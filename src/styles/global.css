@@ -286,8 +286,8 @@ input,select{font-family:inherit;}
 .pslot .pname{font-size:10px;margin-top:4px;background:rgba(0,0,0,.6);padding:1px 5px;border-radius:2px;white-space:nowrap;max-width:86px;overflow:hidden;text-overflow:ellipsis;}
 
 /* ---------------- Competição: two-column layout ---------------- */
-.competicao-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:24px;align-items:start;}
-.competicao-col{min-width:0;}
+.competicao-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;}
+.competicao-cell{min-width:0;}
 .fixture-mini-list{display:flex;flex-direction:column;gap:2px;}
 .fixture-mini-row{
   display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:12.5px;
