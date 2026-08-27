@@ -207,6 +207,24 @@ function fmtMoney(v){
   if(v>=1000) return "US$ " + Math.round(v/1000) + "mil";
   return "US$ " + v;
 }
+const XFER_PRICE_MAX = 20000000;
+const XFER_PRICE_STEP = 100000;
+function renderPriceFilter(f){
+  const cur = f.priceMax==null ? XFER_PRICE_MAX : Math.min(f.priceMax, XFER_PRICE_MAX);
+  const label = f.priceMax==null ? "Sem limite" : fmtMoney(f.priceMax);
+  return `<div class="price-filter">
+    <span class="tiny dim">💰 Orçamento máx.:</span>
+    <input id="xferPriceSlider" type="range" class="price-filter-slider" min="0" max="${XFER_PRICE_MAX}" step="${XFER_PRICE_STEP}"
+      value="${cur}" oninput="Game.previewXferPrice(this.value)"
+      onchange="Game.setXferFilter('priceMax', Number(this.value)>=${XFER_PRICE_MAX}?null:Number(this.value))"/>
+    <input id="xferPriceInput" type="number" class="price-filter-input" min="0" step="${XFER_PRICE_STEP}"
+      placeholder="Sem limite" value="${f.priceMax==null?'':f.priceMax}"
+      oninput="Game.previewXferPriceInput(this.value)"
+      onchange="Game.setXferFilter('priceMax', this.value.trim()===''?null:Math.max(0,Math.round(Number(this.value)||0)))"/>
+    <span id="xferPriceLabel" class="tiny gold bold price-filter-value">${label}</span>
+    ${f.priceMax!=null?`<button class="btn btn-sm" onclick="Game.setXferFilter('priceMax', null)">Limpar</button>`:""}
+  </div>`;
+}
 function ovrClass(ovr){
   if(ovr>=85) return "ovr-90"; if(ovr>=78) return "ovr-80";
   if(ovr>=68) return "ovr-70"; if(ovr>=58) return "ovr-60"; return "ovr-50";
@@ -271,7 +289,7 @@ function newCareerState(){
     lastSeasonSummary:null,
     tmpSelectedTeam:null,
     tmpManagerNameInput:"",
-    xferFilter:{pos:"ALL", team:"ALL", q:"", source:"libertadores"},
+    xferFilter:{pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null},
     matchAnimIdx:0,
     matchPlaying:false,
   };
@@ -1652,6 +1670,7 @@ function renderTransfersTab(){
   if(source==="global"){
     let list = ST.world.globalMarket.slice();
     if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
+    if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
     if(f.q){
       const q = f.q.toLowerCase();
       list = list.filter(p=>p.name.toLowerCase().includes(q) || (p.club||"").toLowerCase().includes(q) || (p.nat||"").toLowerCase().includes(q));
@@ -1666,6 +1685,7 @@ function renderTransfersTab(){
         ${posOptions.map(p=>`<option value="${p}" ${f.pos===p?"selected":""}>${p}</option>`).join("")}
       </select>
     </div>
+    <div class="mb16">${renderPriceFilter(f)}</div>
     <div class="dim tiny mb8">🌍 Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
     <div class="scroll-x"><table class="data"><thead><tr>
       <th>Jogador</th><th>Clube (fora da Libertadores)</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Valor</th><th></th>
@@ -1689,6 +1709,7 @@ function renderTransfersTab(){
   let list = allPlayersList(ST.teamId).map(x=>Object.assign({}, x.p, {_team:x.team}));
   if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
   if(f.team!=="ALL") list = list.filter(p=>p._team===f.team);
+  if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
   if(f.q) list = list.filter(p=>p.name.toLowerCase().includes(f.q.toLowerCase()));
   list.sort((a,b)=>b.ovr-a.ovr);
   const shown = list.slice(0,45);
@@ -1704,6 +1725,7 @@ function renderTransfersTab(){
       ${teamOptions.map(t=>`<option value="${t}" ${f.team===t?"selected":""}>${t}</option>`).join("")}
     </select>
   </div>
+  <div class="mb16">${renderPriceFilter(f)}</div>
   <div class="dim tiny mb8">Mostrando ${shown.length} de ${list.length} jogadores. Orçamento disponível: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
   <div class="scroll-x"><table class="data"><thead><tr>
     <th>Jogador</th><th>Time</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Valor</th><th></th>
@@ -2211,6 +2233,26 @@ const Game = {
       const inp = document.getElementById("xferSearchInput");
       if(inp){ inp.focus(); const v=inp.value; inp.value=""; inp.value=v; }
     }
+  },
+  // Live preview while dragging the price slider — avoids a full re-render
+  // (which would kill the drag) until the user releases it ("change").
+  previewXferPrice(val){
+    const v = Number(val);
+    const label = document.getElementById("xferPriceLabel");
+    const numInput = document.getElementById("xferPriceInput");
+    const unlimited = v>=XFER_PRICE_MAX;
+    if(label) label.textContent = unlimited ? "Sem limite" : fmtMoney(v);
+    if(numInput) numInput.value = unlimited ? "" : String(v);
+  },
+  // Live preview while typing the exact value — keeps the slider in sync.
+  previewXferPriceInput(val){
+    const trimmed = String(val).trim();
+    const unlimited = trimmed==="";
+    const v = unlimited ? XFER_PRICE_MAX : Math.max(0, Math.min(XFER_PRICE_MAX, Math.round(Number(val)||0)));
+    const slider = document.getElementById("xferPriceSlider");
+    const label = document.getElementById("xferPriceLabel");
+    if(slider) slider.value = String(v);
+    if(label) label.textContent = unlimited ? "Sem limite" : fmtMoney(Math.round(Number(val)||0));
   },
   generateScout(){ generateScoutReport(); render(); },
 
