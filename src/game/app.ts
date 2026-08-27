@@ -1203,7 +1203,7 @@ function matchAnimDone(){
 
 // ---------------- HOME ----------------
 function renderInstagramIcon(){
-  return `<div class="social-wrap" style="margin-top:46px;">
+  return `<div class="social-wrap">
     <a class="social-icon" href="https://www.instagram.com/_thefenomeno/" target="_top" rel="noopener noreferrer" aria-label="Instagram" onclick="Game.openInstagram(event)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="2" y="2" width="20" height="20" rx="5.5"></rect>
@@ -1309,12 +1309,12 @@ function renderHome(){
           ` : `
             <button class="btn btn-gold btn-lg" onclick="Game.goNewGame()">▶ JOGAR</button>
           `}
-          ${renderInstagramIcon()}
         </div>
       </div>
       ${renderRatingCards()}
     </div>
     ${renderBottomMarquee()}
+    <div class="social-wrap-center">${renderInstagramIcon()}</div>
   </div>`;
 }
 
