@@ -340,6 +340,23 @@ function buildMomentumWave(events, rng){
 // ------------------------------------------------------------
 // FAST SIMULATION — used for all AI-vs-AI matches (no event log)
 // ------------------------------------------------------------
+// picks `count` goalscorers from a lineup, favoring attackers/midfielders with
+// higher finishing (mirrors the shooter weighting used in the detailed sim) —
+// used so fast-simulated (AI-vs-AI) matches can still feed a real "Artilheiros" table.
+function pickFastScorers(xi, count, rng) {
+  if (count <= 0) return [];
+  const { lineup, slots } = xi;
+  const attackers = lineup.filter((p, i) => p && POS_GROUP[slots[i]] === "ATT");
+  const mids = lineup.filter((p, i) => p && POS_GROUP[slots[i]] === "MID");
+  const pool = attackers.length ? attackers.concat(mids) : lineup.filter(p => p && p.pos !== "GK");
+  if (pool.length === 0) return [];
+  const scorers = [];
+  for (let i = 0; i < count; i++) {
+    scorers.push(weightedChoice(rng, pool, p => Math.pow(1.03, p.sho || p.ovr)).id);
+  }
+  return scorers;
+}
+
 function simulateFastMatch(teamA, teamB, rngSeedNum) {
   const rng = makeRNG(rngSeedNum);
   const bestXIA = bestAvailableXI(teamA);
@@ -355,7 +372,9 @@ function simulateFastMatch(teamA, teamB, rngSeedNum) {
   const lamB = clamp(0.95 + (attB - defA) / 32, 0.1, 3.8);
   const golsA = poisson(rng, lamA);
   const golsB = poisson(rng, lamB);
-  return { homeScore: golsA, awayScore: golsB };
+  const scorersHome = pickFastScorers(bestXIA, golsA, rng);
+  const scorersAway = pickFastScorers(bestXIB, golsB, rng);
+  return { homeScore: golsA, awayScore: golsB, scorersHome, scorersAway };
 }
 
 function poisson(rng, lambda) {
