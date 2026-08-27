@@ -1250,42 +1250,16 @@ function renderSiteNav(hasCareer){
     </div>
   </div>`;
 }
+// phone-frame mockup (adapted from a Uiverse.io design by mobinkakei, in plain
+// CSS since this project doesn't use Tailwind) showing the "lift the trophy" art
+// as the screen content — replaces the old 3-card stack next to the hero text.
 function renderRatingCards(){
   return `<div class="hero-split-cards">
-    <div class="rating-card card-back-l">
-      <div class="rc-top"><div><div class="rc-ovr-label">REP</div><div class="rc-ovr">42</div><div class="rc-pos">NOVATO</div></div></div>
-      <div class="rc-name">1ª TEMPORADA</div>
-      <div class="rc-tier">ONDE A MAIORIA COMEÇA</div>
-      <div class="rc-stats">
-        <div class="rc-stat"><b>0</b><span>Títulos</span></div>
-        <div class="rc-stat"><b>1</b><span>Temp.</span></div>
-        <div class="rc-stat"><b>—</b><span>Legado</span></div>
-      </div>
-    </div>
-    <div class="rating-card card-back-r">
-      <div class="rc-top"><div><div class="rc-ovr-label">REP</div><div class="rc-ovr">78</div><div class="rc-pos">FORTE</div></div></div>
-      <div class="rc-name">CONSOLIDADO</div>
-      <div class="rc-tier">RESPEITADO NO CONTINENTE</div>
-      <div class="rc-stats">
-        <div class="rc-stat"><b>2</b><span>Títulos</span></div>
-        <div class="rc-stat"><b>5</b><span>Temp.</span></div>
-        <div class="rc-stat"><b>★★★</b><span>Legado</span></div>
-      </div>
-    </div>
-    <div class="rating-card card-front">
-      <div class="rc-top">
-        <div><div class="rc-ovr-label">REP</div><div class="rc-ovr">99</div><div class="rc-pos">TÉCNICO</div></div>
-        <img class="rc-icon" src="${GOAT_MASCOT_URI}" alt=""/>
-      </div>
-      <div class="rc-name">A GLÓRIA ETERNA</div>
-      <div class="rc-tier">LENDÁRIO</div>
-      <div class="rc-tag">o sonho de qualquer treinador</div>
-      <div class="rc-stats">
-        <div class="rc-stat"><b>10</b><span>Temp.</span></div>
-        <div class="rc-stat"><b>∞</b><span>Títulos</span></div>
-        <div class="rc-stat"><b>100</b><span>Reput.</span></div>
-      </div>
-      <div class="rc-foot"><span>THEGLORIAETERNA.COM</span><span>★★★★★</span></div>
+    <div class="phone-card">
+      <span class="phone-notch"></span>
+      <span class="phone-btn phone-btn-top"></span>
+      <span class="phone-btn phone-btn-bottom"></span>
+      <img class="phone-screen" src="/images/trophy-celebration.webp" alt="Treinador levantando a taça da Libertadores"/>
     </div>
   </div>`;
 }
