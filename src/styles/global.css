@@ -575,6 +575,7 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .rating-card .rc-foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:9px;color:var(--text-faint);font-family:var(--font-mono);letter-spacing:.05em;}
 
 .bottom-marquee{position:relative;z-index:3;overflow:hidden;white-space:nowrap;padding:18px 0;border-top:1px solid var(--line);}
+.social-wrap-center{position:relative;z-index:3;text-align:center;padding:26px 0 34px;}
 .bottom-marquee-track{display:inline-block;animation:ticker-scroll 22s linear infinite;}
 .bottom-marquee-item{
   display:inline-block;padding:0 30px;font-family:var(--font-display);font-weight:900;text-transform:uppercase;
