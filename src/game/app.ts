@@ -1259,7 +1259,7 @@ function renderRatingCards(){
       <span class="phone-notch"></span>
       <span class="phone-btn phone-btn-top"></span>
       <span class="phone-btn phone-btn-bottom"></span>
-      <img class="phone-screen" src="/images/trophy-celebration.webp" alt="Treinador levantando a taça da Libertadores"/>
+      <img class="phone-screen" src="/images/image-1787874627549.webp" alt="Treinador levantando a taça da Libertadores"/>
     </div>
   </div>`;
 }
