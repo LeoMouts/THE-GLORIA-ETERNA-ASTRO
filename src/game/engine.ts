@@ -77,12 +77,12 @@ function ageOnePlayer(p, rng) {
   if (p.age <= 23) {
     const room = p.pot - p.ovr;
     delta = room > 0 ? Math.round(rng() * Math.min(4, room * 0.5)) : 0;
-  } else if (p.age <= 29) {
-    delta = Math.round((rng() - 0.5) * 2); // -1..1 noise, stable prime years
-  } else if (p.age <= 32) {
-    delta = -Math.round(rng() * 2); // slow decline
+  } else if (p.age <= 31) {
+    delta = Math.round((rng() - 0.5) * 2); // -1..1 noise — overs hold steady through the prime, up to 31
+  } else if (p.age <= 34) {
+    delta = -Math.round(rng() * 2); // decline starts at 32
   } else {
-    delta = -Math.round(1 + rng() * 3); // faster decline
+    delta = -Math.round(1 + rng() * 3); // faster decline from 35 onward, into the retirement window
   }
   p.ovr = clamp(p.ovr + delta, 40, 94);
   p.pot = Math.max(p.pot, p.ovr);
