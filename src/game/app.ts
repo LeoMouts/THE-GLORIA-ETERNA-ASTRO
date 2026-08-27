@@ -289,7 +289,7 @@ function newCareerState(){
     lastSeasonSummary:null,
     tmpSelectedTeam:null,
     tmpManagerNameInput:"",
-    xferFilter:{pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null},
+    xferFilter:{pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null},
     matchAnimIdx:0,
     matchPlaying:false,
   };
@@ -395,7 +395,27 @@ function setupSeasonCompetition(){
     userEliminated:false,
     placementReached:null,
     placementLabel:null,
+    scorers:{}, // "<team>#<playerId>" -> {id,name,team,goals} — season-wide "Artilheiros"
   };
+}
+
+// records one goal for the season-wide top-scorers table.
+function addScorerGoal(teamName, playerId){
+  const p = playerById(teamName, playerId);
+  if(!p) return;
+  const scorers = ST.competition.scorers || (ST.competition.scorers = {});
+  const key = teamName+"#"+playerId;
+  if(!scorers[key]) scorers[key] = {id:playerId, name:p.name, team:teamName, goals:0};
+  scorers[key].goals++;
+}
+
+// wraps the fast (AI-vs-AI) simulator so every match — not just the user's own —
+// still feeds real goalscorers into the "Artilheiros" table.
+function simFast(homeTeamName, awayTeamName){
+  const res = E.simulateFastMatch(ST.world.teams[homeTeamName], ST.world.teams[awayTeamName], nextSeed());
+  (res.scorersHome||[]).forEach(id=>addScorerGoal(homeTeamName, id));
+  (res.scorersAway||[]).forEach(id=>addScorerGoal(awayTeamName, id));
+  return res;
 }
 
 function userGroup(){
@@ -487,6 +507,7 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
     if(!p) return;
     if(ev.type==="red"){ p.suspended=true; p.suspendedMatches=Math.max(p.suspendedMatches,1); }
     if(ev.type==="injury"){ p.injured=true; p.injuredMatches=Math.max(p.injuredMatches,ev.matchesOut); }
+    if(ev.type==="goal"){ addScorerGoal(ev.side==="home"?homeTeamName:awayTeamName, p.id); }
   });
 }
 
@@ -511,7 +532,7 @@ function advanceGroupsStep(){
       if(g===userGroup() && (m.home===ST.teamId||m.away===ST.teamId)){
         pendingUser = { ref:m, group:g, round };
       } else {
-        const res = E.simulateFastMatch(ST.world.teams[m.home], ST.world.teams[m.away], nextSeed());
+        const res = simFast(m.home, m.away);
         m.hs=res.homeScore; m.as=res.awayScore; m.played=true;
       }
     });
@@ -596,7 +617,7 @@ function advanceKnockoutStep(){
     if(tie.teamA===ST.teamId || tie.teamB===ST.teamId){
       pendingUser = { ref:leg, tie };
     } else {
-      const res = E.simulateFastMatch(ST.world.teams[leg.home], ST.world.teams[leg.away], nextSeed());
+      const res = simFast(leg.home, leg.away);
       leg.hs=res.homeScore; leg.as=res.awayScore; leg.played=true;
     }
   });
@@ -698,7 +719,7 @@ function advanceFinalStep(){
   if(f.home===ST.teamId || f.away===ST.teamId){
     goToMatchDay(f, {type:"final"});
   } else {
-    const res = E.simulateFastMatch(ST.world.teams[f.home], ST.world.teams[f.away], nextSeed());
+    const res = simFast(f.home, f.away);
     let hs=res.homeScore, as=res.awayScore;
     if(hs===as){ const rng=E.makeRNG(nextSeed()); if(rng()<0.5) hs++; else as++; }
     f.hs=hs; f.as=as; f.played=true;
@@ -722,7 +743,7 @@ function autoFinishRest(){
       Object.keys(groups).forEach(g=>{
         comp.groupFixtures[g][round].forEach(m=>{
           if(m.played) return;
-          const res = E.simulateFastMatch(ST.world.teams[m.home], ST.world.teams[m.away], nextSeed());
+          const res = simFast(m.home, m.away);
           m.hs=res.homeScore; m.as=res.awayScore; m.played=true;
         });
       });
@@ -734,13 +755,13 @@ function autoFinishRest(){
       round.ties.forEach(tie=>{
         const leg = tie.legs[legIndex];
         if(leg.played) return;
-        const res = E.simulateFastMatch(ST.world.teams[leg.home], ST.world.teams[leg.away], nextSeed());
+        const res = simFast(leg.home, leg.away);
         leg.hs=res.homeScore; leg.as=res.awayScore; leg.played=true;
       });
       finishKnockoutLeg();
     } else if(comp.phase==="final"){
       const f = comp.knockout.final;
-      const res = E.simulateFastMatch(ST.world.teams[f.home], ST.world.teams[f.away], nextSeed());
+      const res = simFast(f.home, f.away);
       let hs=res.homeScore, as=res.awayScore;
       if(hs===as){ const rng=E.makeRNG(nextSeed()); if(rng()<0.5) hs++; else as++; }
       f.hs=hs; f.as=as; f.played=true;
@@ -1452,17 +1473,56 @@ function renderNextMatchCard(){
 }
 function renderCompeticaoTab(){
   const comp = ST.competition;
-  let body = renderNextMatchCard();
+  let left = renderNextMatchCard();
+  let right;
   if(comp.phase==="groups"){
     const g = userGroup();
     const standings = groupStandingsFor(g);
-    body += `<div class="panel-title mt24">Grupo ${g} — Rodada ${Math.min(comp.currentRound+1,6)}/6</div>`;
-    body += renderStandingsTable(standings);
+    left += renderUpcomingFixtures(g);
+    right = `<div class="panel-title">Grupo ${g} — Rodada ${Math.min(comp.currentRound+1,6)}/6</div>` + renderStandingsTable(standings);
   } else {
-    body += `<div class="panel-title mt24">${phaseLabel(comp.phase)}</div>`;
-    body += renderKnockoutBracket();
+    right = `<div class="panel-title">${phaseLabel(comp.phase)}</div>` + renderKnockoutBracket();
   }
-  return body;
+  right += renderTopScorers();
+  return `<div class="competicao-grid">
+    <div class="competicao-col">${left}</div>
+    <div class="competicao-col">${right}</div>
+  </div>`;
+}
+// short list of the next few unplayed fixtures in the user's group — pure lookahead,
+// no scores, just who's up next (round number stands in for a real calendar date).
+function renderUpcomingFixtures(g){
+  const rounds = ST.competition.groupFixtures[g];
+  const upcoming = [];
+  for(let r=0; r<rounds.length && upcoming.length<4; r++){
+    rounds[r].forEach(m=>{ if(!m.played && upcoming.length<4) upcoming.push({home:m.home, away:m.away, round:r+1}); });
+  }
+  if(upcoming.length===0) return "";
+  return `<div class="panel-title mt24">Próximos Jogos</div>
+  <div class="fixture-mini-list">
+  ${upcoming.map(m=>`<div class="fixture-mini-row ${m.home===ST.teamId||m.away===ST.teamId?'is-user':''}">
+    <span class="fixture-mini-team">${crestMini(m.home)}<span>${esc(m.home)}</span></span>
+    <span class="fixture-mini-x">×</span>
+    <span class="fixture-mini-team right"><span>${esc(m.away)}</span>${crestMini(m.away)}</span>
+    <span class="fixture-mini-round">Rodada ${m.round}</span>
+  </div>`).join("")}
+  </div>`;
+}
+// season-wide top scorers, tallied from every match (yours and every AI-vs-AI result).
+function renderTopScorers(){
+  const scorers = Object.values(ST.competition.scorers||{}).sort((a,b)=>b.goals-a.goals).slice(0,5);
+  if(scorers.length===0){
+    return `<div class="panel-title mt24">Artilheiros</div><div class="faint tiny">Nenhum gol registrado ainda nesta temporada.</div>`;
+  }
+  return `<div class="panel-title mt24">Artilheiros</div>
+  <div class="scroll-x"><table class="data"><tbody>
+  ${scorers.map((s,i)=>`<tr>
+    <td class="dim" style="width:24px;">${i+1}</td>
+    <td class="bold">${esc(s.name)} ${s.team===ST.teamId?'<span class="gold small">(você)</span>':''}</td>
+    <td class="dim">${esc(s.team)}</td>
+    <td class="tar gold bold mono">${s.goals}</td>
+  </tr>`).join("")}
+  </tbody></table></div>`;
 }
 function renderStandingsTable(rows){
   return `<div class="scroll-x"><table class="data"><thead><tr>
@@ -1595,6 +1655,17 @@ function statusBadges(p){
   if(p.suspended) b += `<span class="badge badge-susp">SUSPENSO</span> `;
   return b;
 }
+// average of ratePlayerInSlot's fit multiplier across the 11 starting slots (empty
+// slots count as zero fit) — a real, derived "how well does this XI fit the shape" number.
+function computeChemistry(lp, slots){
+  let sum=0, n=0;
+  lp.forEach((p,i)=>{
+    if(!p){ n++; return; }
+    sum += E.ratePlayerInSlot(p, slots[i]).mult;
+    n++;
+  });
+  return n ? Math.round((sum/n)*100) : 0;
+}
 function renderElencoTab(){
   const team = myTeam();
   const avgOvr = Math.round(teamAvgOvr(team));
@@ -1604,6 +1675,8 @@ function renderElencoTab(){
   const lp = lineupPlayers();
   const benchIds = new Set(ST.lineup.filter(Boolean));
   const bench = team.players.filter(p=>!benchIds.has(p.id)).sort((a,b)=>b.ovr-a.ovr);
+  const chemistry = computeChemistry(lp, slots);
+  const captainId = lp.filter(p=>p && p.pos!=="GK").sort((a,b)=>b.ovr-a.ovr)[0]?.id;
 
   const pitchHtml = `<div class="pitch">
     <div class="pitch-center"></div>
@@ -1612,7 +1685,11 @@ function renderElencoTab(){
       const c = coords[i];
       const unavailable = p && (p.injured||p.suspended);
       return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;" onclick="Game.openSlotPicker(${i})">
-        <div class="dot" style="${unavailable?'border-color:var(--red);color:var(--red);':''}">${p?p.ovr:slot}</div>
+        <div class="jersey-card ${unavailable?'unavailable':''}">
+          <div class="jersey-pos">${slot}</div>
+          <div class="jersey-ovr">${p?p.ovr:'—'}</div>
+          ${p && p.id===captainId ? '<div class="jersey-cap" title="Capitão">C</div>' : ''}
+        </div>
         <div class="pname">${p?esc(p.name.split(' ').slice(-1)[0]):'Vazio ('+slot+')'}</div>
       </div>`;
     }).join("")}
@@ -1624,6 +1701,12 @@ function renderElencoTab(){
       <div><div class="faint tiny uc">Elenco</div><div class="bold">${team.players.length} jogadores</div></div>
       <div><div class="faint tiny uc">Overall médio</div><div class="bold gold">${avgOvr}</div></div>
       <div><div class="faint tiny uc">Valor total</div><div class="bold">${fmtMoney(totalValue)}</div></div>
+      <div><div class="faint tiny uc">Entrosamento</div>
+        <div class="row" style="gap:8px;align-items:center;">
+          <div class="rep-bar-wrap" style="width:90px;"><div class="rep-bar" style="width:${chemistry}%"></div></div>
+          <span class="bold gold mono tiny">${chemistry}</span>
+        </div>
+      </div>
     </div>
     <div class="row">
       <select class="select-inline" onchange="Game.changeFormation(this.value)">
@@ -1663,6 +1746,37 @@ function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
 }
 
 // ---------------- TRANSFERÊNCIAS TAB ----------------
+function renderXferSidebar(f, posOptions, teamOptions){
+  return `
+  <div class="xfer-filter-group">
+    <label class="xfer-filter-label">Buscar</label>
+    <input id="xferSearchInput" class="input-inline" placeholder="${teamOptions?'Buscar jogador...':'Jogador, clube ou país...'}" value="${esc(f.q)}" oninput="Game.setXferFilter('q',this.value)"/>
+  </div>
+  <div class="xfer-filter-group">
+    <label class="xfer-filter-label">Posição</label>
+    <select class="select-inline" onchange="Game.setXferFilter('pos',this.value)">
+      <option value="ALL">Todas posições</option>
+      ${posOptions.map(p=>`<option value="${p}" ${f.pos===p?"selected":""}>${p}</option>`).join("")}
+    </select>
+  </div>
+  ${teamOptions ? `<div class="xfer-filter-group">
+    <label class="xfer-filter-label">Time</label>
+    <select class="select-inline" onchange="Game.setXferFilter('team',this.value)">
+      <option value="ALL">Todos os times</option>
+      ${teamOptions.map(t=>`<option value="${t}" ${f.team===t?"selected":""}>${t}</option>`).join("")}
+    </select>
+  </div>` : ""}
+  <div class="xfer-filter-group">
+    <label class="xfer-filter-label">Idade</label>
+    <div class="row" style="gap:8px;">
+      <input type="number" class="input-inline" style="width:100%;" min="15" max="45" placeholder="Mín" value="${f.ageMin??''}" onchange="Game.setXferFilter('ageMin', this.value===''?null:Math.max(15,Math.round(Number(this.value)||15)))"/>
+      <input type="number" class="input-inline" style="width:100%;" min="15" max="45" placeholder="Máx" value="${f.ageMax??''}" onchange="Game.setXferFilter('ageMax', this.value===''?null:Math.min(45,Math.round(Number(this.value)||45)))"/>
+    </div>
+  </div>
+  <div class="xfer-filter-group">${renderPriceFilter(f)}</div>
+  <button class="btn btn-sm btn-block" onclick="Game.clearXferFilters()">Limpar filtros</button>
+  `;
+}
 function renderTransfersTab(){
   const f = ST.xferFilter;
   const source = f.source || "libertadores";
@@ -1678,6 +1792,8 @@ function renderTransfersTab(){
     let list = ST.world.globalMarket.slice();
     if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
     if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
+    if(f.ageMin!=null) list = list.filter(p=>p.age>=f.ageMin);
+    if(f.ageMax!=null) list = list.filter(p=>p.age<=f.ageMax);
     if(f.q){
       const q = f.q.toLowerCase();
       list = list.filter(p=>p.name.toLowerCase().includes(q) || (p.club||"").toLowerCase().includes(q) || (p.nat||"").toLowerCase().includes(q));
@@ -1685,28 +1801,28 @@ function renderTransfersTab(){
     list.sort((a,b)=>b.ovr-a.ovr);
     const shown = list.slice(0,50);
     return `${toggle}
-    <div class="row wrap mb16" style="gap:10px;">
-      <input id="xferSearchInput" class="input-inline grow" placeholder="Buscar por jogador, clube ou país..." value="${esc(f.q)}" oninput="Game.setXferFilter('q',this.value)" style="min-width:220px;"/>
-      <select class="select-inline" onchange="Game.setXferFilter('pos',this.value)">
-        <option value="ALL">Todas posições</option>
-        ${posOptions.map(p=>`<option value="${p}" ${f.pos===p?"selected":""}>${p}</option>`).join("")}
-      </select>
+    <div class="xfer-layout">
+      <aside class="xfer-sidebar">
+        <div class="xfer-filter-label" style="margin-bottom:10px;">Filtros</div>
+        ${renderXferSidebar(f, posOptions, null)}
+      </aside>
+      <div class="xfer-main">
+        <div class="dim tiny mb8">🌍 Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
+        <div class="scroll-x"><table class="data"><thead><tr>
+          <th>Jogador</th><th>Clube (fora da Libertadores)</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Valor</th><th></th>
+        </tr></thead><tbody>
+        ${shown.map(p=>`<tr>
+          <td class="bold">${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></td>
+          <td class="dim">${esc(p.club)}</td>
+          <td><span class="badge badge-pos">${p.pos}</span></td>
+          <td class="tac">${p.age}</td>
+          <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
+          <td class="tac mono">${fmtMoney(p.value)}</td>
+          <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'global')">Propor</button></td>
+        </tr>`).join("")}
+        </tbody></table></div>
+      </div>
     </div>
-    <div class="mb16">${renderPriceFilter(f)}</div>
-    <div class="dim tiny mb8">🌍 Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
-    <div class="scroll-x"><table class="data"><thead><tr>
-      <th>Jogador</th><th>Clube (fora da Libertadores)</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Valor</th><th></th>
-    </tr></thead><tbody>
-    ${shown.map(p=>`<tr>
-      <td class="bold">${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></td>
-      <td class="dim">${esc(p.club)}</td>
-      <td><span class="badge badge-pos">${p.pos}</span></td>
-      <td class="tac">${p.age}</td>
-      <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
-      <td class="tac mono">${fmtMoney(p.value)}</td>
-      <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'global')">Propor</button></td>
-    </tr>`).join("")}
-    </tbody></table></div>
     <div class="panel-title mt24">Seu elenco — venda rápida</div>
     ${renderPlayerTable(myTeam().players.slice().sort((a,b)=>b.ovr-a.ovr), true, false)}
     `;
@@ -1717,87 +1833,95 @@ function renderTransfersTab(){
   if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
   if(f.team!=="ALL") list = list.filter(p=>p._team===f.team);
   if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
+  if(f.ageMin!=null) list = list.filter(p=>p.age>=f.ageMin);
+  if(f.ageMax!=null) list = list.filter(p=>p.age<=f.ageMax);
   if(f.q) list = list.filter(p=>p.name.toLowerCase().includes(f.q.toLowerCase()));
   list.sort((a,b)=>b.ovr-a.ovr);
   const shown = list.slice(0,45);
   return `${toggle}
-  <div class="row wrap mb16" style="gap:10px;">
-    <input id="xferSearchInput" class="input-inline grow" placeholder="Buscar jogador..." value="${esc(f.q)}" oninput="Game.setXferFilter('q',this.value)" style="min-width:180px;"/>
-    <select class="select-inline" onchange="Game.setXferFilter('pos',this.value)">
-      <option value="ALL">Todas posições</option>
-      ${posOptions.map(p=>`<option value="${p}" ${f.pos===p?"selected":""}>${p}</option>`).join("")}
-    </select>
-    <select class="select-inline" onchange="Game.setXferFilter('team',this.value)">
-      <option value="ALL">Todos os times</option>
-      ${teamOptions.map(t=>`<option value="${t}" ${f.team===t?"selected":""}>${t}</option>`).join("")}
-    </select>
+  <div class="xfer-layout">
+    <aside class="xfer-sidebar">
+      <div class="xfer-filter-label" style="margin-bottom:10px;">Filtros</div>
+      ${renderXferSidebar(f, posOptions, teamOptions)}
+    </aside>
+    <div class="xfer-main">
+      <div class="dim tiny mb8">Mostrando ${shown.length} de ${list.length} jogadores. Orçamento disponível: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
+      <div class="scroll-x"><table class="data"><thead><tr>
+        <th>Jogador</th><th>Time</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Valor</th><th></th>
+      </tr></thead><tbody>
+      ${shown.map(p=>`<tr>
+        <td class="bold">${esc(p.name)} <span class="faint tiny">${p.nat}</span></td>
+        <td class="dim">${esc(p._team)}</td>
+        <td><span class="badge badge-pos">${p.pos}</span></td>
+        <td class="tac">${p.age}</td>
+        <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
+        <td class="tac mono">${fmtMoney(p.value)}</td>
+        <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(p._team)}')">Propor</button></td>
+      </tr>`).join("")}
+      </tbody></table></div>
+    </div>
   </div>
-  <div class="mb16">${renderPriceFilter(f)}</div>
-  <div class="dim tiny mb8">Mostrando ${shown.length} de ${list.length} jogadores. Orçamento disponível: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
-  <div class="scroll-x"><table class="data"><thead><tr>
-    <th>Jogador</th><th>Time</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Valor</th><th></th>
-  </tr></thead><tbody>
-  ${shown.map(p=>`<tr>
-    <td class="bold">${esc(p.name)} <span class="faint tiny">${p.nat}</span></td>
-    <td class="dim">${esc(p._team)}</td>
-    <td><span class="badge badge-pos">${p.pos}</span></td>
-    <td class="tac">${p.age}</td>
-    <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
-    <td class="tac mono">${fmtMoney(p.value)}</td>
-    <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(p._team)}')">Propor</button></td>
-  </tr>`).join("")}
-  </tbody></table></div>
   <div class="panel-title mt24">Seu elenco — venda rápida</div>
   ${renderPlayerTable(myTeam().players.slice().sort((a,b)=>b.ovr-a.ovr), true, false)}
   `;
 }
 
 // ---------------- OLHEIRO TAB ----------------
-const SCOUT_BLURBS = {
-  GK:"Reflexos rápidos e leitura de jogo acima da média para a idade.",
-  CB:"Zagueiro sólido, com margem de evolução física e tática.",
-  LB:"Lateral veloz, bom no apoio ofensivo.", RB:"Lateral veloz, bom no apoio ofensivo.",
-  DMF:"Volante com boa marcação e visão de jogo em desenvolvimento.",
-  CM:"Meio-campista completo, cresce a cada temporada.",
-  AM:"Criativo entre as linhas, xará das grandes promessas do continente.",
-  LM:"Ala habilidoso, ótimo em duelos individuais.", RM:"Ala habilidoso, ótimo em duelos individuais.",
-  LW:"Ponta desequilibrante, velocidade acima da média.", RW:"Ponta desequilibrante, velocidade acima da média.",
-  SS:"Segundo atacante inteligente, faro de gol em evolução.",
-  ST:"Centroavante com grande potencial de finalização.",
-};
+// star rating from how much room a prospect has to grow (pot - ovr), 1..5 stars.
+function scoutStars(p){
+  const gap = p.pot - p.ovr;
+  const score = E.clamp(1 + gap/4, 1, 5);
+  const full = Math.round(score);
+  return `<span class="star-rating" title="${score.toFixed(1)}/5">${"★".repeat(full)}${"☆".repeat(5-full)}</span>`;
+}
 function renderScoutTab(){
+  const scoutLevel = E.clamp(1+Math.floor(ST.reputation/20), 1, 5);
+  const levelBadge = `<div class="scout-level-badge">
+    <div class="faint tiny uc" style="text-align:right;">Rede de Olheiros</div>
+    <div class="bold gold">🌐 Nível ${scoutLevel}</div>
+  </div>`;
   const needsRefresh = !ST.scoutReport || ST.scoutSeason!==ST.seasonNum;
   if(needsRefresh){
-    return `<div class="empty-state">
+    return `<div class="row between mb16">
+      <div class="panel-title" style="margin:0;">Jogadores Promissores</div>
+      ${levelBadge}
+    </div>
+    <div class="empty-state">
       <p>Seu departamento de olheiros ainda não gerou o relatório desta temporada.</p>
       <button class="btn btn-gold" onclick="Game.generateScout()">Gerar relatório de olheiros</button>
     </div>`;
   }
-  const items = ST.scoutReport.map(r=>{
+  const rows = ST.scoutReport.map(r=>{
     const p = playerById(r.team, r.playerId);
     if(!p) return "";
     const t = ST.world.teams[r.team];
     const ask = askingPrice(p, t);
-    return `<div class="panel mb12">
-      <div class="row between">
-        <div>
-          <div class="bold">${esc(p.name)} <span class="faint">${t.flag} ${p.nat}, ${p.age} anos</span></div>
-          <div class="faint tiny">${esc(r.team)} · <span class="badge badge-pos">${p.pos}</span></div>
-        </div>
-        <div class="tar">
-          <span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span> <span class="faint">→</span> <span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span>
-        </div>
-      </div>
-      <p class="small dim mt8">${SCOUT_BLURBS[p.pos]||"Jovem promissor observado pela equipe de scouts."}</p>
-      <div class="row between mt8">
-        <span class="tiny faint">Estimativa de mercado: <b class="gold">${fmtMoney(ask)}</b></span>
-        <button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(r.team)}')">Propor transferência</button>
-      </div>
-    </div>`;
+    return `<tr>
+      <td class="bold">${esc(p.name)}</td>
+      <td><span class="badge badge-pos">${p.pos}</span></td>
+      <td class="tac">${p.age}</td>
+      <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
+      <td class="tac"><span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span></td>
+      <td>${t.flag} ${esc(p.nat)}</td>
+      <td class="dim">${esc(r.team)}</td>
+      <td class="tac mono">${fmtMoney(ask)}</td>
+      <td class="tac">${scoutStars(p)}</td>
+      <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(r.team)}')">Propor</button></td>
+    </tr>`;
   }).join("");
-  return `<div class="row between mb16"><div class="panel-title" style="margin:0;">Relatório da temporada ${ST.seasonYear}</div>
-    <button class="btn btn-sm" onclick="Game.generateScout()">🔄 Atualizar</button></div>
-  ${items}`;
+  return `<div class="row between mb16">
+    <div>
+      <div class="panel-title" style="margin:0;">Jogadores Promissores</div>
+      <div class="faint tiny">Relatório da temporada ${ST.seasonYear} — jovens talentos ao redor do continente.</div>
+    </div>
+    ${levelBadge}
+  </div>
+  <div class="scroll-x"><table class="data"><thead><tr>
+    <th>Jogador</th><th>Pos</th><th class="tac">Idade</th><th class="tac">Ger</th><th class="tac">Pot</th><th>Nacionalidade</th><th>Clube</th><th class="tac">Valor</th><th class="tac">Observação</th><th></th>
+  </tr></thead><tbody>
+  ${rows}
+  </tbody></table></div>
+  <div class="row mt16"><button class="btn btn-sm" onclick="Game.generateScout()">🔄 Atualizar relatório</button></div>`;
 }
 
 // ---------------- MATCH DAY ----------------
@@ -2240,6 +2364,11 @@ const Game = {
       const inp = document.getElementById("xferSearchInput");
       if(inp){ inp.focus(); const v=inp.value; inp.value=""; inp.value=v; }
     }
+  },
+  clearXferFilters(){
+    const f = ST.xferFilter;
+    f.pos="ALL"; f.team="ALL"; f.q=""; f.priceMax=null; f.ageMin=null; f.ageMax=null;
+    render();
   },
   // Live preview while dragging the price slider — avoids a full re-render
   // (which would kill the drag) until the user releases it ("change").
