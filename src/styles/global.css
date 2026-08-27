@@ -259,16 +259,59 @@ input,select{font-family:inherit;}
 .pitch-center{position:absolute;left:50%;top:50%;width:80px;height:80px;border:1.5px solid rgba(241,237,225,.28);border-radius:50%;transform:translate(-50%,-50%);}
 .pslot{
   position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;
-  width:78px;cursor:pointer;user-select:none;
+  width:86px;cursor:pointer;user-select:none;
 }
-.pslot .dot{
-  width:34px;height:34px;border-radius:50%;background:var(--panel2);border:2px solid var(--marigold-dim);
-  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;color:var(--marigold);
-  box-shadow:0 3px 8px rgba(0,0,0,.4);font-family:var(--font-mono);
+.jersey-card{
+  position:relative;width:52px;height:56px;
+  background:linear-gradient(180deg,var(--panel2),var(--panel));
+  border:2px solid var(--marigold-dim);border-radius:6px 6px 3px 3px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  box-shadow:0 3px 8px rgba(0,0,0,.4);
 }
-.pslot.empty .dot{border-color:var(--red);color:var(--red);border-style:dashed;}
-.pslot .pname{font-size:10px;margin-top:3px;background:rgba(0,0,0,.6);padding:1px 5px;border-radius:2px;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;}
-.pslot .povr{font-size:9px;color:var(--marigold-bright);}
+.jersey-card:before{
+  content:"";position:absolute;top:-2px;left:50%;transform:translateX(-50%);
+  width:18px;height:6px;background:var(--pitch2);border-radius:0 0 6px 6px;
+}
+.jersey-pos{font-family:var(--font-mono);font-size:8px;font-weight:800;letter-spacing:.04em;color:var(--marigold-dim);text-transform:uppercase;}
+.jersey-ovr{font-family:var(--font-display);font-weight:800;font-size:19px;color:var(--marigold);line-height:1;}
+.jersey-cap{
+  position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;
+  background:var(--marigold);color:#241a04;font-family:var(--font-mono);font-size:9px;font-weight:900;
+  display:flex;align-items:center;justify-content:center;border:2px solid var(--panel2);
+}
+.jersey-card.unavailable{border-color:var(--red);}
+.jersey-card.unavailable .jersey-ovr{color:var(--red);}
+.pslot.empty .jersey-card{border-style:dashed;border-color:var(--line-strong);}
+.pslot.empty .jersey-ovr{color:var(--text-faint);font-size:14px;}
+.pslot .pname{font-size:10px;margin-top:4px;background:rgba(0,0,0,.6);padding:1px 5px;border-radius:2px;white-space:nowrap;max-width:86px;overflow:hidden;text-overflow:ellipsis;}
+
+/* ---------------- Competição: two-column layout ---------------- */
+.competicao-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:24px;align-items:start;}
+.competicao-col{min-width:0;}
+.fixture-mini-list{display:flex;flex-direction:column;gap:2px;}
+.fixture-mini-row{
+  display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:12.5px;
+}
+.fixture-mini-row.is-user{background:rgba(227,185,77,.06);}
+.fixture-mini-team{display:flex;align-items:center;gap:7px;flex:1;min-width:0;}
+.fixture-mini-team.right{justify-content:flex-end;text-align:right;}
+.fixture-mini-team span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.fixture-mini-x{color:var(--text-faint);font-family:var(--font-mono);font-size:11px;flex-shrink:0;}
+.fixture-mini-round{color:var(--text-faint);font-family:var(--font-mono);font-size:10.5px;flex-shrink:0;margin-left:6px;}
+
+/* ---------------- Transferências: sidebar filter layout ---------------- */
+.xfer-layout{display:grid;grid-template-columns:200px 1fr;gap:20px;align-items:start;}
+.xfer-sidebar{
+  background:var(--panel);border:1px solid var(--line-strong);border-radius:4px;padding:14px;
+  display:flex;flex-direction:column;gap:12px;
+}
+.xfer-filter-group{display:flex;flex-direction:column;gap:5px;}
+.xfer-filter-label{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);}
+.xfer-main{min-width:0;}
+
+/* ---------------- Olheiro: scout table ---------------- */
+.scout-level-badge{text-align:right;flex-shrink:0;}
+.star-rating{color:var(--marigold);letter-spacing:1px;font-size:13px;}
 
 table.data{width:100%;border-collapse:collapse;font-size:13px;}
 table.data th{
@@ -411,13 +454,21 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .bracket-center-col{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:0 26px;min-width:150px;}
 .bracket-connector{width:20px;height:2px;background:var(--line-strong);flex-shrink:0;}
 
+@media (max-width:900px){
+  .competicao-grid{grid-template-columns:1fr;}
+  .xfer-layout{grid-template-columns:1fr;}
+  .xfer-sidebar{flex-direction:row;flex-wrap:wrap;}
+  .xfer-filter-group{flex:1;min-width:140px;}
+}
 @media (max-width:640px){
   .hero-title{font-size:15vw;}
   .tabs{margin:12px 10px 0;}
   .tab-content{margin:0 10px 14px;padding:14px;}
   .score-num{font-size:34px;}
-  .pslot{width:56px;}
-  .pslot .dot{width:28px;height:28px;font-size:9px;}
+  .pslot{width:60px;}
+  .jersey-card{width:38px;height:42px;}
+  .jersey-ovr{font-size:14px;}
+  .jersey-pos{font-size:7px;}
   .goat-mascot{opacity:.16;height:70vh !important;right:-60px !important;}
 }
 
