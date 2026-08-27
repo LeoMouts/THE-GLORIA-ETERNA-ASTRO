@@ -927,6 +927,13 @@ function selectNewJob(teamName){
   ST.teamId = teamName;
   if(ST.fired) ST.reputation = 42;
   ST.fired = false; ST.underdogOffer = false; ST.jobOffers = null;
+  // budget is rebuilt around the new club's own financial level — only a small
+  // slice of personal savings carries over, so moving to a smaller club actually
+  // means a smaller transfer kitty (and a bigger club means a bigger one).
+  const newTier = tierOf(ST.world, teamName);
+  const baseByTier = [0, 1800000, 3800000, 7500000, 15000000, 26000000][newTier];
+  const carry = ST.budget * 0.15;
+  ST.budget = Math.round(E.clamp(carry + baseByTier, 500000, 140000000) / 10000) * 10000;
   ST.newsLog.unshift({title:"Nova jornada", text:`${ST.managerName} assume o comando do ${teamName}.`});
   setupSeasonCompetition();
   ST.formation = "4-3-3";
