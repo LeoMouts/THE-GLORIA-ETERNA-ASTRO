@@ -1471,23 +1471,30 @@ function renderNextMatchCard(){
     </div>
   </div>`;
 }
+// four distinct boxed panels, laid out 2×2 — mirrors the reference: match card,
+// standings, upcoming fixtures and top scorers each get their own separated card.
 function renderCompeticaoTab(){
   const comp = ST.competition;
-  let left = renderNextMatchCard();
-  let right;
+  const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
+  let cells;
   if(comp.phase==="groups"){
     const g = userGroup();
     const standings = groupStandingsFor(g);
-    left += renderUpcomingFixtures(g);
-    right = `<div class="panel-title">Grupo ${g} — Rodada ${Math.min(comp.currentRound+1,6)}/6</div>` + renderStandingsTable(standings);
+    const standingsPanel = `<div class="panel">
+      <div class="panel-title">Grupo ${g} — Rodada ${Math.min(comp.currentRound+1,6)}/6</div>
+      ${renderStandingsTable(standings)}
+    </div>`;
+    cells = matchCell
+      + `<div class="competicao-cell">${standingsPanel}</div>`
+      + `<div class="competicao-cell">${renderUpcomingFixtures(g)}</div>`
+      + `<div class="competicao-cell">${renderTopScorers()}</div>`;
   } else {
-    right = `<div class="panel-title">${phaseLabel(comp.phase)}</div>` + renderKnockoutBracket();
+    const bracketPanel = `<div class="panel"><div class="panel-title">${phaseLabel(comp.phase)}</div>${renderKnockoutBracket()}</div>`;
+    cells = matchCell
+      + `<div class="competicao-cell">${renderTopScorers()}</div>`
+      + `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>`;
   }
-  right += renderTopScorers();
-  return `<div class="competicao-grid">
-    <div class="competicao-col">${left}</div>
-    <div class="competicao-col">${right}</div>
-  </div>`;
+  return `<div class="competicao-grid">${cells}</div>`;
 }
 // short list of the next few unplayed fixtures in the user's group — pure lookahead,
 // no scores, just who's up next (round number stands in for a real calendar date).
@@ -1497,8 +1504,11 @@ function renderUpcomingFixtures(g){
   for(let r=0; r<rounds.length && upcoming.length<4; r++){
     rounds[r].forEach(m=>{ if(!m.played && upcoming.length<4) upcoming.push({home:m.home, away:m.away, round:r+1}); });
   }
-  if(upcoming.length===0) return "";
-  return `<div class="panel-title mt24">Próximos Jogos</div>
+  if(upcoming.length===0){
+    return `<div class="panel"><div class="panel-title">Próximos Jogos</div><div class="faint tiny">Sem jogos futuros no momento.</div></div>`;
+  }
+  return `<div class="panel">
+  <div class="panel-title">Próximos Jogos</div>
   <div class="fixture-mini-list">
   ${upcoming.map(m=>`<div class="fixture-mini-row ${m.home===ST.teamId||m.away===ST.teamId?'is-user':''}">
     <span class="fixture-mini-team">${crestMini(m.home)}<span>${esc(m.home)}</span></span>
@@ -1506,15 +1516,17 @@ function renderUpcomingFixtures(g){
     <span class="fixture-mini-team right"><span>${esc(m.away)}</span>${crestMini(m.away)}</span>
     <span class="fixture-mini-round">Rodada ${m.round}</span>
   </div>`).join("")}
+  </div>
   </div>`;
 }
 // season-wide top scorers, tallied from every match (yours and every AI-vs-AI result).
 function renderTopScorers(){
   const scorers = Object.values(ST.competition.scorers||{}).sort((a,b)=>b.goals-a.goals).slice(0,5);
   if(scorers.length===0){
-    return `<div class="panel-title mt24">Artilheiros</div><div class="faint tiny">Nenhum gol registrado ainda nesta temporada.</div>`;
+    return `<div class="panel"><div class="panel-title">Artilheiros</div><div class="faint tiny">Nenhum gol registrado ainda nesta temporada.</div></div>`;
   }
-  return `<div class="panel-title mt24">Artilheiros</div>
+  return `<div class="panel">
+  <div class="panel-title">Artilheiros</div>
   <div class="scroll-x"><table class="data"><tbody>
   ${scorers.map((s,i)=>`<tr>
     <td class="dim" style="width:24px;">${i+1}</td>
@@ -1522,7 +1534,8 @@ function renderTopScorers(){
     <td class="dim">${esc(s.team)}</td>
     <td class="tar gold bold mono">${s.goals}</td>
   </tr>`).join("")}
-  </tbody></table></div>`;
+  </tbody></table></div>
+  </div>`;
 }
 function renderStandingsTable(rows){
   return `<div class="scroll-x"><table class="data"><thead><tr>
