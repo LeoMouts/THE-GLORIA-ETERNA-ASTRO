@@ -293,6 +293,31 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .select-inline{background:var(--panel2);border:1px solid var(--line-strong);color:var(--text);padding:8px 10px;border-radius:4px;font-size:13px;}
 .input-inline{background:var(--panel2);border:1px solid var(--line-strong);color:var(--text);padding:8px 10px;border-radius:4px;font-size:13px;}
 
+.price-filter{
+  display:flex;align-items:center;flex-wrap:wrap;gap:10px;
+  background:var(--panel2);border:1px solid var(--line-strong);border-radius:4px;
+  padding:10px 14px;
+}
+.price-filter-slider{
+  flex:1;min-width:140px;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;
+  background:var(--line-strong);outline:none;cursor:pointer;
+}
+.price-filter-slider::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;
+  background:var(--marigold);border:2px solid var(--panel2);box-shadow:0 0 0 1px var(--marigold-dim);cursor:grab;
+}
+.price-filter-slider::-webkit-slider-thumb:active{cursor:grabbing;background:var(--marigold-bright);}
+.price-filter-slider::-moz-range-thumb{
+  width:16px;height:16px;border-radius:50%;background:var(--marigold);border:2px solid var(--panel2);
+  box-shadow:0 0 0 1px var(--marigold-dim);cursor:grab;
+}
+.price-filter-slider::-moz-range-thumb:active{cursor:grabbing;background:var(--marigold-bright);}
+.price-filter-input{
+  width:120px;background:var(--panel);border:1px solid var(--line-strong);color:var(--text);
+  padding:6px 8px;border-radius:4px;font-size:13px;font-family:var(--font-mono);
+}
+.price-filter-value{min-width:96px;text-align:right;}
+
 /* ---------------- Match center (signature element) ---------------- */
 .scoreboard{
   display:flex;align-items:stretch;justify-content:space-between;gap:0;
