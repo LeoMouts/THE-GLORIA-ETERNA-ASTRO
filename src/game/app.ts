@@ -5,7 +5,7 @@ import * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
 
-const GOAT_MASCOT_URI = "/images/goat-mascot.webp";
+const GOAT_MASCOT_URI = "/images/image-1787868287812.webp";
 
 // ---------- team crests (real club badges, with stylized SVG fallback for any team missing an image) ----------
 const TEAM_LOGOS = {
