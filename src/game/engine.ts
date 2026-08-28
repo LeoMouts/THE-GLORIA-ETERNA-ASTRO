@@ -74,9 +74,19 @@ function ageOnePlayer(p, rng) {
   p.age += 1;
   // growth/decline curve
   let delta = 0;
-  if (p.age <= 23) {
+  if (p.age <= 20) {
+    // close a real, potential-proportional chunk of the remaining gap each season —
+    // a wonderkid with a big room-to-grow closes it much faster than a marginal prospect.
     const room = p.pot - p.ovr;
-    delta = room > 0 ? Math.round(rng() * Math.min(4, room * 0.5)) : 0;
+    delta = room > 0 ? Math.round(room * (0.18 + rng() * 0.14)) : 0;
+  } else if (p.age <= 24) {
+    const room = p.pot - p.ovr;
+    delta = room > 0 ? Math.round(room * (0.14 + rng() * 0.12)) : 0;
+  } else if (p.age <= 27) {
+    // growth tapers out through the late 20s instead of hard-stopping at 23, so a late
+    // bloomer still closes in on their ceiling before the prime plateau below.
+    const room = p.pot - p.ovr;
+    delta = room > 0 ? Math.round(room * (0.08 + rng() * 0.10)) : 0;
   } else if (p.age <= 31) {
     delta = Math.round((rng() - 0.5) * 2); // -1..1 noise — overs hold steady through the prime, up to 31
   } else if (p.age <= 34) {
