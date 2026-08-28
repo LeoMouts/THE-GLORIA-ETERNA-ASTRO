@@ -161,34 +161,19 @@ function jerseyIconSVG(teamName, size){
   </svg>`;
 }
 
-// ---------- original silver trophy mark (goblet silhouette, not the official CONMEBOL design) ----------
-function silverTrophySVG(size, opacity){
-  size = size || 160;
+// ---------- Libertadores trophy render (real artwork, cut out to a transparent PNG) ----------
+const TROPHY_IMG = "/images/awards/trophy.png";
+const TROPHY_ASPECT = 250/609; // width/height of the source cutout
+function trophyImg(height, opacity){
+  height = height || 120;
   opacity = opacity==null ? 1 : opacity;
-  return `<svg width="${size}" height="${size*1.25}" viewBox="0 0 120 150" xmlns="http://www.w3.org/2000/svg" style="opacity:${opacity}">
-    <defs>
-      <linearGradient id="silv1" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#F5F6F8"/><stop offset="45%" stop-color="#AEB6BE"/>
-        <stop offset="55%" stop-color="#8C95A0"/><stop offset="100%" stop-color="#E9ECEF"/>
-      </linearGradient>
-      <linearGradient id="silv2" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#DCE0E4"/><stop offset="100%" stop-color="#9AA3AC"/>
-      </linearGradient>
-    </defs>
-    <path d="M40 12 H80 V38 C80 58 68 70 60 70 C52 70 40 58 40 38 Z" fill="url(#silv1)" stroke="#7A828C" stroke-width="1.5"/>
-    <path d="M40 18 C24 18 20 32 26 44 C31 54 40 56 40 56" fill="none" stroke="url(#silv1)" stroke-width="6" stroke-linecap="round"/>
-    <path d="M80 18 C96 18 100 32 94 44 C89 54 80 56 80 56" fill="none" stroke="url(#silv1)" stroke-width="6" stroke-linecap="round"/>
-    <rect x="55" y="70" width="10" height="26" fill="url(#silv2)"/>
-    <path d="M38 96 H82 L76 110 H44 Z" fill="url(#silv1)" stroke="#7A828C" stroke-width="1.5"/>
-    <rect x="30" y="110" width="60" height="10" rx="2" fill="url(#silv2)" stroke="#7A828C" stroke-width="1"/>
-    <rect x="22" y="120" width="76" height="9" rx="2" fill="url(#silv1)" stroke="#7A828C" stroke-width="1"/>
-    <circle cx="60" cy="4" r="5" fill="url(#silv1)" stroke="#7A828C" stroke-width="1"/>
-  </svg>`;
+  const w = Math.round(height*TROPHY_ASPECT);
+  return `<img src="${TROPHY_IMG}" alt="Taça CONMEBOL Libertadores" width="${w}" height="${height}" loading="lazy" style="display:block;height:${height}px;width:${w}px;opacity:${opacity};filter:drop-shadow(0 4px 14px rgba(0,0,0,.5));"/>`;
 }
 function cornerWatermarks(){
   return `
-  <div style="position:fixed;top:-30px;left:-30px;pointer-events:none;z-index:0;">${silverTrophySVG(150,0.07)}</div>
-  <div style="position:fixed;bottom:-40px;right:-30px;pointer-events:none;z-index:0;transform:rotate(8deg);">${silverTrophySVG(190,0.06)}</div>
+  <div style="position:fixed;top:-30px;left:-30px;pointer-events:none;z-index:0;">${trophyImg(220,0.07)}</div>
+  <div style="position:fixed;bottom:-40px;right:-30px;pointer-events:none;z-index:0;transform:rotate(8deg);">${trophyImg(280,0.06)}</div>
   `;
 }
 
@@ -959,6 +944,15 @@ function endOfSeason(){
   ST.history.push({year:ST.seasonYear, team:ST.teamId, result:placement, reputation:ST.reputation});
   ST.newsLog.unshift({title:`Temporada ${ST.seasonYear} encerrada`, text:`${ST.teamId} terminou a Libertadores em: ${placement}. Reputação: ${repChange>=0?"+":""}${repChange}.`});
 
+  // Rei da América: the tournament's outright top scorer — only worth celebrating on the
+  // championship screen when that player happens to be one of ours.
+  const scorersList = Object.values(comp.scorers || {});
+  const topScorer = scorersList.length ? scorersList.slice().sort((a,b)=>b.goals-a.goals)[0] : null;
+  const reiDaAmerica = (placement==="Campeão" && topScorer && topScorer.team===ST.teamId) ? topScorer : null;
+  if(reiDaAmerica){
+    ST.newsLog.unshift({title:"Rei da América", text:`${reiDaAmerica.name} termina a Libertadores como artilheiro da competição com ${reiDaAmerica.goals} gols e leva o Rei da América para o ${ST.teamId}.`});
+  }
+
   ageWorld();
 
   ST.fired = ST.reputation<=15;
@@ -968,7 +962,7 @@ function endOfSeason(){
     ST.jobOffers = buildJobOffers(ST.fired ? "weaker" : "stronger");
   }
 
-  ST.lastSeasonSummary = { placement, repChange, tier, newBudget:ST.budget, year:ST.seasonYear };
+  ST.lastSeasonSummary = { placement, repChange, tier, newBudget:ST.budget, year:ST.seasonYear, reiDaAmerica };
 
   ST.seasonNum += 1;
   ST.seasonYear += 1;
@@ -1717,7 +1711,7 @@ function renderKnockoutBracket(){
     <div class="bracket-side left">${bracketHalfHtml(comp,0)}</div>
     <div class="bracket-center-col">
       <div class="bracket-round-label gold">Final</div>
-      ${silverTrophySVG(50, champion?1:0.45)}
+      ${trophyImg(54, champion?1:0.45)}
       ${finalBox}
       ${champion?`<div class="gold bold tiny tac mt8">CAMPEÃO</div>`:''}
     </div>
@@ -2444,7 +2438,9 @@ function renderNewsModal(){
 // ---------------- SEASON END / JOB OFFERS / CAREER OVER ----------------
 function renderSeasonEndScreen(){
   const s = ST.lastSeasonSummary;
+  const isChampion = s.placement === "Campeão";
   return `${cornerWatermarks()}<div class="hero" style="min-height:80vh;position:relative;z-index:1;">
+    ${isChampion ? `<div class="mb16">${trophyImg(150,1)}</div>` : ""}
     <div class="hero-badge">TEMPORADA ${s.year} ENCERRADA</div>
     <h1 class="hero-title" style="font-size:clamp(30px,6vw,54px);">${esc(s.placement.toUpperCase())}</h1>
     <div class="panel mt24" style="max-width:420px;">
@@ -2452,7 +2448,20 @@ function renderSeasonEndScreen(){
       <div class="kv"><span>Novo orçamento de transferências</span><span class="gold bold">${fmtMoney(ST.budget)}</span></div>
       <div class="kv"><span>Próxima temporada</span><span class="bold">${ST.seasonYear} (${ST.seasonNum}/10)</span></div>
     </div>
+    ${s.reiDaAmerica ? renderReiDaAmericaPanel(s.reiDaAmerica) : ""}
     <button class="btn btn-gold btn-lg mt24" onclick="Game.continueSeason()">Seguir para ${ST.seasonYear} →</button>
+  </div>`;
+}
+// individual-award reveal — only shown when the tournament's outright top scorer plays for
+// the club you just won the Libertadores with.
+function renderReiDaAmericaPanel(r){
+  return `<div class="rei-panel mt24">
+    <img src="/images/awards/rei-da-america-ring.jpg" alt="Anel Rei da América" class="rei-panel-img"/>
+    <div class="rei-panel-body">
+      <div class="faint tiny uc" style="letter-spacing:.08em;margin-bottom:6px;">Prêmio individual</div>
+      <div class="rei-panel-title">Rei da América</div>
+      <p class="rei-panel-text">${esc(r.name)} foi o artilheiro da Libertadores com <b class="gold">${r.goals}</b> gol${r.goals===1?'':'s'} e leva o anel de Rei da América para o ${esc(ST.teamId)}.</p>
+    </div>
   </div>`;
 }
 function renderJobOffers(){
@@ -2488,7 +2497,7 @@ function renderCareerOver(){
   return `${cornerWatermarks()}
   ${titles.length>0?`<img src="${GOAT_MASCOT_URI}" alt="Mascote GOAT" class="goat-mascot" style="position:absolute;left:-30px;bottom:0;height:min(48vh,380px);width:auto;z-index:1;pointer-events:none;filter:drop-shadow(0 12px 30px rgba(0,0,0,.55));" />`:""}
   <div class="hero" style="position:relative;z-index:2;">
-    <div class="trophy-glow" style="background:radial-gradient(circle at 40% 30%, #F5F6F8, #ADB5BD 55%, #6B7280 100%); box-shadow:0 0 90px 10px rgba(200,205,210,.35), inset 0 -10px 30px rgba(0,0,0,.35);">${titles.length>0?silverTrophySVG(108):'⚽'}</div>
+    <div class="trophy-glow" style="background:radial-gradient(circle at 40% 30%, #F5F6F8, #ADB5BD 55%, #6B7280 100%); box-shadow:0 0 90px 10px rgba(200,205,210,.35), inset 0 -10px 30px rgba(0,0,0,.35);">${trophyImg(128, titles.length>0?1:0.55)}</div>
     <div class="hero-badge">CARREIRA ENCERRADA — 10 TEMPORADAS</div>
     <h1 class="hero-title" style="font-size:clamp(28px,6vw,54px);">${titles.length>0? titles.length+" TÍTULO"+(titles.length>1?"S":"")+" DE LIBERTADORES" : "FIM DE CICLO"}</h1>
     <div class="panel mt24" style="max-width:480px;text-align:left;">
