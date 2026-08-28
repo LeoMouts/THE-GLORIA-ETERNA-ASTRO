@@ -310,6 +310,7 @@ input,select{font-family:inherit;}
 .xfer-filter-group{display:flex;flex-direction:column;gap:5px;}
 .xfer-filter-label{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-faint);}
 .xfer-main{min-width:0;}
+.xfer-pagination{display:flex;align-items:center;justify-content:center;gap:14px;padding-top:14px;}
 .xfer-mode-toggle .btn{flex:1;min-width:150px;padding:13px 20px;font-size:15px;}
 
 /* ---------------- Olheiro: scout table ---------------- */
