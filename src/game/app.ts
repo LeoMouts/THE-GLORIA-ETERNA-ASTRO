@@ -1785,7 +1785,6 @@ function renderElencoTab(){
         </div>
       </div>
       <button class="squad-central-tile" onclick="Game.openSquadCentral()" title="Ver todos os jogadores do elenco">
-        <span class="squad-central-tile-icon">🗂️</span>
         <span class="squad-central-tile-label">Central de Elenco</span>
       </button>
     </div>
@@ -1851,7 +1850,7 @@ function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
     <td><span class="badge badge-pos">${p.pos}</span></td>
     <td class="tac">${p.age}</td>
     <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
-    <td class="tac faint">${p.pot}</td>
+    <td class="tac"><span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span></td>
     <td class="tac mono">${fmtMoney(p.value)}</td>
     <td>${statusBadges(p)||'<span class="faint tiny">Disponível</span>'}</td>
     <td>
@@ -2263,20 +2262,32 @@ function renderMatch(){
   </div>`;
 }
 
-// full-squad overview — every player (starters + bench) with name/pos/OVR/POT/idade/valor.
-// Selling itself isn't done here: "Quero Vender" hands off to Transferências > Vender.
+// full-squad overview — every player (starters + bench) with name/pos/OVR/POT/idade/valor,
+// plus an editable jersey number per player. Selling itself isn't done here: "Ir para
+// Transferências" hands off to Transferências > Vender.
 function renderSquadCentralModal(){
   const team = myTeam();
   const players = team.players.slice().sort((a,b)=>b.ovr-a.ovr);
   const totalValue = players.reduce((a,p)=>a+p.value,0);
+  const rows = players.map(p=>`<tr>
+    <td class="tac" style="width:44px;"><input type="number" class="input-inline squad-number-input" min="1" max="99" placeholder="—" value="${p.number||''}" onchange="Game.setPlayerNumber(${p.id}, this.value)"/></td>
+    <td class="bold">${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></td>
+    <td><span class="badge badge-pos">${p.pos}</span></td>
+    <td class="tac">${p.age}</td>
+    <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
+    <td class="tac"><span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span></td>
+    <td class="tac mono">${fmtMoney(p.value)}</td>
+  </tr>`).join("");
   return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
     <div class="modal modal-wide">
       <div class="row between wrap" style="gap:12px;margin-bottom:6px;">
         <div class="panel-title" style="margin:0;">Central de Elenco</div>
-        <button class="btn btn-gold btn-sm" onclick="Game.goSellFromSquadCentral()">Quero Vender</button>
+        <button class="btn btn-gold btn-sm" onclick="Game.goSellFromSquadCentral()">Ir para Transferências</button>
       </div>
       <div class="dim tiny mb12">${players.length} jogadores · Valor total do elenco: <span class="gold bold">${fmtMoney(totalValue)}</span></div>
-      ${renderPlayerTable(players, false, false)}
+      <div class="scroll-x"><table class="data"><thead><tr>
+        <th class="tac">Nº</th><th>Jogador</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">POT</th><th class="tac">Valor</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
       <button class="btn btn-block mt16" onclick="Game.closeModal()">Fechar</button>
     </div>
   </div>`;
@@ -2576,6 +2587,14 @@ const Game = {
   assignSlot(idx, playerId){ assignSlot(idx, playerId); ST.uiModal=null; scheduleSave(); render(); },
   closeModal(){ ST.uiModal=null; render(); },
   openSquadCentral(){ ST.uiModal={type:"squadCentral"}; render(); },
+  setPlayerNumber(playerId, val){
+    const p = playerById(ST.teamId, Number(playerId));
+    if(!p) return;
+    const raw = String(val).trim();
+    p.number = raw==="" ? null : E.clamp(Math.round(Number(raw))||1, 1, 99);
+    scheduleSave();
+    render();
+  },
   goSellFromSquadCentral(){
     ST.uiModal = null;
     ST.hubTab = "transfers";
