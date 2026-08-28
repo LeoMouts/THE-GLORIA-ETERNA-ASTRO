@@ -381,7 +381,7 @@ function newCareerState(){
     lastSeasonSummary:null,
     tmpSelectedTeam:null,
     tmpManagerNameInput:"",
-    xferFilter:{pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null, mode:"buy", sort:"ovr"},
+    xferFilter:{pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null, mode:"buy", sort:"ovr", page:1},
     matchAnimIdx:0,
     matchPlaying:false,
   };
@@ -1814,6 +1814,24 @@ function sortXferList(list, sortKey){
   else arr.sort((a,b)=> b.ovr-a.ovr);
   return arr;
 }
+// pagination for the Contratar lists — caps how many rows render at once so the
+// page doesn't grow into one giant scroll; returns the current page's slice plus
+// the page-nav bar HTML to place after the table.
+const XFER_PAGE_SIZE = 20;
+function paginateXferList(list, page){
+  const totalPages = Math.max(1, Math.ceil(list.length / XFER_PAGE_SIZE));
+  const cur = E.clamp(page||1, 1, totalPages);
+  const start = (cur-1)*XFER_PAGE_SIZE;
+  return { shown: list.slice(start, start+XFER_PAGE_SIZE), page: cur, totalPages };
+}
+function renderXferPagination(page, totalPages){
+  if(totalPages<=1) return "";
+  return `<div class="xfer-pagination">
+    <button class="btn btn-sm" ${page<=1?"disabled":""} onclick="Game.setXferPage(${page-1})">◀ Anterior</button>
+    <span class="faint tiny mono">Página ${page} de ${totalPages}</span>
+    <button class="btn btn-sm" ${page>=totalPages?"disabled":""} onclick="Game.setXferPage(${page+1})">Próxima ▶</button>
+  </div>`;
+}
 
 function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
   if(players.length===0) return `<div class="empty-state">Nenhum jogador aqui.</div>`;
@@ -1927,7 +1945,7 @@ function renderXferBuySubTab(f){
       list = list.filter(p=>p.name.toLowerCase().includes(q) || (p.club||"").toLowerCase().includes(q) || (p.nat||"").toLowerCase().includes(q));
     }
     list = sortXferList(list, f.sort);
-    const shown = list.slice(0,50);
+    const {shown, page, totalPages} = paginateXferList(list, f.page);
     return `${toggle}
     <div class="xfer-layout">
       <aside class="xfer-sidebar">
@@ -1949,6 +1967,7 @@ function renderXferBuySubTab(f){
           <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'global')">Propor</button></td>
         </tr>`).join("")}
         </tbody></table></div>
+        ${renderXferPagination(page, totalPages)}
       </div>
     </div>
     `;
@@ -1963,7 +1982,7 @@ function renderXferBuySubTab(f){
   if(f.ageMax!=null) list = list.filter(p=>p.age<=f.ageMax);
   if(f.q) list = list.filter(p=>p.name.toLowerCase().includes(f.q.toLowerCase()));
   list = sortXferList(list, f.sort);
-  const shown = list.slice(0,45);
+  const {shown, page, totalPages} = paginateXferList(list, f.page);
   return `${toggle}
   <div class="xfer-layout">
     <aside class="xfer-sidebar">
@@ -1985,6 +2004,7 @@ function renderXferBuySubTab(f){
         <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(p._team)}')">Propor</button></td>
       </tr>`).join("")}
       </tbody></table></div>
+      ${renderXferPagination(page, totalPages)}
     </div>
   </div>
   `;
@@ -2552,15 +2572,22 @@ const Game = {
   },
   setXferFilter(key, val){
     ST.xferFilter[key]=val;
+    if(key!=="page") ST.xferFilter.page=1; // any real filter change jumps back to page 1
     render();
     if(key==="q"){
       const inp = document.getElementById("xferSearchInput");
       if(inp){ inp.focus(); const v=inp.value; inp.value=""; inp.value=v; }
     }
   },
+  setXferPage(n){
+    ST.xferFilter.page = Math.max(1, n);
+    render();
+    const main = document.querySelector(".xfer-main");
+    if(main) main.scrollIntoView({block:"start"});
+  },
   clearXferFilters(){
     const f = ST.xferFilter;
-    f.pos="ALL"; f.team="ALL"; f.q=""; f.priceMax=null; f.ageMin=null; f.ageMax=null; f.sort="ovr";
+    f.pos="ALL"; f.team="ALL"; f.q=""; f.priceMax=null; f.ageMin=null; f.ageMax=null; f.sort="ovr"; f.page=1;
     render();
   },
   // Live preview while dragging the price slider — avoids a full re-render
