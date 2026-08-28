@@ -426,6 +426,62 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .empty-state{text-align:center;padding:40px 20px;color:var(--text-faint);}
 .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px;}
 .modal{background:var(--panel2);border:1px solid var(--line-strong);border-top:3px solid var(--marigold);padding:22px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);max-height:85vh;overflow-y:auto;}
+
+/* ---------------- Transfer contract document (FIFA-15-style two-panel offer sheet) ---------------- */
+.contract-doc{
+  display:flex;background:linear-gradient(180deg,#161310,#0c0a08);
+  border:1px solid var(--line-strong);border-top:3px solid var(--marigold);
+  box-shadow:0 20px 60px rgba(0,0,0,.6);
+  max-width:720px;width:100%;max-height:88vh;overflow-y:auto;
+}
+.contract-panel{flex:1;min-width:0;padding:22px;}
+.contract-panel-header{
+  font-family:var(--font-display);font-weight:800;font-size:16px;letter-spacing:.04em;
+  color:var(--marigold);text-transform:uppercase;margin:0 0 14px;
+  padding-bottom:8px;border-bottom:1px solid var(--line);
+}
+.contract-divider{width:1px;flex-shrink:0;position:relative;background:linear-gradient(180deg,transparent,var(--line-strong) 15%,var(--line-strong) 85%,transparent);}
+.contract-pen{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(45deg);font-size:20px;filter:drop-shadow(0 0 6px rgba(232,162,60,.5));}
+.contract-crest-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.contract-kv{display:flex;justify-content:space-between;gap:10px;padding:7px 0;font-size:12.5px;color:var(--text-dim);border-bottom:1px dashed var(--line);}
+.contract-kv span:last-child{color:var(--text);font-weight:600;}
+.contract-player-card{margin-top:16px;background:var(--panel);border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;}
+.contract-player-banner{
+  background:linear-gradient(115deg,var(--marigold-bright),var(--marigold) 70%);color:#241a04;
+  padding:8px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;
+  font-family:var(--font-display);font-weight:800;text-transform:uppercase;font-size:14px;
+}
+.contract-player-body{padding:12px;}
+.contract-stat-grid{display:flex;gap:8px;margin-bottom:10px;}
+.contract-stat-grid > div{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:6px;text-align:center;}
+.contract-stat-grid span{display:block;font-size:9.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;}
+.contract-stat-grid b{display:block;font-family:var(--font-mono);color:var(--marigold);font-size:15px;margin-top:2px;}
+.contract-stat-row{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding-top:8px;border-top:1px solid var(--line);}
+.contract-advisor{
+  background:rgba(232,162,60,.06);border-left:2px solid var(--marigold-dim);
+  padding:10px 12px;font-size:12.5px;line-height:1.55;color:var(--text-dim);margin:0 0 14px;
+}
+.contract-advisor b{color:var(--text);}
+
+.contract-doc-signing{align-items:center;justify-content:center;flex-direction:column;padding:54px 30px;text-align:center;gap:6px;}
+.contract-sign-title{font-family:var(--font-display);font-weight:800;font-size:22px;color:var(--marigold-bright);text-transform:uppercase;margin-bottom:8px;}
+.signature-path{
+  fill:none;stroke:var(--marigold);stroke-width:3;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:400;stroke-dashoffset:400;
+  animation:sign-draw 1.3s cubic-bezier(.65,0,.35,1) forwards;
+}
+@keyframes sign-draw{to{stroke-dashoffset:0;}}
+.contract-sign-stamp{
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.15em;color:var(--text-faint);
+  text-transform:uppercase;margin-top:8px;opacity:0;animation:sign-stamp-in .4s ease .9s forwards;
+}
+@keyframes sign-stamp-in{to{opacity:1;}}
+
+@media (max-width:640px){
+  .contract-doc{flex-direction:column;max-height:90vh;}
+  .contract-divider{width:auto;height:1px;}
+  .contract-pen{display:none;}
+}
 .news-item{padding:10px 0;border-bottom:1px solid var(--line);font-size:13px;}
 .news-item:last-child{border-bottom:none;}
 .kv{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px dashed var(--line);}
