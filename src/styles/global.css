@@ -462,7 +462,8 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
   letter-spacing:.03em;text-align:center;padding:6px;transition:all .15s ease;
 }
 .squad-central-tile:hover{border-color:var(--marigold);box-shadow:0 0 16px rgba(232,162,60,.35);background:var(--panel2);}
-.squad-central-tile-icon{font-size:16px;line-height:1;}
+.squad-number-input{width:44px;padding:6px 4px;text-align:center;-moz-appearance:textfield;}
+.squad-number-input::-webkit-outer-spin-button,.squad-number-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 
 /* ---------------- Transfer contract document (FIFA-15-style two-panel offer sheet) ---------------- */
 .contract-doc{
