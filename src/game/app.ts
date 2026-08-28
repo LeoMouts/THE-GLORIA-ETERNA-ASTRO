@@ -1163,11 +1163,25 @@ function quickSell(playerId){
 function generateScoutReport(){
   const rng = E.makeRNG(nextSeed());
   const candidates = allPlayersList(ST.teamId)
-    .filter(({p})=>p.age<=23 && p.pot-p.ovr>=4)
-    .sort((a,b)=> (b.p.pot-b.p.ovr)*2+b.p.pot - ((a.p.pot-a.p.ovr)*2+a.p.pot));
-  const top = candidates.slice(0,16);
-  // shuffle a bit within similar quality bands for variety
-  ST.scoutReport = top.slice(0,12).map(c=>({playerId:c.p.id, team:c.team}));
+    .filter(({p})=>p.age<=23 && p.pot-p.ovr>=4);
+  // weighted random sample (no replacement), favoring the higher-upside prospects but never
+  // deterministic — so hitting "Atualizar relatório" genuinely reshuffles who shows up, and
+  // different careers (a fresh RNG stream each time) don't all surface the same names.
+  const pool = candidates.map(c=>({c, score: Math.max(1, (c.p.pot-c.p.ovr)*2 + c.p.pot)}));
+  const picked = [];
+  const n = Math.min(12, pool.length);
+  for(let i=0;i<n;i++){
+    const total = pool.reduce((a,it)=>a+it.score, 0);
+    let r = rng()*total;
+    let idx = pool.length-1;
+    for(let j=0;j<pool.length;j++){
+      r -= pool[j].score;
+      if(r<=0){ idx=j; break; }
+    }
+    picked.push(pool[idx].c);
+    pool.splice(idx,1);
+  }
+  ST.scoutReport = picked.map(c=>({playerId:c.p.id, team:c.team}));
   ST.scoutSeason = ST.seasonNum;
   scheduleSave();
 }
