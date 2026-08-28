@@ -1250,16 +1250,14 @@ function renderSiteNav(hasCareer){
     </div>
   </div>`;
 }
-// phone-frame mockup (adapted from a Uiverse.io design by mobinkakei, in plain
-// CSS since this project doesn't use Tailwind) showing the "lift the trophy" art
-// as the screen content — replaces the old 3-card stack next to the hero text.
+// glow-border hover card (Uiverse.io design by gharsh11032000, recolored to the
+// site's black/gold identity) showing the "lift the trophy" art as its background.
 function renderRatingCards(){
   return `<div class="hero-split-cards">
-    <div class="phone-card">
-      <span class="phone-notch"></span>
-      <span class="phone-btn phone-btn-top"></span>
-      <span class="phone-btn phone-btn-bottom"></span>
-      <img class="phone-screen" src="/images/image-1787874627549.webp" alt="Treinador levantando a taça da Libertadores"/>
+    <div class="card">
+      <p class="heading">A Glória Eterna</p>
+      <p>Erga a taça. Escreva sua lenda.</p>
+      <p>THEGLORIAETERNA.COM</p>
     </div>
   </div>`;
 }
