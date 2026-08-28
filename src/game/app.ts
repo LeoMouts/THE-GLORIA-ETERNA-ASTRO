@@ -1806,6 +1806,16 @@ function renderElencoTab(){
 }
 
 function posOrder(pos){ return {GK:0,CB:1,LB:2,RB:3,DMF:4,CM:5,AM:6,LM:7,RM:8,LW:9,RW:10,SS:11,ST:12}[pos] ?? 13; }
+// wingers and wide-mids are interchangeable on the same flank (RW<->RM, LW<->LM),
+// on top of whatever real altPos a player already carries.
+const WIDE_SWAP_POS = {RW:"RM", RM:"RW", LW:"LM", LM:"LW"};
+function slotCompatible(p, slot){
+  if(p.pos===slot) return true;
+  if(p.altPos && p.altPos.includes(slot)) return true;
+  const swap = WIDE_SWAP_POS[slot];
+  if(swap && (p.pos===swap || (p.altPos && p.altPos.includes(swap)))) return true;
+  return false;
+}
 // shared sort for every transfer-market / squad list — "pos" (posição), "value" (valor) or the default "ovr" (geral)
 function sortXferList(list, sortKey){
   const arr = list.slice();
@@ -2315,32 +2325,39 @@ function renderSlotPickerModal(m){
   const team = myTeam();
   const slot = slotsForFormation()[m.slotIndex];
   const currentId = ST.lineup[m.slotIndex];
-  const sorted = team.players.slice().sort((a,b)=>{
-    const aFit = a.pos===slot?0:(a.altPos&&a.altPos.includes(slot)?1:2);
-    const bFit = b.pos===slot?0:(b.altPos&&b.altPos.includes(slot)?1:2);
-    if(aFit!==bFit) return aFit-bFit;
+  const startersElsewhere = new Set(ST.lineup.filter((id,i)=> id!=null && i!==m.slotIndex));
+  const eligible = team.players.filter(p=>slotCompatible(p, slot));
+  const sorted = eligible.slice().sort((a,b)=>{
+    const aExact = a.pos===slot?0:1;
+    const bExact = b.pos===slot?0:1;
+    if(aExact!==bExact) return aExact-bExact;
     return b.ovr-a.ovr;
   });
+  const rows = sorted.map(p=>{
+    const disabled = p.injured||p.suspended;
+    const isCur = p.id===currentId;
+    const isCap = p.id===ST.captainId;
+    const isStarterElsewhere = startersElsewhere.has(p.id);
+    return `<div class="slot-pick-row ${isCur?'current':''} ${disabled?'unavailable':''}">
+      <div class="slot-pick-main">
+        <span class="badge badge-pos">${p.pos}</span>
+        <span class="bold">${esc(p.name)}</span>
+        <span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span>
+        ${isCur?'<span class="badge badge-titular">Nesta posição</span>':(isStarterElsewhere?'<span class="badge badge-titular">Titular</span>':'')}
+        ${statusBadges(p)}
+      </div>
+      <div class="slot-pick-actions">
+        <button class="btn btn-sm ${isCap?'btn-gold':'btn-ghost'}" title="Definir como capitão" onclick="Game.setCaptain(${p.id})">${isCap?'★ Capitão':'☆ Capitão'}</button>
+        ${disabled?`<span class="faint tiny">Indisponível</span>`:`<button class="btn btn-sm ${isCur?'':'btn-gold'}" onclick="Game.assignSlot(${m.slotIndex},${p.id})">${isCur?'Escalado':'Escalar'}</button>`}
+      </div>
+    </div>`;
+  }).join("");
   return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
     <div class="modal">
       <div class="panel-title">Escalar para ${slot}</div>
       ${currentId?`<button class="btn btn-sm btn-danger mb12" onclick="Game.assignSlot(${m.slotIndex},null)">Deixar posição vazia</button>`:""}
-      <div class="scroll-x" style="max-height:50vh;overflow-y:auto;">
-      <table class="data"><tbody>
-      ${sorted.map(p=>{
-        const disabled = p.injured||p.suspended;
-        const isCur = p.id===currentId;
-        const isCap = p.id===ST.captainId;
-        return `<tr style="${isCur?'background:rgba(227,185,77,.1);':''}${disabled?'opacity:.45;':''}">
-          <td class="bold">${esc(p.name)}</td>
-          <td><span class="badge badge-pos">${p.pos}</span></td>
-          <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
-          <td>${statusBadges(p)}</td>
-          <td><button class="btn btn-sm ${isCap?'btn-gold':'btn-ghost'}" title="Definir como capitão" onclick="Game.setCaptain(${p.id})">${isCap?'★ Capitão':'☆ Capitão'}</button></td>
-          <td>${disabled?`<span class="faint tiny">Indisponível</span>`:`<button class="btn btn-sm ${isCur?'':'btn-gold'}" onclick="Game.assignSlot(${m.slotIndex},${p.id})">${isCur?'Escalado':'Escalar'}</button>`}</td>
-        </tr>`;
-      }).join("")}
-      </tbody></table>
+      <div class="slot-pick-list">
+        ${rows || `<div class="empty-state">Nenhum jogador do elenco joga em ${slot}.</div>`}
       </div>
       <button class="btn btn-block mt16" onclick="Game.closeModal()">Fechar</button>
     </div>
