@@ -329,6 +329,18 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .badge-pos{background:#2A2205;color:var(--marigold);}
 .badge-inj{background:#3A1B18;color:#F0B4AC;}
 .badge-susp{background:#3A2A14;color:var(--marigold-bright);}
+.badge-titular{background:#123049;color:#8FC3EA;}
+
+/* ---------------- Slot picker (Escalar): filtered, no side-scroll, wraps instead ---------------- */
+.slot-pick-list{display:flex;flex-direction:column;gap:8px;max-height:56vh;overflow-y:auto;padding-right:2px;}
+.slot-pick-row{
+  background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:10px 12px;
+  display:flex;flex-direction:column;gap:8px;
+}
+.slot-pick-row.current{border-color:var(--marigold-dim);background:rgba(227,185,77,.08);}
+.slot-pick-row.unavailable{opacity:.5;}
+.slot-pick-main{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.slot-pick-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;}
 .ovr-chip{
   display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;border-radius:3px;
   font-weight:800;font-size:12px;font-family:var(--font-mono);
