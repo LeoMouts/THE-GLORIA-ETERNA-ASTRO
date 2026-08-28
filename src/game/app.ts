@@ -2199,9 +2199,7 @@ function renderContractSigning(message){
   return `<div class="modal-backdrop">
     <div class="contract-doc contract-doc-signing">
       <div class="contract-sign-title">${esc(message)}</div>
-      <svg class="signature-svg" viewBox="0 0 220 70" width="220" height="70">
-        <path class="signature-path" d="M10,50 C25,15 40,60 58,32 C70,12 82,55 98,35 C110,20 122,48 138,30 C150,16 165,42 182,28 C192,20 200,32 208,25" />
-      </svg>
+      <div class="signature-wrap"><span class="signature-text">Grupo The Fenômeno</span></div>
       <div class="contract-sign-stamp">Contrato assinado</div>
     </div>
   </div>`;
@@ -2392,7 +2390,7 @@ const Game = {
     if(!m || m.type!=="incomingOffer" || m.signing) return;
     m.signing = true; m.signMsg = "Venda Concluída!";
     render();
-    setTimeout(()=>{ acceptIncomingOffer(); render(); }, 1500);
+    setTimeout(()=>{ acceptIncomingOffer(); render(); }, 2200);
   },
   declineIncomingOffer(){ declineIncomingOffer(); render(); },
   submitOffer(playerId, team){
@@ -2405,7 +2403,7 @@ const Game = {
     if(res.ok){
       m.signing = true; m.signMsg = "Contrato Assinado!";
       render();
-      setTimeout(()=>{ ST.uiModal=null; render(); }, 1500);
+      setTimeout(()=>{ ST.uiModal=null; render(); }, 2200);
     } else if(msgEl){
       msgEl.innerHTML = `<span class="red">${esc(res.msg)}</span>`;
     }
