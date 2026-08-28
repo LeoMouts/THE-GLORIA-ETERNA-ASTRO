@@ -109,42 +109,45 @@ input,select{font-family:inherit;}
 .scroll-x{overflow-x:auto;}
 
 /* ---------------- Buttons ----------------
-   Glow-border style (Uiverse.io by gharsh11032000 — same design as the hero
-   card), recolored to the site's black + marigold-gold identity, applied to
-   every button in the game via this shared base class. */
+   Outline-fill-shine style (Uiverse.io by mrhyddenn), recolored from blue to
+   the site's black + marigold-gold identity, applied to every button via this
+   shared base class. The shine sweep is inset (overflow:hidden), so unlike the
+   previous glow-halo version it stays contained even in dense scrolling tables. */
 .btn{
   display:inline-flex;align-items:center;gap:8px;justify-content:center;
-  padding:11px 20px;border-radius:8px;border:none;
-  background:#000;color:var(--chalk);font-weight:700;font-size:14px;
-  letter-spacing:.02em;transition:color .15s ease;
+  position:relative;overflow:hidden;
+  padding:11px 20px;border-radius:7px;border:1px solid var(--marigold-dim);
+  background:transparent;color:var(--chalk);font-weight:600;font-size:14px;
+  text-transform:uppercase;letter-spacing:.08em;
+  box-shadow:0 0 0 0 transparent;
+  transition:all .2s ease-in;
   font-family:var(--font-body);
-  position:relative;z-index:0;
 }
 .btn:before{
-  content:'';position:absolute;inset:0;left:-4px;top:-4px;margin:auto;
-  width:calc(100% + 8px);height:calc(100% + 8px);border-radius:10px;
-  background:linear-gradient(-45deg, var(--marigold) 0%, #000 100%);
-  z-index:-10;pointer-events:none;transition:all .6s cubic-bezier(.175,.885,.32,1.275);
+  content:'';display:block;width:0;height:86%;position:absolute;top:7%;left:0;
+  opacity:0;background:#fff;box-shadow:0 0 50px 30px #fff;
+  transform:skewX(-20deg);
 }
-.btn:after{
-  content:"";z-index:-1;position:absolute;inset:0;
-  background:linear-gradient(-45deg, var(--marigold-bright) 0%, #000 100%);
-  transform:translate3d(0,0,0) scale(.92);filter:blur(14px);
+.btn:hover{
+  background:var(--marigold);color:#241a04;border-color:var(--marigold);
+  box-shadow:0 0 30px 5px rgba(232,162,60,.75);
+  transition:all .2s ease-out;
 }
-.btn:hover{color:var(--marigold-bright);}
-.btn:hover:after{filter:blur(22px);}
-.btn:hover:before{transform:rotate(-180deg);}
-.btn:active{transform:translateY(1px) scale(.98);}
+.btn:hover:before{animation:btn-shine .5s 0s linear;}
+@keyframes btn-shine{
+  from{opacity:0;left:0%;}
+  50%{opacity:1;}
+  to{opacity:0;left:100%;}
+}
+.btn:active{box-shadow:0 0 0 0 transparent;transition:box-shadow .2s ease-in;}
 .btn:disabled{opacity:.4;cursor:not-allowed;}
-.btn-gold{color:var(--marigold-bright);font-weight:800;}
+.btn-gold{background:var(--marigold);color:#241a04;border-color:var(--marigold);font-weight:800;}
+.btn-gold:hover{box-shadow:0 0 30px 6px rgba(232,162,60,.85);}
 .btn-lg{padding:16px 34px;font-size:16px;}
-.btn-danger{color:#F0B4AC;}
-/* small buttons live packed inside scrolling tables — the oversized blurred
-   halo would get clipped there, so they get a contained glow ring instead. */
-.btn-sm{padding:6px 12px;font-size:12px;border-radius:5px;border:1px solid var(--marigold-dim);}
-.btn-sm:before,.btn-sm:after{content:none;}
-.btn-sm:hover{border-color:var(--marigold);box-shadow:0 0 8px rgba(232,162,60,.55);}
-.btn-ghost{color:var(--text-dim);}
+.btn-danger{border-color:var(--terracotta-dim);color:#F0B4AC;}
+.btn-danger:hover{background:var(--terracotta);color:#fff;border-color:var(--terracotta);box-shadow:0 0 30px 5px rgba(193,80,46,.7);}
+.btn-sm{padding:6px 12px;font-size:12px;border-radius:5px;letter-spacing:.02em;}
+.btn-ghost{border-color:var(--line);}
 .btn-block{width:100%;}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;}
 
