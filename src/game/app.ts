@@ -69,6 +69,20 @@ function luminance(hex){
   const r=parseInt(c.substring(0,2),16)/255, g=parseInt(c.substring(2,4),16)/255, b=parseInt(c.substring(4,6),16)/255;
   return 0.299*r+0.587*g+0.114*b;
 }
+// ---------- generic team jersey icon (unlicensed kit template, tinted with the team's own colors) ----------
+function jerseyIconSVG(teamName, size){
+  size = size || 40;
+  const colors = TEAM_COLORS[teamName] || ["#3E8ED0","#122720"];
+  const [c1,c2] = colors;
+  const trim = luminance(c1) > 0.6 ? (luminance(c2) < 0.5 ? c2 : "#241a04") : (luminance(c2) > 0.35 ? c2 : "#E3B94D");
+  return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <path d="M24,8 L16,4 L2,12 L12,26 L12,58 L52,58 L52,26 L62,12 L48,4 L40,8 L32,18 Z" fill="${c1}" stroke="#00000055" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M24,8 L32,17 L40,8" fill="none" stroke="${trim}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M12,26 L2,12" fill="none" stroke="${trim}" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M52,26 L62,12" fill="none" stroke="${trim}" stroke-width="2.5" stroke-linecap="round"/>
+    <rect x="12" y="52" width="40" height="4" fill="${trim}" opacity=".9"/>
+  </svg>`;
+}
 
 // ---------- original silver trophy mark (goblet silhouette, not the official CONMEBOL design) ----------
 function silverTrophySVG(size, opacity){
@@ -277,6 +291,7 @@ function newCareerState(){
     hubTab:"elenco",
     formation:"4-3-3",
     lineup:{},
+    captainId:null,
     competition:null,
     pendingMatch:null,
     transferAsking:{},
@@ -1515,7 +1530,7 @@ function renderStandingsTable(rows){
   </tr></thead><tbody>
   ${rows.map((r,i)=>`<tr style="${r.team===ST.teamId?'background:rgba(227,185,77,.08);':''}${i<2?'':''}">
     <td class="dim">${i+1}${i<2?' <span class="gold">▲</span>':''}</td>
-    <td class="bold">${esc(r.team)}${r.team===ST.teamId?' <span class="gold small">(você)</span>':''}</td>
+    <td class="bold"><span class="standings-team"><span class="standings-crest">${crestMini(r.team)}</span><span>${esc(r.team)}</span>${r.team===ST.teamId?' <span class="gold small">(você)</span>':''}</span></td>
     <td class="tac">${r.played}</td><td class="tac">${r.w}</td><td class="tac">${r.d}</td><td class="tac">${r.l}</td>
     <td class="tac">${r.gf}</td><td class="tac">${r.ga}</td><td class="tac">${r.gd>0?'+':''}${r.gd}</td><td class="tac bold gold">${r.pts}</td>
   </tr>`).join("")}
@@ -1661,7 +1676,9 @@ function renderElencoTab(){
   const benchIds = new Set(ST.lineup.filter(Boolean));
   const bench = team.players.filter(p=>!benchIds.has(p.id)).sort((a,b)=>b.ovr-a.ovr);
   const chemistry = computeChemistry(lp, slots);
-  const captainId = lp.filter(p=>p && p.pos!=="GK").sort((a,b)=>b.ovr-a.ovr)[0]?.id;
+  const autoCaptainId = lp.filter(p=>p && p.pos!=="GK").sort((a,b)=>b.ovr-a.ovr)[0]?.id;
+  const captainId = (ST.captainId && lp.some(p=>p && p.id===ST.captainId)) ? ST.captainId : autoCaptainId;
+  const shirt = jerseyIconSVG(team.name, 30);
 
   const pitchHtml = `<div class="pitch">
     <div class="pitch-center"></div>
@@ -1671,9 +1688,12 @@ function renderElencoTab(){
       const unavailable = p && (p.injured||p.suspended);
       return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;" onclick="Game.openSlotPicker(${i})">
         <div class="jersey-card ${unavailable?'unavailable':''}">
-          <div class="jersey-pos">${slot}</div>
-          <div class="jersey-ovr">${p?p.ovr:'—'}</div>
-          ${p && p.id===captainId ? '<div class="jersey-cap" title="Capitão">C</div>' : ''}
+          <div class="jersey-shirt">${shirt}</div>
+          <div class="jersey-stats">
+            <span class="jersey-pos">${slot}</span>
+            <span class="jersey-ovr">${p?p.ovr:'—'}</span>
+            ${p && p.id===captainId ? '<span class="jersey-cap" title="Capitão">C</span>' : ''}
+          </div>
         </div>
         <div class="pname">${p?esc(p.name.split(' ').slice(-1)[0]):'Vazio ('+slot+')'}</div>
       </div>`;
@@ -2171,11 +2191,13 @@ function renderSlotPickerModal(m){
       ${sorted.map(p=>{
         const disabled = p.injured||p.suspended;
         const isCur = p.id===currentId;
+        const isCap = p.id===ST.captainId;
         return `<tr style="${isCur?'background:rgba(227,185,77,.1);':''}${disabled?'opacity:.45;':''}">
           <td class="bold">${esc(p.name)}</td>
           <td><span class="badge badge-pos">${p.pos}</span></td>
           <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
           <td>${statusBadges(p)}</td>
+          <td><button class="btn btn-sm ${isCap?'btn-gold':'btn-ghost'}" title="Definir como capitão" onclick="Game.setCaptain(${p.id})">${isCap?'★ Capitão':'☆ Capitão'}</button></td>
           <td>${disabled?`<span class="faint tiny">Indisponível</span>`:`<button class="btn btn-sm ${isCur?'':'btn-gold'}" onclick="Game.assignSlot(${m.slotIndex},${p.id})">${isCur?'Escalado':'Escalar'}</button>`}</td>
         </tr>`;
       }).join("")}
@@ -2362,6 +2384,7 @@ const Game = {
   advanceFast(){ advanceWithSpeed("fast"); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
 
   openSlotPicker(idx){ ST.uiModal={type:"slotPicker", slotIndex:idx}; render(); },
+  setCaptain(playerId){ ST.captainId = playerId; render(); },
   assignSlot(idx, playerId){ assignSlot(idx, playerId); ST.uiModal=null; scheduleSave(); render(); },
   closeModal(){ ST.uiModal=null; render(); },
   autoLineup(){ autoFillLineup(); render(); },
