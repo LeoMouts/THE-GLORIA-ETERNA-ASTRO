@@ -304,7 +304,7 @@ function newCareerState(){
     lastSeasonSummary:null,
     tmpSelectedTeam:null,
     tmpManagerNameInput:"",
-    xferFilter:{pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null},
+    xferFilter:{pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null, mode:"buy", sort:"ovr"},
     matchAnimIdx:0,
     matchPlaying:false,
   };
@@ -1728,6 +1728,14 @@ function renderElencoTab(){
 }
 
 function posOrder(pos){ return {GK:0,CB:1,LB:2,RB:3,DMF:4,CM:5,AM:6,LM:7,RM:8,LW:9,RW:10,SS:11,ST:12}[pos] ?? 13; }
+// shared sort for every transfer-market / squad list — "pos" (posição), "value" (valor) or the default "ovr" (geral)
+function sortXferList(list, sortKey){
+  const arr = list.slice();
+  if(sortKey==="pos") arr.sort((a,b)=> posOrder(a.pos)-posOrder(b.pos) || b.ovr-a.ovr);
+  else if(sortKey==="value") arr.sort((a,b)=> b.value-a.value);
+  else arr.sort((a,b)=> b.ovr-a.ovr);
+  return arr;
+}
 
 function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
   if(players.length===0) return `<div class="empty-state">Nenhum jogador aqui.</div>`;
@@ -1751,11 +1759,11 @@ function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
 }
 
 // ---------------- TRANSFERÊNCIAS TAB ----------------
-function renderXferSidebar(f, posOptions, teamOptions){
+function renderXferSidebar(f, posOptions, teamOptions, searchPlaceholder){
   return `
   <div class="xfer-filter-group">
     <label class="xfer-filter-label">Buscar</label>
-    <input id="xferSearchInput" class="input-inline" placeholder="${teamOptions?'Buscar jogador...':'Jogador, clube ou país...'}" value="${esc(f.q)}" oninput="Game.setXferFilter('q',this.value)"/>
+    <input id="xferSearchInput" class="input-inline" placeholder="${searchPlaceholder || (teamOptions?'Buscar jogador...':'Jogador, clube ou país...')}" value="${esc(f.q)}" oninput="Game.setXferFilter('q',this.value)"/>
   </div>
   <div class="xfer-filter-group">
     <label class="xfer-filter-label">Posição</label>
@@ -1779,14 +1787,51 @@ function renderXferSidebar(f, posOptions, teamOptions){
     </div>
   </div>
   <div class="xfer-filter-group">${renderPriceFilter(f)}</div>
+  <div class="xfer-filter-group">
+    <label class="xfer-filter-label">Ordenar por</label>
+    <select class="select-inline" onchange="Game.setXferFilter('sort',this.value)">
+      <option value="ovr" ${(!f.sort||f.sort==='ovr')?'selected':''}>Geral (OVR)</option>
+      <option value="pos" ${f.sort==='pos'?'selected':''}>Posição</option>
+      <option value="value" ${f.sort==='value'?'selected':''}>Valor</option>
+    </select>
+  </div>
   <button class="btn btn-sm btn-block" onclick="Game.clearXferFilters()">Limpar filtros</button>
   `;
 }
 function renderTransfersTab(){
   const f = ST.xferFilter;
-  const source = f.source || "libertadores";
+  const mode = f.mode || "buy";
   ensureGlobalMarket();
 
+  const modeToggle = `<div class="btn-row mb16 xfer-mode-toggle">
+    <button class="btn ${mode==='buy'?'btn-gold':''}" onclick="Game.setXferFilter('mode','buy')">📥 Contratar</button>
+    <button class="btn ${mode==='sell'?'btn-gold':''}" onclick="Game.setXferFilter('mode','sell')">📤 Vender</button>
+  </div>`;
+
+  return modeToggle + (mode==="sell" ? renderXferSellSubTab(f) : renderXferBuySubTab(f));
+}
+function renderXferSellSubTab(f){
+  const posOptions = ["GK","CB","LB","RB","DMF","CM","AM","LM","RM","LW","RW","ST"];
+  let list = myTeam().players.slice();
+  if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
+  if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
+  if(f.ageMin!=null) list = list.filter(p=>p.age>=f.ageMin);
+  if(f.ageMax!=null) list = list.filter(p=>p.age<=f.ageMax);
+  if(f.q) list = list.filter(p=>p.name.toLowerCase().includes(f.q.toLowerCase()));
+  list = sortXferList(list, f.sort);
+  return `<div class="xfer-layout">
+    <aside class="xfer-sidebar">
+      <div class="xfer-filter-label" style="margin-bottom:10px;">Filtros</div>
+      ${renderXferSidebar(f, posOptions, null, "Buscar jogador...")}
+    </aside>
+    <div class="xfer-main">
+      <div class="dim tiny mb8">Seu elenco — ${list.length} jogador${list.length===1?'':'es'} disponíve${list.length===1?'l':'is'} para venda.</div>
+      ${renderPlayerTable(list, true, false)}
+    </div>
+  </div>`;
+}
+function renderXferBuySubTab(f){
+  const source = f.source || "libertadores";
   const posOptions = ["GK","CB","LB","RB","DMF","CM","AM","LM","RM","LW","RW","ST"];
   const toggle = `<div class="btn-row mb16">
     <button class="btn btn-sm ${source==='libertadores'?'btn-gold':''}" onclick="Game.setXferFilter('source','libertadores')">Times da Libertadores</button>
@@ -1803,7 +1848,7 @@ function renderTransfersTab(){
       const q = f.q.toLowerCase();
       list = list.filter(p=>p.name.toLowerCase().includes(q) || (p.club||"").toLowerCase().includes(q) || (p.nat||"").toLowerCase().includes(q));
     }
-    list.sort((a,b)=>b.ovr-a.ovr);
+    list = sortXferList(list, f.sort);
     const shown = list.slice(0,50);
     return `${toggle}
     <div class="xfer-layout">
@@ -1828,8 +1873,6 @@ function renderTransfersTab(){
         </tbody></table></div>
       </div>
     </div>
-    <div class="panel-title mt24">Seu elenco — venda rápida</div>
-    ${renderPlayerTable(myTeam().players.slice().sort((a,b)=>b.ovr-a.ovr), true, false)}
     `;
   }
 
@@ -1841,7 +1884,7 @@ function renderTransfersTab(){
   if(f.ageMin!=null) list = list.filter(p=>p.age>=f.ageMin);
   if(f.ageMax!=null) list = list.filter(p=>p.age<=f.ageMax);
   if(f.q) list = list.filter(p=>p.name.toLowerCase().includes(f.q.toLowerCase()));
-  list.sort((a,b)=>b.ovr-a.ovr);
+  list = sortXferList(list, f.sort);
   const shown = list.slice(0,45);
   return `${toggle}
   <div class="xfer-layout">
@@ -1866,8 +1909,6 @@ function renderTransfersTab(){
       </tbody></table></div>
     </div>
   </div>
-  <div class="panel-title mt24">Seu elenco — venda rápida</div>
-  ${renderPlayerTable(myTeam().players.slice().sort((a,b)=>b.ovr-a.ovr), true, false)}
   `;
 }
 
@@ -2441,7 +2482,7 @@ const Game = {
   },
   clearXferFilters(){
     const f = ST.xferFilter;
-    f.pos="ALL"; f.team="ALL"; f.q=""; f.priceMax=null; f.ageMin=null; f.ageMax=null;
+    f.pos="ALL"; f.team="ALL"; f.q=""; f.priceMax=null; f.ageMin=null; f.ageMax=null; f.sort="ovr";
     render();
   },
   // Live preview while dragging the price slider — avoids a full re-render
