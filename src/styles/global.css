@@ -464,16 +464,28 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .contract-advisor b{color:var(--text);}
 
 .contract-doc-signing{align-items:center;justify-content:center;flex-direction:column;padding:54px 30px;text-align:center;gap:6px;}
-.contract-sign-title{font-family:var(--font-display);font-weight:800;font-size:22px;color:var(--marigold-bright);text-transform:uppercase;margin-bottom:8px;}
-.signature-path{
-  fill:none;stroke:var(--marigold);stroke-width:3;stroke-linecap:round;stroke-linejoin:round;
-  stroke-dasharray:400;stroke-dashoffset:400;
-  animation:sign-draw 1.3s cubic-bezier(.65,0,.35,1) forwards;
+.contract-sign-title{font-family:var(--font-display);font-weight:800;font-size:22px;color:var(--marigold-bright);text-transform:uppercase;margin-bottom:14px;}
+/* real cursive signature — genuine glyphs from a script font (not a hand-drawn
+   squiggle), revealed left-to-right via an animated clip-path so it reads as
+   if it's being written live. An underline sweeps in on the same timing. */
+.signature-wrap{position:relative;display:inline-block;padding-bottom:10px;}
+.signature-text{
+  display:inline-block;font-family:"Mrs Saint Delafield", "Segoe Script", cursive;
+  font-size:44px;line-height:1;color:var(--marigold-bright);white-space:nowrap;
+  clip-path:inset(0 100% 0 0);
+  animation:sign-reveal 1.6s cubic-bezier(.65,0,.35,1) forwards;
+  filter:drop-shadow(0 0 10px rgba(232,162,60,.35));
 }
-@keyframes sign-draw{to{stroke-dashoffset:0;}}
+@keyframes sign-reveal{to{clip-path:inset(0 0 0 0);}}
+.signature-wrap:after{
+  content:"";position:absolute;left:0;bottom:2px;height:2px;width:0;
+  background:linear-gradient(90deg,var(--marigold),var(--marigold-bright));
+  animation:sign-underline 1.6s cubic-bezier(.65,0,.35,1) forwards;
+}
+@keyframes sign-underline{to{width:100%;}}
 .contract-sign-stamp{
   font-family:var(--font-mono);font-size:10px;letter-spacing:.15em;color:var(--text-faint);
-  text-transform:uppercase;margin-top:8px;opacity:0;animation:sign-stamp-in .4s ease .9s forwards;
+  text-transform:uppercase;margin-top:8px;opacity:0;animation:sign-stamp-in .4s ease 1.5s forwards;
 }
 @keyframes sign-stamp-in{to{opacity:1;}}
 
