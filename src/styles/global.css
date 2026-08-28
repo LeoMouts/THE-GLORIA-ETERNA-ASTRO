@@ -161,11 +161,6 @@ input,select{font-family:inherit;}
 .panel-title{
   font-family:var(--font-display);text-transform:uppercase;letter-spacing:.04em;
   font-size:13px;color:var(--marigold);font-weight:800;margin:0 0 12px;
-  display:flex;align-items:center;gap:9px;
-}
-.panel-title:before{
-  content:"";display:block;width:11px;height:11px;background:var(--terracotta);
-  clip-path:polygon(0 0, 100% 20%, 100% 100%, 0 80%);
 }
 
 /* ---------------- Top bar / hub header ---------------- */
