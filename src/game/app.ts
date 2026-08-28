@@ -1784,6 +1784,10 @@ function renderElencoTab(){
           <span class="bold gold mono tiny">${chemistry}</span>
         </div>
       </div>
+      <button class="squad-central-tile" onclick="Game.openSquadCentral()" title="Ver todos os jogadores do elenco">
+        <span class="squad-central-tile-icon">🗂️</span>
+        <span class="squad-central-tile-label">Central de Elenco</span>
+      </button>
     </div>
     <div class="row">
       <select class="select-inline" onchange="Game.changeFormation(this.value)">
@@ -2259,6 +2263,24 @@ function renderMatch(){
   </div>`;
 }
 
+// full-squad overview — every player (starters + bench) with name/pos/OVR/POT/idade/valor.
+// Selling itself isn't done here: "Quero Vender" hands off to Transferências > Vender.
+function renderSquadCentralModal(){
+  const team = myTeam();
+  const players = team.players.slice().sort((a,b)=>b.ovr-a.ovr);
+  const totalValue = players.reduce((a,p)=>a+p.value,0);
+  return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
+    <div class="modal modal-wide">
+      <div class="row between wrap" style="gap:12px;margin-bottom:6px;">
+        <div class="panel-title" style="margin:0;">Central de Elenco</div>
+        <button class="btn btn-gold btn-sm" onclick="Game.goSellFromSquadCentral()">Quero Vender</button>
+      </div>
+      <div class="dim tiny mb12">${players.length} jogadores · Valor total do elenco: <span class="gold bold">${fmtMoney(totalValue)}</span></div>
+      ${renderPlayerTable(players, false, false)}
+      <button class="btn btn-block mt16" onclick="Game.closeModal()">Fechar</button>
+    </div>
+  </div>`;
+}
 // ---------------- MODAL ----------------
 function renderModal(){
   const m = ST.uiModal;
@@ -2268,6 +2290,7 @@ function renderModal(){
   if(m.type==="news") return renderNewsModal();
   if(m.type==="confirm") return renderConfirmModal(m);
   if(m.type==="incomingOffer") return renderIncomingOfferModal(m);
+  if(m.type==="squadCentral") return renderSquadCentralModal();
   return "";
 }
 function renderIncomingOfferModal(m){
@@ -2552,6 +2575,14 @@ const Game = {
   setCaptain(playerId){ ST.captainId = playerId; render(); },
   assignSlot(idx, playerId){ assignSlot(idx, playerId); ST.uiModal=null; scheduleSave(); render(); },
   closeModal(){ ST.uiModal=null; render(); },
+  openSquadCentral(){ ST.uiModal={type:"squadCentral"}; render(); },
+  goSellFromSquadCentral(){
+    ST.uiModal = null;
+    ST.hubTab = "transfers";
+    ST.xferFilter.mode = "sell";
+    ST.xferFilter.page = 1;
+    render();
+  },
   autoLineup(){ autoFillLineup(); render(); },
   changeFormation(f){ setFormation(f); scheduleSave(); render(); },
 
