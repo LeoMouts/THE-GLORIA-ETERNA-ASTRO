@@ -262,32 +262,39 @@ input,select{font-family:inherit;}
   width:86px;cursor:pointer;user-select:none;
 }
 .jersey-card{
-  position:relative;width:52px;height:56px;
+  position:relative;width:56px;height:76px;
   background:linear-gradient(180deg,var(--panel2),var(--panel));
   border:2px solid var(--marigold-dim);border-radius:6px 6px 3px 3px;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;
   box-shadow:0 3px 8px rgba(0,0,0,.4);
+  padding:5px 2px 4px;
 }
-.jersey-card:before{
-  content:"";position:absolute;top:-2px;left:50%;transform:translateX(-50%);
-  width:18px;height:6px;background:var(--pitch2);border-radius:0 0 6px 6px;
+.jersey-shirt{width:30px;height:30px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;}
+.jersey-shirt svg{width:100%;height:100%;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));}
+.jersey-stats{
+  display:flex;align-items:center;justify-content:center;gap:4px;width:100%;
+  border-top:1px solid rgba(241,237,225,.15);margin-top:2px;padding-top:4px;
 }
-.jersey-pos{font-family:var(--font-mono);font-size:8px;font-weight:800;letter-spacing:.04em;color:var(--marigold-dim);text-transform:uppercase;}
-.jersey-ovr{font-family:var(--font-display);font-weight:800;font-size:19px;color:var(--marigold);line-height:1;}
+.jersey-pos{font-family:var(--font-mono);font-size:7.5px;font-weight:800;letter-spacing:.03em;color:var(--marigold-dim);text-transform:uppercase;}
+.jersey-ovr{font-family:var(--font-display);font-weight:800;font-size:16px;color:var(--marigold);line-height:1;}
 .jersey-cap{
-  position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;
-  background:var(--marigold);color:#241a04;font-family:var(--font-mono);font-size:9px;font-weight:900;
-  display:flex;align-items:center;justify-content:center;border:2px solid var(--panel2);
+  width:13px;height:13px;border-radius:3px;flex:0 0 auto;
+  background:var(--marigold);color:#241a04;font-family:var(--font-mono);font-size:8px;font-weight:900;
+  display:flex;align-items:center;justify-content:center;
 }
 .jersey-card.unavailable{border-color:var(--red);}
 .jersey-card.unavailable .jersey-ovr{color:var(--red);}
 .pslot.empty .jersey-card{border-style:dashed;border-color:var(--line-strong);}
+.pslot.empty .jersey-card .jersey-shirt{opacity:.35;}
 .pslot.empty .jersey-ovr{color:var(--text-faint);font-size:14px;}
 .pslot .pname{font-size:10px;margin-top:4px;background:rgba(0,0,0,.6);padding:1px 5px;border-radius:2px;white-space:nowrap;max-width:86px;overflow:hidden;text-overflow:ellipsis;}
 
 /* ---------------- Competição: two-column layout ---------------- */
 .competicao-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;}
 .competicao-cell{min-width:0;}
+.standings-team{display:inline-flex;align-items:center;gap:8px;}
+.standings-crest{width:18px;height:20px;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;}
+.standings-crest svg,.standings-crest img{display:block;max-width:100%;max-height:100%;}
 .fixture-mini-list{display:flex;flex-direction:column;gap:2px;}
 .fixture-mini-row{
   display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:12.5px;
@@ -534,9 +541,11 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
   .tab-content{margin:0 10px 14px;padding:14px;}
   .score-num{font-size:34px;}
   .pslot{width:60px;}
-  .jersey-card{width:38px;height:42px;}
-  .jersey-ovr{font-size:14px;}
-  .jersey-pos{font-size:7px;}
+  .jersey-card{width:44px;height:60px;padding:3px 2px 2px;}
+  .jersey-shirt{width:22px;height:22px;}
+  .jersey-ovr{font-size:13px;}
+  .jersey-pos{font-size:6.5px;}
+  .jersey-cap{width:11px;height:11px;font-size:6.5px;}
   .goat-mascot{opacity:.16;height:70vh !important;right:-60px !important;}
 }
 
