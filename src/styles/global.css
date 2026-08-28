@@ -539,6 +539,19 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
   .bracket-center-col{min-width:108px;}
   .bm-row{padding:4px 5px;font-size:9px;}
 }
+/* Below this the two mirrored halves no longer fit side by side at a legible
+   card size — stack them (oitavas→quartas→semi, then a final, then the mirrored
+   other half) instead of shrinking text past readable. Each stacked row only
+   has to fit 3 round-columns wide, so it stays comfortably inside the panel
+   at any card size above, with no horizontal scrolling required. */
+@media (max-width:1000px){
+  .bracket-wrap{flex-direction:column;gap:18px;overflow-x:visible;}
+  .bracket-side{justify-content:center;}
+  .bracket-center-col{padding:6px 0;min-width:0;}
+  .bm{width:124px;}
+  .bracket-side{gap:8px;}
+  .bm-row{padding:5px 6px;font-size:10px;}
+}
 @media (max-width:900px){
   .competicao-grid{grid-template-columns:1fr;}
   .xfer-layout{grid-template-columns:1fr;}
@@ -557,6 +570,11 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
   .jersey-pos{font-size:6.5px;}
   .jersey-cap{width:11px;height:11px;font-size:6.5px;}
   .goat-mascot{opacity:.16;height:70vh !important;right:-60px !important;}
+  .bm{width:31vw;min-width:88px;}
+  .bracket-side{gap:5px;}
+  .bracket-wrap{gap:12px;}
+  .bm-row{padding:4px 5px;font-size:9px;}
+  .bm-crest{width:11px;}
 }
 
 /* ---------------- Social icon (Uiverse.io by david-mohseni, adapted) ---------------- */
