@@ -1624,7 +1624,7 @@ function renderKnockoutBracket(){
   const finalTie = effectiveFinal(comp);
   const finalIsUser = finalTie.home===ST.teamId || finalTie.away===ST.teamId;
   const champion = (comp.phase==="done" && finalTie.played) ? (finalTie.hs>finalTie.as?finalTie.home:finalTie.away) : null;
-  const finalBox = `<div class="bm ${finalIsUser?'user-tie':''}" style="width:172px;">
+  const finalBox = `<div class="bm ${finalIsUser?'user-tie':''}">
     <div class="bm-row ${champion&&champion===finalTie.home?'winner':''} ${!finalTie.home?'tbd':''}">
       <span class="bm-crest">${crestMini(finalTie.home)}</span>
       <span class="bm-name">${finalTie.home?esc(finalTie.home):'A definir'}</span>
