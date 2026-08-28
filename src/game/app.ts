@@ -63,6 +63,83 @@ function crestSVG(teamName, size){
     <text x="50" y="54" font-family="Arial, sans-serif" font-weight="900" font-size="27" text-anchor="middle" fill="${textColor}">${esc(initials)}</text>
   </svg>`;
 }
+// ---------- real kit renders (Elenco tab only) — camisa 1 of each Libertadores club, line + goalkeeper ----------
+const TEAM_KIT_OUTFIELD = {
+  "Flamengo": "/images/kits/outfield/flamengo.png",
+  "Estudiantes": "/images/kits/outfield/estudiantes.png",
+  "Cusco FC": "/images/kits/outfield/cusco-fc.png",
+  "Independiente Medellín": "/images/kits/outfield/independiente-medellin.png",
+  "Nacional": "/images/kits/outfield/nacional.png",
+  "Universitario": "/images/kits/outfield/universitario.png",
+  "Coquimbo Unido": "/images/kits/outfield/coquimbo-unido.png",
+  "Deportes Tolima": "/images/kits/outfield/deportes-tolima.png",
+  "Fluminense": "/images/kits/outfield/fluminense.png",
+  "Bolívar": "/images/kits/outfield/bolivar.png",
+  "Deportivo La Guaira": "/images/kits/outfield/deportivo-la-guaira.png",
+  "Independiente Rivadavia": "/images/kits/outfield/independiente-rivadavia.png",
+  "Boca Juniors": "/images/kits/outfield/boca-juniors.png",
+  "Cruzeiro": "/images/kits/outfield/cruzeiro.png",
+  "Universidad Católica": "/images/kits/outfield/universidad-catolica.png",
+  "Barcelona SC": "/images/kits/outfield/barcelona-sc.png",
+  "Peñarol": "/images/kits/outfield/penarol.png",
+  "Corinthians": "/images/kits/outfield/corinthians.png",
+  "Independiente Santa Fe": "/images/kits/outfield/independiente-santa-fe.png",
+  "Platense": "/images/kits/outfield/platense.png",
+  "Palmeiras": "/images/kits/outfield/palmeiras.png",
+  "Cerro Porteño": "/images/kits/outfield/cerro-porteno.png",
+  "Junior Barranquilla": "/images/kits/outfield/junior-barranquilla.png",
+  "Sporting Cristal": "/images/kits/outfield/sporting-cristal.png",
+  "LDU Quito": "/images/kits/outfield/ldu-quito.png",
+  "Lanús": "/images/kits/outfield/lanus.png",
+  "Always Ready": "/images/kits/outfield/always-ready.png",
+  "Mirassol": "/images/kits/outfield/mirassol.png",
+  "Independiente del Valle": "/images/kits/outfield/independiente-del-valle.png",
+  "Libertad": "/images/kits/outfield/libertad.png",
+  "Rosario Central": "/images/kits/outfield/rosario-central.png",
+  "Universidad Central": "/images/kits/outfield/universidad-central.png",
+};
+const TEAM_KIT_GK = {
+  "Flamengo": "/images/kits/gk/flamengo.png",
+  "Estudiantes": "/images/kits/gk/estudiantes.png",
+  "Cusco FC": "/images/kits/gk/cusco-fc.png",
+  "Independiente Medellín": "/images/kits/gk/independiente-medellin.png",
+  "Nacional": "/images/kits/gk/nacional.png",
+  "Universitario": "/images/kits/gk/universitario.png",
+  "Coquimbo Unido": "/images/kits/gk/coquimbo-unido.png",
+  "Deportes Tolima": "/images/kits/gk/deportes-tolima.png",
+  "Fluminense": "/images/kits/gk/fluminense.png",
+  "Bolívar": "/images/kits/gk/bolivar.png",
+  "Deportivo La Guaira": "/images/kits/gk/deportivo-la-guaira.png",
+  "Independiente Rivadavia": "/images/kits/gk/independiente-rivadavia.png",
+  "Boca Juniors": "/images/kits/gk/boca-juniors.png",
+  "Cruzeiro": "/images/kits/gk/cruzeiro.png",
+  "Universidad Católica": "/images/kits/gk/universidad-catolica.png",
+  "Barcelona SC": "/images/kits/gk/barcelona-sc.png",
+  "Peñarol": "/images/kits/gk/penarol.png",
+  "Corinthians": "/images/kits/gk/corinthians.png",
+  "Independiente Santa Fe": "/images/kits/gk/independiente-santa-fe.png",
+  "Platense": "/images/kits/gk/platense.png",
+  "Palmeiras": "/images/kits/gk/palmeiras.png",
+  "Cerro Porteño": "/images/kits/gk/cerro-porteno.png",
+  "Junior Barranquilla": "/images/kits/gk/junior-barranquilla.png",
+  "Sporting Cristal": "/images/kits/gk/sporting-cristal.png",
+  "LDU Quito": "/images/kits/gk/ldu-quito.png",
+  "Lanús": "/images/kits/gk/lanus.png",
+  "Always Ready": "/images/kits/gk/always-ready.png",
+  "Mirassol": "/images/kits/gk/mirassol.png",
+  "Independiente del Valle": "/images/kits/gk/independiente-del-valle.png",
+  "Libertad": "/images/kits/gk/libertad.png",
+  "Rosario Central": "/images/kits/gk/rosario-central.png",
+  "Universidad Central": "/images/kits/gk/universidad-central.png",
+};
+// Elenco pitch jersey: real camisa 1 render when we have one for the club (outfield vs. goalkeeper
+// kit chosen by slot), falling back to the generic tinted SVG for anything missing.
+function jerseyImage(teamName, isGK, size){
+  size = size || 40;
+  const src = isGK ? TEAM_KIT_GK[teamName] : TEAM_KIT_OUTFIELD[teamName];
+  if(!src) return jerseyIconSVG(teamName, size);
+  return `<img src="${src}" alt="${esc(teamName)} ${isGK?'goleiro':'linha'}" loading="lazy" style="display:block;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));"/>`;
+}
 function hashStr(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h<<5)-h+s.charCodeAt(i); h|=0; } return h; }
 function luminance(hex){
   const c = hex.replace('#','');
@@ -1678,7 +1755,8 @@ function renderElencoTab(){
   const chemistry = computeChemistry(lp, slots);
   const autoCaptainId = lp.filter(p=>p && p.pos!=="GK").sort((a,b)=>b.ovr-a.ovr)[0]?.id;
   const captainId = (ST.captainId && lp.some(p=>p && p.id===ST.captainId)) ? ST.captainId : autoCaptainId;
-  const shirt = jerseyIconSVG(team.name, 30);
+  const shirtLine = jerseyImage(team.name, false, 30);
+  const shirtGK = jerseyImage(team.name, true, 30);
 
   const pitchHtml = `<div class="pitch">
     <div class="pitch-center"></div>
@@ -1688,7 +1766,7 @@ function renderElencoTab(){
       const unavailable = p && (p.injured||p.suspended);
       return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;" onclick="Game.openSlotPicker(${i})">
         <div class="jersey-card ${unavailable?'unavailable':''}">
-          <div class="jersey-shirt">${shirt}</div>
+          <div class="jersey-shirt">${slot==="GK"?shirtGK:shirtLine}</div>
           <div class="jersey-stats">
             <span class="jersey-pos">${slot}</span>
             <span class="jersey-ovr">${p?p.ovr:'—'}</span>
