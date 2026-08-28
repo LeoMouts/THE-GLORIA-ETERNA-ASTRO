@@ -454,6 +454,15 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .empty-state{text-align:center;padding:40px 20px;color:var(--text-faint);}
 .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.78);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px;}
 .modal{background:var(--panel2);border:1px solid var(--line-strong);border-top:3px solid var(--marigold);padding:22px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);max-height:85vh;overflow-y:auto;}
+.modal-wide{max-width:760px;}
+.squad-central-tile{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  width:96px;height:60px;background:var(--panel);border:1px solid var(--marigold-dim);border-radius:5px;
+  cursor:pointer;color:var(--chalk);font-family:var(--font-mono);font-size:9px;text-transform:uppercase;
+  letter-spacing:.03em;text-align:center;padding:6px;transition:all .15s ease;
+}
+.squad-central-tile:hover{border-color:var(--marigold);box-shadow:0 0 16px rgba(232,162,60,.35);background:var(--panel2);}
+.squad-central-tile-icon{font-size:16px;line-height:1;}
 
 /* ---------------- Transfer contract document (FIFA-15-style two-panel offer sheet) ---------------- */
 .contract-doc{
