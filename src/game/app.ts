@@ -2108,20 +2108,35 @@ function renderModal(){
   return "";
 }
 function renderIncomingOfferModal(m){
+  if(m.signing) return renderContractSigning(m.signMsg || "Venda concluída!");
   const isArab = m.category==="arabe";
-  return `<div class="modal-backdrop">
-    <div class="modal" style="border-top-color:${isArab?'var(--terracotta)':'var(--marigold)'};">
-      <div class="hero-eyebrow" style="margin-bottom:10px;">${isArab?"Proposta inacreditável":"Proposta do exterior"}</div>
-      <div class="panel-title" style="margin:0 0 6px;">${esc(m.club)} quer contratar ${esc(m.playerName)}!</div>
-      <p class="small dim">${isArab
-        ? "Um clube árabe está oferecendo uma fortuna muito acima do valor de mercado do jogador."
-        : "Um clube de fora da Libertadores fez uma proposta acima do valor de mercado do jogador."}</p>
-      <div class="kv"><span>Valor de mercado</span><span>${fmtMoney(m.value)}</span></div>
-      <div class="kv"><span>Proposta recebida</span><span class="gold bold">${fmtMoney(m.offer)}</span></div>
-      <div class="kv"><span>Acima do valor</span><span class="green bold">+${Math.round((m.offer/m.value-1)*100)}%</span></div>
-      <div class="btn-row mt16">
-        <button class="btn btn-gold grow" onclick="Game.acceptIncomingOffer()">Aceitar e vender</button>
-        <button class="btn" onclick="Game.declineIncomingOffer()">Recusar</button>
+  const p = playerById(ST.teamId, m.playerId);
+  const pct = Math.round((m.offer/m.value-1)*100);
+  return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
+    <div class="contract-doc">
+      <div class="contract-panel">
+        <div class="contract-panel-header">Jogador</div>
+        <div class="contract-crest-row">
+          <div style="font-size:28px;">${isArab?'🏆':'🌍'}</div>
+          <div><div class="faint tiny uc">Time interessado</div><div class="bold">${esc(m.club)}</div></div>
+        </div>
+        <div class="contract-kv"><span>Tipo de transferência</span><span>Vender</span></div>
+        <div class="contract-kv"><span>Categoria</span><span>${isArab?'Proposta inacreditável':'Proposta do exterior'}</span></div>
+        ${p ? contractPlayerCard(p) : ""}
+      </div>
+      <div class="contract-divider"><span class="contract-pen">✒️</span></div>
+      <div class="contract-panel">
+        <div class="contract-panel-header">Proposta</div>
+        <p class="contract-advisor"><b>Comentários do Gerente de Futebol:</b><br>${isArab
+          ? "Um clube árabe está oferecendo uma fortuna muito acima do valor de mercado do jogador."
+          : "Um clube de fora da Libertadores fez uma proposta acima do valor de mercado do jogador."}</p>
+        <div class="contract-kv"><span>Valor de mercado</span><span>${fmtMoney(m.value)}</span></div>
+        <div class="contract-kv"><span>Proposta recebida</span><span class="gold bold">${fmtMoney(m.offer)}</span></div>
+        <div class="contract-kv"><span>Acima do valor</span><span class="green bold">+${pct}%</span></div>
+        <div class="btn-row mt16">
+          <button class="btn btn-gold grow" onclick="Game.acceptIncomingOffer()">✒️ Aceitar e Assinar</button>
+          <button class="btn" onclick="Game.declineIncomingOffer()">Recusar</button>
+        </div>
       </div>
     </div>
   </div>`;
@@ -2170,29 +2185,72 @@ function renderSlotPickerModal(m){
     </div>
   </div>`;
 }
+// short advisor blurb (FIFA-style "his price is probably between X and Y"),
+// flavored by age band — uses only real player fields, nothing invented.
+function transferAdvisorLine(p, lo, hi){
+  const vibe = p.age<=21 ? `${esc(p.name)} tem um futuro brilhante pela frente.`
+    : p.age<=29 ? `${esc(p.name)} está no auge da carreira.`
+    : `${esc(p.name)} traz muita experiência pra equipe.`;
+  return `${vibe} O preço dele provavelmente está entre ${fmtMoney(lo)} e ${fmtMoney(hi)}, se quiser fazer uma proposta.`;
+}
+// the "contract signed" closing screen — a hand-drawn signature animates in,
+// then the modal auto-closes. Shared by the outgoing and incoming offer flows.
+function renderContractSigning(message){
+  return `<div class="modal-backdrop">
+    <div class="contract-doc contract-doc-signing">
+      <div class="contract-sign-title">${esc(message)}</div>
+      <svg class="signature-svg" viewBox="0 0 220 70" width="220" height="70">
+        <path class="signature-path" d="M10,50 C25,15 40,60 58,32 C70,12 82,55 98,35 C110,20 122,48 138,30 C150,16 165,42 182,28 C192,20 200,32 208,25" />
+      </svg>
+      <div class="contract-sign-stamp">Contrato assinado</div>
+    </div>
+  </div>`;
+}
+function contractPlayerCard(p){
+  return `<div class="contract-player-card">
+    <div class="contract-player-banner"><span>${esc(p.name)}</span><span>${p.pos}</span></div>
+    <div class="contract-player-body">
+      <div class="contract-stat-grid">
+        <div><span>Ger</span><b>${p.ovr}</b></div>
+        <div><span>Idade</span><b>${p.age}</b></div>
+        <div><span>Pot</span><b>${p.pot}</b></div>
+      </div>
+      <div class="contract-stat-row"><span>Valor de mercado</span><b class="gold">${fmtMoney(p.value)}</b></div>
+    </div>
+  </div>`;
+}
 function renderBuyOfferModal(m){
+  if(m.signing) return renderContractSigning(m.signMsg || "Contrato assinado!");
   const isGlobal = m.team==="global";
   const p = isGlobal ? ST.world.globalMarket.find(x=>x.id===m.playerId) : ST.world.teams[m.team].players.find(x=>x.id===m.playerId);
   if(!p) return `<div class="modal-backdrop"><div class="modal"><p>Jogador indisponível.</p><button class="btn" onclick="Game.closeModal()">Fechar</button></div></div>`;
   const ask = isGlobal ? globalMarketAskingPrice(p) : askingPrice(p, ST.world.teams[m.team]);
+  const lo = Math.round(ask*0.85/5000)*5000, hi = Math.round(ask*1.3/5000)*5000;
+  const clubName = isGlobal ? p.club : m.team;
   return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
-    <div class="modal">
-      <div class="panel-title">Proposta por ${esc(p.name)}</div>
-      <div class="kv"><span>Clube atual</span><span class="bold">${esc(isGlobal? p.club : m.team)}</span>${isGlobal?' <span class="faint tiny">(fora da Libertadores)</span>':''}</div>
-      <div class="kv"><span>Posição</span><span>${p.pos}</span></div>
-      <div class="kv"><span>Idade</span><span>${p.age}</span></div>
-      <div class="kv"><span>Overall</span><span class="gold bold">${p.ovr}</span></div>
-      <div class="kv"><span>Valor de mercado</span><span>${fmtMoney(p.value)}</span></div>
-      <div class="kv"><span>Pedido estimado</span><span class="gold bold">${fmtMoney(ask)}</span></div>
-      <div class="kv"><span>Seu orçamento</span><span>${fmtMoney(ST.budget)}</span></div>
-      <div class="mt16">
-        <label class="tiny faint">Valor da proposta (US$)</label>
-        <input id="offerInput" type="number" class="input-inline" style="width:100%;" value="${ask}" step="10000"/>
+    <div class="contract-doc">
+      <div class="contract-panel">
+        <div class="contract-panel-header">Jogador</div>
+        <div class="contract-crest-row">
+          ${isGlobal ? `<div style="font-size:28px;">🌍</div>` : `<div style="width:40px;">${crestSVG(clubName,40)}</div>`}
+          <div><div class="faint tiny uc">Time</div><div class="bold">${esc(clubName)}</div>${isGlobal?'<div class="faint tiny">Fora da Libertadores</div>':''}</div>
+        </div>
+        <div class="contract-kv"><span>Tipo de transferência</span><span>Comprar</span></div>
+        <div class="contract-kv"><span>Valor de passe estipulado</span><span class="gold bold">${fmtMoney(ask)}</span></div>
+        ${contractPlayerCard(p)}
       </div>
-      <div id="offerMsg" class="small mt8"></div>
-      <div class="btn-row mt16">
-        <button class="btn btn-gold grow" onclick="Game.submitOffer(${p.id},'${escJs(m.team)}')">Enviar proposta</button>
-        <button class="btn" onclick="Game.closeModal()">Cancelar</button>
+      <div class="contract-divider"><span class="contract-pen">✒️</span></div>
+      <div class="contract-panel">
+        <div class="contract-panel-header">Proposta</div>
+        <p class="contract-advisor"><b>Comentários do Gerente de Futebol:</b><br>${transferAdvisorLine(p, lo, hi)}</p>
+        <div class="contract-kv"><span>Orç. de transferência</span><span class="gold bold">${fmtMoney(ST.budget)}</span></div>
+        <label class="tiny faint mt16" style="display:block;">Valor da proposta (US$)</label>
+        <input id="offerInput" type="number" class="input-inline" style="width:100%;" value="${ask}" step="10000"/>
+        <div id="offerMsg" class="small mt8"></div>
+        <div class="btn-row mt16">
+          <button class="btn btn-gold grow" onclick="Game.submitOffer(${p.id},'${escJs(m.team)}')">✒️ Enviar Proposta</button>
+          <button class="btn" onclick="Game.closeModal()">Cancelar</button>
+        </div>
       </div>
     </div>
   </div>`;
@@ -2329,15 +2387,25 @@ const Game = {
     render();
   },
   openBuyModal(playerId, team){ ST.uiModal={type:"buyOffer", playerId, team}; render(); },
-  acceptIncomingOffer(){ acceptIncomingOffer(); render(); },
+  acceptIncomingOffer(){
+    const m = ST.uiModal;
+    if(!m || m.type!=="incomingOffer" || m.signing) return;
+    m.signing = true; m.signMsg = "Venda Concluída!";
+    render();
+    setTimeout(()=>{ acceptIncomingOffer(); render(); }, 1500);
+  },
   declineIncomingOffer(){ declineIncomingOffer(); render(); },
   submitOffer(playerId, team){
+    const m = ST.uiModal;
+    if(!m || m.signing) return;
     const input = document.getElementById("offerInput");
     const offer = Math.max(0, Math.round(Number(input.value)||0));
     const res = team==="global" ? buyGlobalPlayer(playerId, offer) : makeOffer(playerId, team, offer);
     const msgEl = document.getElementById("offerMsg");
     if(res.ok){
-      ST.uiModal=null; render();
+      m.signing = true; m.signMsg = "Contrato Assinado!";
+      render();
+      setTimeout(()=>{ ST.uiModal=null; render(); }, 1500);
     } else if(msgEl){
       msgEl.innerHTML = `<span class="red">${esc(res.msg)}</span>`;
     }
