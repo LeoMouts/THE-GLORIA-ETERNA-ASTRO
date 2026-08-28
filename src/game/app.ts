@@ -1882,8 +1882,8 @@ function renderTransfersTab(){
   ensureGlobalMarket();
 
   const modeToggle = `<div class="btn-row mb16 xfer-mode-toggle">
-    <button class="btn ${mode==='buy'?'btn-gold':''}" onclick="Game.setXferFilter('mode','buy')">📥 Contratar</button>
-    <button class="btn ${mode==='sell'?'btn-gold':''}" onclick="Game.setXferFilter('mode','sell')">📤 Vender</button>
+    <button class="btn ${mode==='buy'?'btn-gold':''}" onclick="Game.setXferFilter('mode','buy')">Contratar</button>
+    <button class="btn ${mode==='sell'?'btn-gold':''}" onclick="Game.setXferFilter('mode','sell')">Vender</button>
   </div>`;
 
   return modeToggle + (mode==="sell" ? renderXferSellSubTab(f) : renderXferBuySubTab(f));
@@ -1913,7 +1913,7 @@ function renderXferBuySubTab(f){
   const posOptions = ["GK","CB","LB","RB","DMF","CM","AM","LM","RM","LW","RW","ST"];
   const toggle = `<div class="btn-row mb16">
     <button class="btn btn-sm ${source==='libertadores'?'btn-gold':''}" onclick="Game.setXferFilter('source','libertadores')">Times da Libertadores</button>
-    <button class="btn btn-sm ${source==='global'?'btn-gold':''}" onclick="Game.setXferFilter('source','global')">🌎 Mercado Global</button>
+    <button class="btn btn-sm ${source==='global'?'btn-gold':''}" onclick="Game.setXferFilter('source','global')">Mercado Global</button>
   </div>`;
 
   if(source==="global"){
