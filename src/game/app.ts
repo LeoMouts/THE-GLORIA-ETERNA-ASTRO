@@ -106,6 +106,11 @@ const TEAM_KIT_OUTFIELD = {
   "Libertad": "/images/kits/outfield/outfield/libertad.png",
   "Rosario Central": "/images/kits/outfield/outfield/rosario-central.png",
   "Universidad Central": "/images/kits/outfield/outfield/universidad-central.png",
+  // Pré-Libertadores (Sul-Americana) clubs
+  "Vasco da Gama": "/images/kits/outfield/outfield/vasco-da-gama.png", "São Paulo": "/images/kits/outfield/outfield/sao-paulo.png",
+  "Grêmio": "/images/kits/outfield/outfield/gremio.png", "Santos": "/images/kits/outfield/outfield/santos.png",
+  "River Plate": "/images/kits/outfield/outfield/river-plate.png", "Botafogo": "/images/kits/outfield/outfield/botafogo.png",
+  "Atlético Mineiro": "/images/kits/outfield/outfield/atletico-mineiro.png", "Racing": "/images/kits/outfield/outfield/racing.png",
 };
 const TEAM_KIT_GK = {
   "Flamengo": "/images/kits/gk/gk/flamengo.png",
@@ -140,6 +145,11 @@ const TEAM_KIT_GK = {
   "Libertad": "/images/kits/gk/gk/libertad.png",
   "Rosario Central": "/images/kits/gk/gk/rosario-central.png",
   "Universidad Central": "/images/kits/gk/gk/universidad-central.png",
+  // Pré-Libertadores (Sul-Americana) clubs
+  "Vasco da Gama": "/images/kits/gk/gk/vasco-da-gama.png", "São Paulo": "/images/kits/gk/gk/sao-paulo.png",
+  "Grêmio": "/images/kits/gk/gk/gremio.png", "Santos": "/images/kits/gk/gk/santos.png",
+  "River Plate": "/images/kits/gk/gk/river-plate.png", "Botafogo": "/images/kits/gk/gk/botafogo.png",
+  "Atlético Mineiro": "/images/kits/gk/gk/atletico-mineiro.png", "Racing": "/images/kits/gk/gk/racing.png",
 };
 // Elenco pitch jersey: real camisa 1 render when we have one for the club (outfield vs. goalkeeper
 // kit chosen by slot), falling back to the generic tinted SVG for anything missing.
