@@ -815,6 +815,7 @@ function startShootout(teamAName, teamBName, resolveCtx){
 function applyShootoutResult(ctx, winner){
   if(ctx.type==="knockoutTie"){
     const round = currentKnockoutRound();
+    if(!round){ ST.stage = "hub"; ST.hubTab = "competicao"; return; }
     const tie = round.ties.find(t=>t.id===ctx.tieId);
     if(tie) tie.winner = winner;
     const comp = ST.competition;
@@ -3042,11 +3043,14 @@ const Game = {
       s.resultShown[i] = true;
       const k = s.kicks[i];
       if(k.scored){ if(k.team==="A") s.scoreA++; else s.scoreB++; }
-      render();
+      // decide BEFORE painting, so a decisive kick's render already shows the "vence a
+      // disputa" banner instead of sitting one frame behind on "preparando a próxima".
       if(shootoutDecided(s)){
         s.phase = "done";
+        render();
         setTimeout(()=>Game.finishShootout(), 2400);
       } else {
+        render();
         setTimeout(()=>{ s.revealIdx++; Game.tickShootout(); }, 1300);
       }
     }
