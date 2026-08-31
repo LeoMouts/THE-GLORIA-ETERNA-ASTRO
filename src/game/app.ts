@@ -2833,7 +2833,7 @@ function renderMatch(){
         <p class="small dim">Sua escalação atual será usada nesta partida. Ajuste no campo se necessário antes de simular.</p>
         ${missing>0?`<p class="small red">⚠ Você tem ${missing} posição(ões) vazia(s) — o time será completado automaticamente.</p>`:""}
         ${unavailable>0?`<p class="small red">⚠ ${unavailable} jogador(es) escalado(s) estão suspensos/lesionados e serão substituídos.</p>`:""}
-        <button class="btn btn-sm mt8" onclick="Game.setTab('elenco'); ST.stage='hub'; render();">✏️ Editar escalação</button>
+        <button class="btn btn-sm mt8" onclick="Game.goEditLineup()">✏️ Editar escalação</button>
       </div>
       <div class="tac mt24">
         <button class="btn btn-gold btn-lg" onclick="Game.simulateMatch()">▶ Simular Partida</button>
@@ -3377,6 +3377,11 @@ const Game = {
   beginPreLibCareer(){ crownPreLibChampion(ST.managerName); render(); },
 
   setTab(id){ ST.hubTab=id; render(); },
+  // "Editar escalação" on the match-confirm screen: jump back to the hub's Elenco tab.
+  // (previously this button's onclick called bare ST/render() directly in the HTML attribute —
+  // those aren't real globals in the bundled output, so the click silently threw and could
+  // leave the screen stuck mid-transition; routing through a proper Game method fixes that.)
+  goEditLineup(){ ST.hubTab='elenco'; ST.stage='hub'; render(); },
   advance(){ advanceTournament(); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
   advanceSlow(){ advanceWithSpeed("slow"); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
   advanceFast(){ advanceWithSpeed("fast"); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
