@@ -985,9 +985,18 @@ function simulatePendingMatch(){
 
 // a stable-but-cosmetic "energia" reading for the penalty-taker picker — deterministic per
 // player+match (so it doesn't jump around on re-render) without a full stamina system.
-function pseudoFatigue(playerId, seed){
-  const h = Math.abs(hashStr(playerId+"_"+(seed||0)));
-  return 60 + (h % 41); // 60-100%
+// a stamina reading that actually tracks the match: ~100% near kickoff, draining toward full
+// time, and draining FASTER the older the player is (young legs hold up better; past ~30 the
+// drop-off steepens) — plus a small per-player personal variance so it's not identical twins.
+function pseudoFatigue(player, minute, seed){
+  const m = E.clamp(minute||0, 0, 90);
+  const age = (player && player.age) || 26;
+  const ageFactor = E.clamp(1 + (age-26)*0.035, 0.7, 1.6);
+  const baseDrop = 42 * ageFactor;
+  const drop = baseDrop * (m/90);
+  const h = Math.abs(hashStr((player?player.id:0)+"_"+(seed||0)));
+  const variance = (h % 9) - 4;
+  return E.clamp(Math.round(100 - drop + variance), 28, 100);
 }
 
 // Resolves one "penalty_pending" event in place — turns it into a real goal/miss event with a
@@ -1458,7 +1467,12 @@ function render(){
     app.innerHTML = html + renderModal();
     const tickerEl = document.getElementById("ticker");
     if(tickerEl) tickerEl.scrollTop = tickerEl.scrollHeight;
-    if(ST && ST.stage==="match" && ST.pendingMatch && ST.pendingMatch.result && !matchAnimDone()){
+    if(ST && ST.stage==="match" && ST.pendingMatch && ST.pendingMatch.result && !matchAnimDone()
+       && !(ST.uiModal && ST.uiModal.type==="penaltyResult")){
+      // that last guard matters: the penalty's event already flipped from "penalty_pending" to
+      // a resolved goal/miss the instant it was taken, so without it this block would see a
+      // normal event next and start auto-ticking the match clock again UNDER the result card,
+      // instead of waiting for the card's own timer to dismiss it first.
       const pm = ST.pendingMatch;
       const nextEvent = pm.result.events[ST.matchAnimIdx];
       if(nextEvent && nextEvent.type==="penalty_pending"){
@@ -2572,7 +2586,7 @@ function renderPenaltyPickerModal(m){
     return p ? {p, slot:atkSlots[i]} : null;
   }).filter(Boolean).sort((a,b)=>b.p.ovr-a.p.ovr);
   const rows = candidates.map(({p,slot})=>{
-    const fatigue = pseudoFatigue(p.id, pm.seed);
+    const fatigue = pseudoFatigue(p, ev.minute, pm.seed);
     return `<div class="pen-pick-row" onclick="Game.takePenalty(${p.id})">
       <span class="badge badge-pos">${slot}</span>
       <span class="bold pen-pick-name">${esc(p.name)}</span>
