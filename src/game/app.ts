@@ -21,6 +21,10 @@ const TEAM_LOGOS = {
   "LDU Quito": "/logos/ldu-quito.png", "Lanús": "/logos/lanus.png", "Always Ready": "/logos/always-ready.png",
   "Mirassol": "/logos/mirassol.png", "Independiente del Valle": "/logos/independiente-del-valle.png", "Libertad": "/logos/libertad.png",
   "Rosario Central": "/logos/rosario-central.png", "Universidad Central": "/logos/universidad-central.png",
+  // Pré-Libertadores (Sul-Americana) clubs
+  "Vasco da Gama": "/logos/vasco-da-gama.png", "São Paulo": "/logos/sao-paulo.png", "Grêmio": "/logos/gremio.png",
+  "Santos": "/logos/santos.png", "River Plate": "/logos/river-plate.png", "Botafogo": "/logos/botafogo.png",
+  "Atlético Mineiro": "/logos/atletico-mineiro.png", "Racing": "/logos/racing.png",
 };
 const TEAM_COLORS = {
   "Flamengo": ["#C8102E","#1A1A1A"], "Estudiantes": ["#B7161C","#FFFFFF"], "Cusco FC": ["#7A1F2B","#D4A72C"],
@@ -263,9 +267,10 @@ function freshWorld(){
 }
 
 // ============================================================
-// PRÉ-LIBERTADORES — quick 8-team knockout among Sul-Americana clubs.
-// Winner earns a season-2027 Libertadores slot in place of whoever had the
-// worst 2026 group-stage campaign (fewest points, then worst SG, then fewest wins).
+// PRÉ-LIBERTADORES — quick 8-team knockout among Sul-Americana clubs. The player is stuck
+// with their chosen team until they win it (each failed attempt rolls the year forward).
+// Winning earns a Libertadores slot the following season, in place of whoever had the
+// worst group-stage campaign that year (fewest points, then worst SG, then fewest wins).
 // ============================================================
 // standard seeded bracket (1v8 / 4v5 / 3v6 / 2v7) built from each squad's average OVR,
 // so the two strongest sides can only meet in the final.
@@ -275,6 +280,11 @@ const PRELIB_QF_PAIRS = [
   {half:1, slot:0, teamA:"Botafogo", teamB:"Vasco da Gama"},
   {half:1, slot:1, teamA:"São Paulo", teamB:"Atlético Mineiro"},
 ];
+// the player is stuck with whichever team they pick — a failed campaign doesn't send them back
+// to team select, it just rolls the Sul-Americana forward a year for another shot. This caps
+// how many years they can keep trying before the window closes for good.
+const PRELIB_START_YEAR = 2026;
+const PRELIB_MAX_YEAR = 2035; // 10 attempts total (2026..2035)
 
 function freshPrelibWorld(){
   const teams = {};
@@ -302,15 +312,31 @@ function currentPrelibTies(){
 }
 
 function startPreLib(teamName){
-  ST._prelibDirty = true; // ST.world/teamId now point at the ephemeral prelib data, not any saved career
   ST.world = freshPrelibWorld();
   ST.teamId = teamName;
   ST.formation = ST.formation || "4-3-3";
   autoFillLineup();
   ST.competition = { scorers:{} }; // lightweight stub: only .scorers is touched by the reused match engine
   const qf = PRELIB_QF_PAIRS.map(pr=>makePrelibTie(pr.teamA, pr.teamB, pr.half, pr.slot));
-  ST.prelib = { userTeam:teamName, phase:"qf", qf, sf:null, final:null, champion:null };
+  ST.prelib = { userTeam:teamName, year:PRELIB_START_YEAR, phase:"qf", qf, sf:null, final:null, champion:null };
   ST.stage = "prelib_bracket";
+  scheduleSave();
+}
+
+// a failed campaign doesn't reset the player's team choice — it just refreshes every prelib
+// squad (clean of injuries/suspensions/form from the last attempt) and rolls the Sul-Americana
+// forward a year for another shot, same team, until they either break through or run out of years.
+function retryPreLibSameTeam(){
+  const p = ST.prelib;
+  if(!p || p.phase!=="eliminated") return;
+  p.year += 1;
+  Object.values(ST.world.teams).forEach(t=>t.players.forEach(pl=>{
+    pl.injured=false; pl.suspended=false; pl.form=0; pl.suspendedMatches=0; pl.injuredMatches=0;
+  }));
+  const qf = PRELIB_QF_PAIRS.map(pr=>makePrelibTie(pr.teamA, pr.teamB, pr.half, pr.slot));
+  p.qf = qf; p.sf = null; p.final = null; p.champion = null; p.phase = "qf";
+  ST.stage = "prelib_bracket";
+  scheduleSave();
 }
 
 function resolvePrelibTieAuto(tie){
@@ -339,6 +365,7 @@ function stepPreLib(){
   if(pendingUser){
     goToMatchDay(pendingUser, {type:"prelib_"+p.phase, tieId:pendingUser.id});
   }
+  scheduleSave();
 }
 
 function finishPrelibMatch(tieId){
@@ -358,10 +385,12 @@ function checkPrelibElimination(){
   const p = ST.prelib;
   const userTie = currentPrelibTies().find(t=>t.teamA===p.userTeam || t.teamB===p.userTeam);
   if(userTie && userTie.winner && userTie.winner!==p.userTeam){
-    p.phase = "eliminated";
+    p.phase = (p.year>=PRELIB_MAX_YEAR) ? "failed" : "eliminated";
+    scheduleSave();
     return;
   }
   progressPrelibBracket();
+  scheduleSave();
 }
 
 function progressPrelibBracket(){
@@ -389,10 +418,9 @@ function progressPrelibBracket(){
   }
 }
 
-// simulates a full, independent 2026 group stage across the real 32 Libertadores clubs
-// (official draw) purely to find whoever had the worst campaign — fewest points, then
-// worst goal difference, then fewest wins — so the Pré-Libertadores champion has someone
-// concrete to replace.
+// simulates a full, independent group stage across the real 32 Libertadores clubs (official
+// draw) purely to find whoever had the worst campaign — fewest points, then worst goal
+// difference, then fewest wins — so the Pré-Libertadores champion has someone concrete to replace.
 function simulateReferenceGroupStage(){
   const world = freshWorld();
   const groups = {};
@@ -422,6 +450,8 @@ function crownPreLibChampion(managerName){
   const championMeta = ST.world.teams[championName];
   const championRoster = championMeta.players.map(pl=>Object.assign({}, pl));
   const worstTeamName = simulateReferenceGroupStage();
+  const wonYear = p.year;
+  const promotionYear = wonYear + 1;
 
   const world = freshWorld();
   const keptGroup = (world.teams[worstTeamName] && world.teams[worstTeamName].group) || "A";
@@ -438,14 +468,15 @@ function crownPreLibChampion(managerName){
   ST.world = world;
   ST.teamId = championName;
   ST.managerName = managerName || "Treinador";
-  ST.seasonNum = 2;
-  ST.seasonYear = 2027;
+  ST.seasonYear = promotionYear;
+  ST.seasonNum = Math.min(10, promotionYear - 2025);
   ST.reputation = 50;
   const tier = tierOf(ST.world, championName);
   ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tier];
   ST.history = [];
+  const triesNote = wonYear>PRELIB_START_YEAR ? ` após ${wonYear-PRELIB_START_YEAR+1} tentativas na Sul-Americana` : "";
   ST.newsLog = [
-    {title:"Campeão da Pré-Libertadores!", text:`${championName} venceu o torneio classificatório e garantiu vaga na Libertadores 2027 no lugar do ${worstTeamName}, dona da pior campanha na fase de grupos de 2026.`},
+    {title:"Campeão da Pré-Libertadores!", text:`${championName} venceu o torneio classificatório de ${wonYear}${triesNote} e garantiu vaga na Libertadores ${promotionYear} no lugar do ${worstTeamName}, dona da pior campanha na fase de grupos de ${wonYear}.`},
     {title:"Bem-vindo!", text:`${ST.managerName} assume o comando do ${championName} para a campanha de ${ST.seasonYear} da CONMEBOL Libertadores.`},
   ];
   ST.prelib = null;
@@ -571,13 +602,16 @@ function newCareerState(){
   };
 }
 
+// stages with no committed data yet — never worth resuming straight into these on reload.
+const PRECOMMIT_STAGES = new Set(["team_select","manager_name","mode_select","prelib_select"]);
 async function initApp(){
   const loaded = await loadState();
   if(loaded && loaded.schemaVersion===SCHEMA_VERSION){
     ST = loaded;
-    // never resume into a transient pre-career setup screen (team pick / manager name) —
-    // only resume straight into the hub if a career was actually started.
-    if(!ST.teamId || !ST.world){
+    // never resume into a transient pre-career setup screen (team pick / manager name / mode
+    // pick) — only resume straight into the hub (or an in-progress Pré-Libertadores run) if
+    // something was actually committed.
+    if(!ST.teamId || !ST.world || PRECOMMIT_STAGES.has(ST.stage)){
       ST.stage = "home";
     }
     recomputeIdCounter();
@@ -590,6 +624,11 @@ async function initApp(){
     ST = newCareerState();
   }
   render();
+  // a penalty shootout drives itself via its own setTimeout chain, which a page reload
+  // wipes — restart it so a save captured mid-shootout doesn't resume frozen.
+  if(ST.stage==="penaltyShootout" && ST.penaltyShootout && ST.penaltyShootout.phase==="kicking"){
+    setTimeout(()=>{ Game.tickShootout(); }, 700);
+  }
 }
 
 function recomputeIdCounter(){
@@ -608,20 +647,6 @@ async function resetCareer(){
   render();
 }
 
-// bails out of an in-progress Pré-Libertadores run: nothing about that run was ever
-// persisted (see startPreLib/stepPreLib — no scheduleSave calls until the champion is
-// crowned), so recovering is just re-reading whatever real career was saved on disk.
-async function abandonPreLibRestore(){
-  const loaded = await loadState();
-  if(loaded && loaded.schemaVersion===SCHEMA_VERSION){
-    ST = loaded;
-    if(!ST.teamId || !ST.world) ST.stage = "home"; else ST.stage = "hub";
-    recomputeIdCounter();
-  } else {
-    ST = newCareerState();
-  }
-  render();
-}
 window.resetCareer = () => {
   ST.uiModal = {type:"confirm", message:"Tem certeza que quer apagar sua carreira atual e recomeçar?", action:"resetCareer"};
   render();
@@ -1696,6 +1721,7 @@ function render(){
   try{
     let html = "";
     if(!ST || ST.stage==="home") html = renderHome();
+    else if(ST.stage==="mode_select") html = renderModeSelect();
     else if(ST.stage==="team_select") html = renderTeamSelect();
     else if(ST.stage==="manager_name") html = renderManagerName();
     else if(ST.stage==="hub") html = renderHub();
@@ -1815,7 +1841,8 @@ function renderRatingCards(){
 }
 
 function renderHome(){
-  const hasCareer = ST && ST.teamId;
+  const hasCareer = ST && ST.teamId && ST.world;
+  const inPrelib = hasCareer && !!ST.prelib;
   return `
   ${cornerWatermarks()}
   <div style="position:relative;z-index:2;">
@@ -1828,18 +1855,32 @@ function renderHome(){
         <p class="hero-split-desc">Assuma o comando de um clube da Copa Libertadores 2026. Escale, negocie, evolua — e descubra se você tem o que é preciso para erguer a taça em 10 temporadas.</p>
         <div class="hero-split-actions">
           ${hasCareer ? `
-            <button class="btn btn-gold btn-lg" onclick="Game.continueCareer()">▶ CONTINUAR CARREIRA</button>
+            <button class="btn btn-gold btn-lg" onclick="Game.continueCareer()">▶ ${inPrelib?"CONTINUAR PRÉ-LIBERTADORES":"CONTINUAR CARREIRA"}</button>
             <button class="btn btn-ghost" onclick="Game.goNewGame()">Nova carreira</button>
           ` : `
             <button class="btn btn-gold btn-lg" onclick="Game.goNewGame()">▶ JOGAR</button>
           `}
-          <button class="btn btn-ghost" onclick="Game.goPreLib()">🏆 Pré-Libertadores</button>
         </div>
       </div>
       ${renderRatingCards()}
     </div>
     ${renderBottomMarquee()}
     <div class="social-wrap-center">${renderInstagramIcon()}</div>
+  </div>`;
+}
+
+// ---------------- MODE SELECT ----------------
+function renderModeSelect(){
+  return `
+  <div class="hero" style="min-height:80vh;">
+    <div style="align-self:flex-start;margin-left:20px;"><button class="btn btn-ghost btn-sm" onclick="Game.goHome()">← Voltar</button></div>
+    <div class="hero-eyebrow">Como você quer jogar?</div>
+    <h1 class="hero-title" style="font-size:clamp(28px,6vw,48px);">ESCOLHA SEU CAMINHO</h1>
+    <div class="mt24" style="display:flex;flex-direction:column;gap:14px;max-width:380px;width:100%;">
+      <button class="btn btn-gold btn-lg" onclick="Game.chooseNormalCareer()">▶ Carreira Libertadores 2026</button>
+      <button class="btn btn-ghost btn-lg" onclick="Game.goPreLib()">🏆 Jogar Pré-Libertadores</button>
+    </div>
+    <p class="dim small mt24" style="max-width:420px;">Carreira Libertadores: assuma um dos 32 clubes já classificados. Pré-Libertadores: dispute um mata-mata entre 8 clubes da Sul-Americana — vença e ganhe uma vaga direta na Libertadores do ano seguinte.</p>
   </div>`;
 }
 
@@ -1923,9 +1964,9 @@ function renderPreLibSelect(){
   }).join("");
   return `
   <div style="padding:26px 20px 10px;">
-    <button class="btn btn-ghost btn-sm" onclick="Game.exitPreLibToHome()">← Voltar</button>
+    <button class="btn btn-ghost btn-sm" onclick="Game.goHome()">← Voltar</button>
     <h2 class="panel-title" style="font-size:22px;margin-top:18px;">🏆 Pré-Libertadores</h2>
-    <p class="dim small">8 clubes da Sul-Americana disputam um mata-mata rápido (jogo único, com pênaltis em caso de empate). Escolha seu time do coração: se ele for campeão, assume a vaga do pior time da fase de grupos da Libertadores 2026 e você já começa a carreira em 2027 no comando dele.</p>
+    <p class="dim small">8 clubes da Sul-Americana disputam um mata-mata rápido (jogo único, com pênaltis em caso de empate). Escolha seu time do coração: se ele for campeão em ${PRELIB_START_YEAR}, assume a vaga do pior time da fase de grupos da Libertadores e você já começa a carreira em ${PRELIB_START_YEAR+1} no comando dele. Se não conseguir, você continua com esse mesmo time, tentando de novo no ano seguinte, até vencer.</p>
     <div class="group-grid">${groupCards}</div>
   </div>
   <div style="position:sticky;bottom:0;background:linear-gradient(180deg,transparent,rgba(8,16,14,.97) 30%);padding:22px 20px 26px;text-align:center;">
@@ -1962,24 +2003,30 @@ function renderPreLibBracket(){
   const finalHtml = p.final ? prelibTieCard(p.final,userTeam) : prelibTieCard(null);
 
   let footer;
-  if(p.phase==="eliminated"){
+  if(p.phase==="failed"){
     footer = `<div class="panel tac" style="padding:20px;">
-      <div class="bold" style="font-size:16px;margin-bottom:8px;">${esc(userTeam)} foi eliminado da Pré-Libertadores.</div>
-      <p class="dim small">Sua torcida não vai representar a Libertadores 2027 desta vez — mas você pode tentar de novo com outro time.</p>
-      <button class="btn btn-gold mt8" onclick="Game.retryPreLib()">🔁 Tentar novamente</button>
-      <button class="btn btn-ghost btn-sm mt8" onclick="Game.abandonPreLib()">Sair</button>
+      <div class="bold" style="font-size:16px;margin-bottom:8px;">${esc(userTeam)} não conseguiu a classificação em nenhuma das ${PRELIB_MAX_YEAR-PRELIB_START_YEAR+1} tentativas.</div>
+      <p class="dim small">A janela pra essa vaga se fechou. Você pode começar uma nova jornada, com qualquer time.</p>
+      <button class="btn btn-gold mt8" onclick="Game.goHome()">Voltar ao início</button>
+    </div>`;
+  } else if(p.phase==="eliminated"){
+    footer = `<div class="panel tac" style="padding:20px;">
+      <div class="bold" style="font-size:16px;margin-bottom:8px;">${esc(userTeam)} foi eliminado da Sul-Americana ${p.year}.</div>
+      <p class="dim small">Você continua no comando do ${esc(userTeam)} — a próxima chance é a Sul-Americana ${p.year+1}.</p>
+      <button class="btn btn-gold mt8" onclick="Game.retryPreLib()">🔁 Tentar novamente (${p.year+1})</button>
+      <button class="btn btn-ghost btn-sm mt8" onclick="Game.goHome()">Sair por agora</button>
     </div>`;
   } else {
     footer = `<div class="tac" style="padding:10px 0 24px;">
       <button class="btn btn-gold btn-lg" onclick="Game.advancePreLib()">▶ Avançar</button>
-      <div><button class="btn btn-ghost btn-sm mt8" onclick="Game.abandonPreLib()">Sair da Pré-Libertadores</button></div>
+      <div><button class="btn btn-ghost btn-sm mt8" onclick="Game.goHome()">Sair por agora</button></div>
     </div>`;
   }
 
   return `
   <div style="padding:22px 16px 0;max-width:900px;margin:0 auto;">
     <div class="tac" style="margin-bottom:6px;">
-      <div class="hero-badge" style="display:inline-flex;">🏆 PRÉ-LIBERTADORES</div>
+      <div class="hero-badge" style="display:inline-flex;">🏆 PRÉ-LIBERTADORES ${p.year}</div>
       <div class="dim small" style="margin-top:6px;">Torcendo por: <span class="bold" style="color:var(--gold,#D4AF37);">${esc(userTeam)}</span></div>
     </div>
     <div class="scroll-x" style="margin-top:18px;">
@@ -2000,14 +2047,14 @@ function renderPreLibChampion(){
   return `
   <div class="hero" style="min-height:80vh;">
     ${trophyImg(90,0.9)}
-    <div class="hero-badge" style="margin-top:10px;">🏆 CAMPEÃO DA PRÉ-LIBERTADORES</div>
+    <div class="hero-badge" style="margin-top:10px;">🏆 CAMPEÃO DA PRÉ-LIBERTADORES ${p.year}</div>
     <div style="margin:14px 0;">${crestSVG(t, 76)}</div>
     <h1 class="hero-title" style="font-size:clamp(28px,6vw,48px);">${esc(t)}</h1>
-    <p class="hero-sub">${esc(meta.flag)} ${esc(meta.country)} garantiu vaga direta na Libertadores 2027.</p>
+    <p class="hero-sub">${esc(meta.flag)} ${esc(meta.country)} garantiu vaga direta na Libertadores ${p.year+1}.</p>
     <p class="dim small" style="max-width:460px;">Como devemos chamar você, treinador(a)?</p>
     <input id="mgrNameInput" class="input-inline" style="max-width:320px;width:100%;padding:14px;font-size:16px;text-align:center;" placeholder="Seu nome" value="${esc(ST.tmpManagerNameInput||'')}" />
     <div class="mt24">
-      <button class="btn btn-gold btn-lg" onclick="Game.beginPreLibCareer()">Assinar contrato e começar a Libertadores 2027 →</button>
+      <button class="btn btn-gold btn-lg" onclick="Game.beginPreLibCareer()">Assinar contrato e começar a Libertadores ${p.year+1} →</button>
     </div>
   </div>`;
 }
@@ -3240,12 +3287,16 @@ const Game = {
   },
   goNewGame(){
     if(ST.teamId && ST.world){
-      ST.uiModal = {type:"confirm", message:"Você já tem uma carreira em andamento. Iniciar uma nova carreira vai apagar o progresso atual. Continuar?", action:"confirmNewGame"};
+      const msg = ST.prelib
+        ? "Você já tem uma tentativa de Pré-Libertadores em andamento. Iniciar algo novo agora vai apagar esse progresso. Continuar?"
+        : "Você já tem uma carreira em andamento. Iniciar uma nova carreira vai apagar o progresso atual. Continuar?";
+      ST.uiModal = {type:"confirm", message:msg, action:"confirmNewGame"};
       render();
       return;
     }
-    ST.tmpSelectedTeam=null; ST.tmpManagerNameInput=""; ST.stage="team_select"; render();
+    ST.stage="mode_select"; render();
   },
+  chooseNormalCareer(){ ST.tmpSelectedTeam=null; ST.tmpManagerNameInput=""; ST.stage="team_select"; render(); },
   pickTeam(name){ ST.tmpSelectedTeam=name; render(); },
   confirmTeam(){ if(!ST.tmpSelectedTeam) return; ST.stage="manager_name"; render(); },
   beginCareer(){
@@ -3254,16 +3305,16 @@ const Game = {
     startCareer(ST.tmpSelectedTeam, name || "Treinador");
     render();
   },
-  continueCareer(){ ST.stage="hub"; render(); },
-
-  goPreLib(){
-    if(ST.teamId && ST.world && !ST.prelib){
-      ST.uiModal = {type:"confirm", message:"Você já tem uma carreira em andamento. Jogar a Pré-Libertadores agora vai colocar essa carreira em pausa até o torneio terminar (nada é perdido). Continuar?", action:"confirmPreLib"};
+  continueCareer(){
+    if(ST.prelib){
+      ST.stage = ["match","penaltyShootout","prelib_champion"].includes(ST.stage) ? ST.stage : "prelib_bracket";
       render();
       return;
     }
-    ST.tmpPrelibTeam=null; ST.stage="prelib_select"; render();
+    ST.stage="hub"; render();
   },
+
+  goPreLib(){ ST.tmpPrelibTeam=null; ST.stage="prelib_select"; render(); },
   pickPreLibTeam(name){ ST.tmpPrelibTeam=name; render(); },
   confirmPreLibTeam(){
     if(!ST.tmpPrelibTeam) return;
@@ -3271,15 +3322,7 @@ const Game = {
     render();
   },
   advancePreLib(){ stepPreLib(); render(); },
-  retryPreLib(){ ST.tmpPrelibTeam=null; ST.prelib=null; ST.stage="prelib_select"; render(); },
-  exitPreLibToHome(){
-    if(ST._prelibDirty){ Game.abandonPreLib(); return; }
-    ST.stage="home"; render();
-  },
-  abandonPreLib(){
-    ST.uiModal = {type:"confirm", message:"Sair da Pré-Libertadores agora? O progresso deste torneio é perdido, mas sua carreira salva (se houver) continua intacta.", action:"confirmAbandonPreLib"};
-    render();
-  },
+  retryPreLib(){ retryPreLibSameTeam(); render(); },
   beginPreLibCareer(){
     const inputEl = document.getElementById("mgrNameInput");
     const name = inputEl ? inputEl.value.trim() : "";
@@ -3329,9 +3372,7 @@ const Game = {
     if(!m) { render(); return; }
     if(m.action==="quickSell") quickSell(m.payload);
     else if(m.action==="resetCareer") { resetCareer(); return; }
-    else if(m.action==="confirmNewGame") { ST.tmpSelectedTeam=null; ST.tmpManagerNameInput=""; ST.stage="team_select"; }
-    else if(m.action==="confirmPreLib") { ST.tmpPrelibTeam=null; ST.stage="prelib_select"; }
-    else if(m.action==="confirmAbandonPreLib") { abandonPreLibRestore(); return; }
+    else if(m.action==="confirmNewGame") { ST.stage="mode_select"; }
     render();
   },
   openBuyModal(playerId, team){ ST.uiModal={type:"buyOffer", playerId, team}; render(); },
