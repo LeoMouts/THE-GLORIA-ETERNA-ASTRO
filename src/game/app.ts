@@ -345,6 +345,7 @@ function finishPrelibMatch(tieId){
   const tie = currentPrelibTies().find(t=>t.id===tieId);
   if(!tie) { ST.stage = "prelib_bracket"; return; }
   if(tie.hs===tie.as){
+    tie.wentToPens = true;
     startShootout(tie.teamA, tie.teamB, {type:"prelibTie", tieId:tie.id});
     return;
   }
@@ -1292,6 +1293,7 @@ function advanceWithSpeed(speed){
 
 function finishPendingMatch(){
   const pm = ST.pendingMatch;
+  if(!pm) return; // guards against a stray double-invocation finding nothing left to finish
   const ctx = pm.context;
   ST.pendingMatch = null;
   if(String(ctx.type).indexOf("prelib_")===0){
