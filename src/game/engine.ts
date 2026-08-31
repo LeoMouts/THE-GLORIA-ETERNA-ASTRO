@@ -244,6 +244,20 @@ function simulateDetailedMatch(homeTeam, awayTeam, homeLineup, awayLineup, slots
   homeChanceMinutes.forEach(m => processChance(m, "home", homeLineup, awayLineup, attHome, defAway, gkOf(awayLineup)));
   awayChanceMinutes.forEach(m => processChance(m, "away", awayLineup, homeLineup, attAway, defHome, gkOf(homeLineup)));
 
+  // Penalties — rare, roughly matching real-world frequency. Left UNRESOLVED here on purpose:
+  // the caller resolves the kick live (interactive taker pick for the human side, an immediate
+  // auto-pick for the other) via resolvePenaltyKick, instead of the outcome being baked in
+  // before the player ever sees the match.
+  function rollPenalty(side, atkOvr, defOvr) {
+    const chance = clamp(0.07 + (atkOvr - defOvr) / 900, 0.03, 0.14);
+    if (rng() < chance) {
+      const minute = Math.floor(rng() * 90) + 1;
+      events.push({ minute, side, type: "penalty_pending" });
+    }
+  }
+  rollPenalty("home", attHome, defAway);
+  rollPenalty("away", attAway, defHome);
+
   // Cards
   function rollCards(side, lineup) {
     const n = lineup.filter(Boolean).length;
@@ -311,6 +325,44 @@ function simulateDetailedMatch(homeTeam, awayTeam, homeLineup, awayLineup, slots
     momentum: computeMomentum(events),
     momentumWave: buildMomentumWave(events, rng),
   };
+}
+
+// ---------------- Penalty kicks (mid-match "penalty_pending" events + full shootouts) ----------------
+const PENALTY_GOAL_FLAVORS = [
+  "{shooter} guarda a bola no canto direito — {gk} até tentou, mas não chegou. GOL!",
+  "Cavadinha! {gk} se atira e a bola passa por cima, bem no meio. Frieza total de {shooter}.",
+  "{shooter} manda no ângulo esquerdo, sem chance pra {gk}. Golaço!",
+  "Pancada seca no meio do gol — {gk} já tinha caído pro lado. GOL!",
+  "{shooter} espera {gk} se mexer primeiro e resolve no canto oposto. Categoria.",
+  "Sem dó: {shooter} bate forte embaixo, rasteira no cantinho. {gk} nem chega a tempo.",
+  "{shooter} não treme — bola no ângulo, {gk} só olha. GOL!",
+  "{shooter} bate colocado no canto esquerdo, quicando antes da linha. Inatingível.",
+];
+const PENALTY_MISS_FLAVORS = [
+  "{gk} lê a intenção, vai pro canto certo e faz a defesa!",
+  "{shooter} manda por cima do travessão! Perdeu a chance.",
+  "Na trave! {shooter} não acredita — a bola volta em campo.",
+  "{gk} espalma com os dois punhos — que defesa!",
+  "{shooter} bate no meio do gol, {gk} nem precisou se jogar pra segurar.",
+  "{gk} sai na cara do gol e fecha o ângulo — {shooter} não teve o que fazer.",
+  "Bola na lateral da rede! {shooter} bateu mal dessa vez.",
+  "{shooter} escorrega na hora da batida e manda a bola longe do gol.",
+];
+function fillPenaltyTemplate(tpl, shooterName, gkName) {
+  return tpl.replace(/\{shooter\}/g, shooterName).replace(/\{gk\}/g, gkName || "o goleiro");
+}
+// Resolves one penalty kick live — used for both a mid-match "penalty_pending" event and each
+// kick in a shootout. Real penalties are converted at a high rate (~75-80%); shooting skill vs
+// goalkeeping skill nudges that up or down, plus a flavor line naming both players.
+function resolvePenaltyKick(shooter, gkPlayer, rng) {
+  const shootSkill = shooter ? (shooter.sho || shooter.ovr) : 68;
+  const gkSkill = gkPlayer ? (gkPlayer.gk || gkPlayer.ovr) : 60;
+  const scoreChance = clamp(0.74 + (shootSkill - gkSkill) / 220, 0.55, 0.92);
+  const scored = rng() < scoreChance;
+  const tpl = choice(rng, scored ? PENALTY_GOAL_FLAVORS : PENALTY_MISS_FLAVORS);
+  const shooterName = shooter ? shooter.name : "O batedor";
+  const gkName = gkPlayer ? gkPlayer.name : null;
+  return { scored, flavor: fillPenaltyTemplate(tpl, shooterName, gkName) };
 }
 
 function computePossession(rA, rB){
@@ -487,4 +539,5 @@ export {
   bestAvailableXI, poisson,
   doubleRoundRobin, newStandingsRow, applyResultToStandings, sortedStandings,
   pairKnockout,
+  resolvePenaltyKick,
 };
