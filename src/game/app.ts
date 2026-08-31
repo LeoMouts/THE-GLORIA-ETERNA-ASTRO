@@ -309,7 +309,10 @@ function freshPrelibWorld(){
     if(maxId>nextIdCounter) nextIdCounter = maxId;
     teams[name] = { name:t.name, country:t.country, flag:t.flag, group:t.group, source:t.source, players };
   });
-  return { groups:{A:[],B:[],C:[],D:[],E:[],F:[],G:[],H:[]}, teams, globalMarket:[] };
+  GLOBAL_MARKET_SRC.forEach(p=>{ if(p.id>nextIdCounter) nextIdCounter=p.id; });
+  // full hub access (same as a real career) means a real transfer market too — buying reinforcements
+  // is one of the levers that makes the Sul-Americana actually winnable instead of a pure dice roll.
+  return { groups:{A:[],B:[],C:[],D:[],E:[],F:[],G:[],H:[]}, teams, globalMarket: GLOBAL_MARKET_SRC.map(p=>Object.assign({}, p)) };
 }
 
 function makePrelibTie(teamA, teamB, half, slot){
@@ -325,15 +328,23 @@ function currentPrelibTies(){
   return [];
 }
 
-function startPreLib(teamName){
+function startPreLib(teamName, managerName){
   ST.world = freshPrelibWorld();
   ST.teamId = teamName;
+  ST.managerName = managerName || "Treinador";
+  const tier = tierOf(ST.world, teamName);
+  ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tier];
+  ST.reputation = 50;
   ST.formation = ST.formation || "4-3-3";
   autoFillLineup();
   ST.competition = { scorers:{} }; // lightweight stub: only .scorers is touched by the reused match engine
   const qf = PRELIB_QF_PAIRS.map(pr=>makePrelibTie(pr.teamA, pr.teamB, pr.half, pr.slot));
   ST.prelib = { userTeam:teamName, year:PRELIB_START_YEAR, phase:"qf", qf, sf:null, final:null, champion:null };
-  ST.stage = "prelib_bracket";
+  // runs through the exact same hub used by a real career — Elenco, Transferências e Olheiro
+  // all work out of the box (they only ever touch ST.world/myTeam(), never ST.competition);
+  // only the Competição tab needs to know it's showing a bracket instead of groups.
+  ST.stage = "hub";
+  ST.hubTab = "competicao";
   scheduleSave();
 }
 
@@ -349,7 +360,7 @@ function retryPreLibSameTeam(){
   }));
   const qf = PRELIB_QF_PAIRS.map(pr=>makePrelibTie(pr.teamA, pr.teamB, pr.half, pr.slot));
   p.qf = qf; p.sf = null; p.final = null; p.champion = null; p.phase = "qf";
-  ST.stage = "prelib_bracket";
+  ST.stage = "hub"; ST.hubTab = "competicao";
   scheduleSave();
 }
 
@@ -384,14 +395,14 @@ function stepPreLib(){
 
 function finishPrelibMatch(tieId){
   const tie = currentPrelibTies().find(t=>t.id===tieId);
-  if(!tie) { ST.stage = "prelib_bracket"; return; }
+  if(!tie) { ST.stage = "hub"; ST.hubTab = "competicao"; return; }
   if(tie.hs===tie.as){
     tie.wentToPens = true;
     startShootout(tie.teamA, tie.teamB, {type:"prelibTie", tieId:tie.id});
     return;
   }
   tie.winner = tie.hs>tie.as ? tie.home : tie.away;
-  ST.stage = "prelib_bracket";
+  ST.stage = "hub"; ST.hubTab = "competicao";
   checkPrelibElimination();
 }
 
@@ -617,7 +628,7 @@ function newCareerState(){
 }
 
 // stages with no committed data yet — never worth resuming straight into these on reload.
-const PRECOMMIT_STAGES = new Set(["team_select","manager_name","mode_select","prelib_select"]);
+const PRECOMMIT_STAGES = new Set(["team_select","manager_name","mode_select","prelib_select","prelib_manager_name"]);
 async function initApp(){
   const loaded = await loadState();
   if(loaded && loaded.schemaVersion===SCHEMA_VERSION){
@@ -628,6 +639,9 @@ async function initApp(){
     if(!ST.teamId || !ST.world || PRECOMMIT_STAGES.has(ST.stage)){
       ST.stage = "home";
     }
+    // "prelib_bracket" was a standalone screen from an earlier build — the bracket now lives
+    // inside the normal hub's Competição tab, so an old save pointing at it just resumes there.
+    if(ST.stage==="prelib_bracket"){ ST.stage="hub"; ST.hubTab="competicao"; }
     recomputeIdCounter();
   } else if(loaded){
     // an older/incompatible save from a previous version of the game — cannot be
@@ -844,6 +858,7 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
 
 // -- advance the tournament by one step (called from "Avançar" button) --
 function advanceTournament(){
+  if(ST.prelib){ stepPreLib(); return; }
   const comp = ST.competition;
   if(comp.phase==="groups") advanceGroupsStep();
   else if(comp.phase==="r16"||comp.phase==="qf"||comp.phase==="sf") advanceKnockoutStep();
@@ -1090,7 +1105,7 @@ function applyShootoutResult(ctx, winner){
   } else if(ctx.type==="prelibTie"){
     const tie = currentPrelibTies().find(t=>t.id===ctx.tieId);
     if(tie) tie.winner = winner;
-    ST.stage = "prelib_bracket";
+    ST.stage = "hub"; ST.hubTab = "competicao";
     checkPrelibElimination();
   }
 }
@@ -1745,7 +1760,7 @@ function render(){
     else if(ST.stage==="career_over") html = renderCareerOver();
     else if(ST.stage==="penaltyShootout") html = renderPenaltyShootoutScreen();
     else if(ST.stage==="prelib_select") html = renderPreLibSelect();
-    else if(ST.stage==="prelib_bracket") html = renderPreLibBracket();
+    else if(ST.stage==="prelib_manager_name") html = renderPreLibManagerName();
     else if(ST.stage==="prelib_champion") html = renderPreLibChampion();
     else html = `<div class="empty-state">Estado desconhecido: ${esc(ST.stage)}</div>`;
     app.innerHTML = html + renderModal();
@@ -1980,13 +1995,30 @@ function renderPreLibSelect(){
   <div style="padding:26px 20px 10px;">
     <button class="btn btn-ghost btn-sm" onclick="Game.goHome()">← Voltar</button>
     <h2 class="panel-title" style="font-size:22px;margin-top:18px;">🏆 Pré-Libertadores</h2>
-    <p class="dim small">8 clubes da Sul-Americana disputam um mata-mata rápido (jogo único, com pênaltis em caso de empate). Escolha seu time do coração: se ele for campeão em ${PRELIB_START_YEAR}, assume a vaga do pior time da fase de grupos da Libertadores e você já começa a carreira em ${PRELIB_START_YEAR+1} no comando dele. Se não conseguir, você continua com esse mesmo time, tentando de novo no ano seguinte, até vencer.</p>
+    <p class="dim small">8 clubes da Sul-Americana disputam um mata-mata rápido (jogo único, com pênaltis em caso de empate). Escolha seu time do coração: se ele for campeão em ${PRELIB_START_YEAR}, assume a vaga do pior time da fase de grupos da Libertadores e você já começa a carreira em ${PRELIB_START_YEAR+1} no comando dele. Se não conseguir, você continua com esse mesmo time — com acesso total ao elenco, transferências e olheiro pra se reforçar — tentando de novo no ano seguinte, até vencer.</p>
     <div class="group-grid">${groupCards}</div>
   </div>
   <div style="position:sticky;bottom:0;background:linear-gradient(180deg,transparent,rgba(8,16,14,.97) 30%);padding:22px 20px 26px;text-align:center;">
     <button class="btn btn-gold btn-lg" ${sel?"":"disabled"} onclick="Game.confirmPreLibTeam()">
       ${sel? "Torcer pelo "+esc(sel)+" →" : "Selecione um time"}
     </button>
+  </div>`;
+}
+
+// ---------------- PRÉ-LIBERTADORES · NOME DO TREINADOR ----------------
+function renderPreLibManagerName(){
+  const t = ST.tmpPrelibTeam;
+  return `
+  <div class="hero" style="min-height:80vh;">
+    <div style="align-self:flex-start;margin-left:20px;"><button class="btn btn-ghost btn-sm" onclick="Game.goPreLib()">← Voltar</button></div>
+    <div style="margin-bottom:14px;">${crestSVG(t, 76)}</div>
+    <div class="hero-badge">🏆 PRÉ-LIBERTADORES ${PRELIB_START_YEAR}</div>
+    <h1 class="hero-title" style="font-size:clamp(30px,6vw,54px);">${esc(t)}</h1>
+    <p class="hero-sub">Como devemos chamar você, treinador(a)?</p>
+    <input id="mgrNameInput" class="input-inline" style="max-width:320px;width:100%;padding:14px;font-size:16px;text-align:center;" placeholder="Seu nome" value="${esc(ST.tmpManagerNameInput||'')}" />
+    <div class="mt24">
+      <button class="btn btn-gold btn-lg" onclick="Game.beginPreLibRun()">Assinar contrato e começar →</button>
+    </div>
   </div>`;
 }
 
@@ -2009,48 +2041,18 @@ function prelibTieCard(tie, userTeam){
   </div>`;
 }
 
-function renderPreLibBracket(){
-  const p = ST.prelib;
+// shared 3-column QF/SF/Final tree, reused by the Competição tab during a Pré-Libertadores run.
+function renderPreLibBracketColumns(p){
   const userTeam = p.userTeam;
   const qfHtml = p.qf.map(t=>prelibTieCard(t,userTeam)).join("");
   const sfHtml = p.sf ? p.sf.map(t=>prelibTieCard(t,userTeam)).join("") : [0,1].map(()=>prelibTieCard(null)).join("");
   const finalHtml = p.final ? prelibTieCard(p.final,userTeam) : prelibTieCard(null);
-
-  let footer;
-  if(p.phase==="failed"){
-    footer = `<div class="panel tac" style="padding:20px;">
-      <div class="bold" style="font-size:16px;margin-bottom:8px;">${esc(userTeam)} não conseguiu a classificação em nenhuma das ${PRELIB_MAX_YEAR-PRELIB_START_YEAR+1} tentativas.</div>
-      <p class="dim small">A janela pra essa vaga se fechou. Você pode começar uma nova jornada, com qualquer time.</p>
-      <button class="btn btn-gold mt8" onclick="Game.goHome()">Voltar ao início</button>
-    </div>`;
-  } else if(p.phase==="eliminated"){
-    footer = `<div class="panel tac" style="padding:20px;">
-      <div class="bold" style="font-size:16px;margin-bottom:8px;">${esc(userTeam)} foi eliminado da Sul-Americana ${p.year}.</div>
-      <p class="dim small">Você continua no comando do ${esc(userTeam)} — a próxima chance é a Sul-Americana ${p.year+1}.</p>
-      <button class="btn btn-gold mt8" onclick="Game.retryPreLib()">🔁 Tentar novamente (${p.year+1})</button>
-      <button class="btn btn-ghost btn-sm mt8" onclick="Game.goHome()">Sair por agora</button>
-    </div>`;
-  } else {
-    footer = `<div class="tac" style="padding:10px 0 24px;">
-      <button class="btn btn-gold btn-lg" onclick="Game.advancePreLib()">▶ Avançar</button>
-      <div><button class="btn btn-ghost btn-sm mt8" onclick="Game.goHome()">Sair por agora</button></div>
-    </div>`;
-  }
-
-  return `
-  <div style="padding:22px 16px 0;max-width:900px;margin:0 auto;">
-    <div class="tac" style="margin-bottom:6px;">
-      <div class="hero-badge" style="display:inline-flex;">🏆 PRÉ-LIBERTADORES ${p.year}</div>
-      <div class="dim small" style="margin-top:6px;">Torcendo por: <span class="bold" style="color:var(--gold,#D4AF37);">${esc(userTeam)}</span></div>
+  return `<div class="scroll-x">
+    <div style="display:flex;gap:18px;min-width:560px;">
+      <div style="flex:1;"><div class="panel-title tac" style="font-size:13px;">Quartas</div>${qfHtml}</div>
+      <div style="flex:1;align-self:center;"><div class="panel-title tac" style="font-size:13px;">Semifinal</div>${sfHtml}</div>
+      <div style="flex:1;align-self:center;"><div class="panel-title tac" style="font-size:13px;">Final</div>${finalHtml}</div>
     </div>
-    <div class="scroll-x" style="margin-top:18px;">
-      <div style="display:flex;gap:18px;min-width:640px;">
-        <div style="flex:1;"><div class="panel-title tac" style="font-size:13px;">Quartas</div>${qfHtml}</div>
-        <div style="flex:1;align-self:center;"><div class="panel-title tac" style="font-size:13px;">Semifinal</div>${sfHtml}</div>
-        <div style="flex:1;align-self:center;"><div class="panel-title tac" style="font-size:13px;">Final</div>${finalHtml}</div>
-      </div>
-    </div>
-    ${footer}
   </div>`;
 }
 
@@ -2064,9 +2066,7 @@ function renderPreLibChampion(){
     <div class="hero-badge" style="margin-top:10px;">🏆 CAMPEÃO DA PRÉ-LIBERTADORES ${p.year}</div>
     <div style="margin:14px 0;">${crestSVG(t, 76)}</div>
     <h1 class="hero-title" style="font-size:clamp(28px,6vw,48px);">${esc(t)}</h1>
-    <p class="hero-sub">${esc(meta.flag)} ${esc(meta.country)} garantiu vaga direta na Libertadores ${p.year+1}.</p>
-    <p class="dim small" style="max-width:460px;">Como devemos chamar você, treinador(a)?</p>
-    <input id="mgrNameInput" class="input-inline" style="max-width:320px;width:100%;padding:14px;font-size:16px;text-align:center;" placeholder="Seu nome" value="${esc(ST.tmpManagerNameInput||'')}" />
+    <p class="hero-sub">${esc(meta.flag)} ${esc(meta.country)} garantiu vaga direta na Libertadores ${p.year+1}, ${esc(ST.managerName)}!</p>
     <div class="mt24">
       <button class="btn btn-gold btn-lg" onclick="Game.beginPreLibCareer()">Assinar contrato e começar a Libertadores ${p.year+1} →</button>
     </div>
@@ -2084,7 +2084,7 @@ function renderHub(){
         <div class="club-badge" style="background:none;border:none;">${crestSVG(team.name, 40)}</div>
         <div>
           <div class="bold" style="font-size:15px;">${esc(team.name)}</div>
-          <div class="faint tiny">${team.flag} ${esc(team.country)} · Temporada ${ST.seasonYear} (${ST.seasonNum}/10)</div>
+          <div class="faint tiny">${team.flag} ${esc(team.country)} · ${ST.prelib ? `Pré-Libertadores ${ST.prelib.year}` : `Temporada ${ST.seasonYear} (${ST.seasonNum}/10)`}</div>
         </div>
       </div>
       <div class="stat-pill">${fmtMoney(ST.budget)}</div>
@@ -2120,7 +2120,16 @@ function tabBtn(id,label){
 function phaseLabel(phase){
   return {groups:"Fase de Grupos", r16:"Oitavas de Final", qf:"Quartas de Final", sf:"Semifinal", final:"Final", done:"Encerrada"}[phase]||phase;
 }
+function getNextUserPrelibMatch(){
+  const p = ST.prelib;
+  if(!p || p.phase==="done" || p.phase==="eliminated" || p.phase==="failed") return null;
+  const tie = currentPrelibTies().find(t=>t.teamA===p.userTeam || t.teamB===p.userTeam);
+  if(!tie || tie.played) return null;
+  const roundLabel = {qf:"Quartas de Final", sf:"Semifinal", final:"Final"}[p.phase] || p.phase;
+  return {home:tie.home, away:tie.away, label:`Pré-Libertadores ${p.year} · ${roundLabel} · Jogo único`};
+}
 function getNextUserMatch(){
+  if(ST.prelib) return getNextUserPrelibMatch();
   const comp = ST.competition;
   if(comp.phase==="groups"){
     const g = userGroup();
@@ -2165,9 +2174,40 @@ function renderNextMatchCard(){
     </div>
   </div>`;
 }
+// the Pré-Libertadores flavor of the Competição tab: same "próximo jogo" card and the same
+// Simulação Lenta / Ir para o Resultado buttons as a real career, just showing the knockout
+// bracket instead of a group table, plus whatever status the run is currently in.
+function renderPreLibCompeticaoTab(){
+  const p = ST.prelib;
+  const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
+  const bracketPanel = `<div class="panel"><div class="panel-title">🏆 Pré-Libertadores ${p.year}</div>${renderPreLibBracketColumns(p)}</div>`;
+
+  let statusPanel;
+  if(p.phase==="failed"){
+    statusPanel = `<div class="panel tac">
+      <div class="bold" style="font-size:15px;margin-bottom:8px;">${esc(p.userTeam)} não conseguiu a classificação em nenhuma das ${PRELIB_MAX_YEAR-PRELIB_START_YEAR+1} tentativas.</div>
+      <p class="dim small">A janela pra essa vaga se fechou. Comece uma nova jornada pelo menu inicial.</p>
+      <button class="btn btn-gold mt8" onclick="Game.goHome()">Voltar ao início</button>
+    </div>`;
+  } else if(p.phase==="eliminated"){
+    statusPanel = `<div class="panel tac">
+      <div class="bold" style="font-size:15px;margin-bottom:8px;">${esc(p.userTeam)} foi eliminado da Sul-Americana ${p.year}.</div>
+      <p class="dim small">Reforce o elenco em Transferências e tente de novo — a próxima chance é ${p.year+1}.</p>
+      <button class="btn btn-gold mt8" onclick="Game.retryPreLib()">🔁 Tentar novamente (${p.year+1})</button>
+    </div>`;
+  } else {
+    statusPanel = renderTopScorers();
+  }
+
+  const cells = matchCell
+    + `<div class="competicao-cell">${statusPanel}</div>`
+    + `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>`;
+  return `<div class="competicao-grid">${cells}</div>`;
+}
 // four distinct boxed panels, laid out 2×2 — mirrors the reference: match card,
 // standings, upcoming fixtures and top scorers each get their own separated card.
 function renderCompeticaoTab(){
+  if(ST.prelib) return renderPreLibCompeticaoTab();
   const comp = ST.competition;
   const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
   let cells;
@@ -3320,29 +3360,21 @@ const Game = {
     render();
   },
   continueCareer(){
-    if(ST.prelib){
-      ST.stage = ["match","penaltyShootout","prelib_champion"].includes(ST.stage) ? ST.stage : "prelib_bracket";
-      render();
-      return;
-    }
-    ST.stage="hub"; render();
+    ST.stage = ["match","penaltyShootout","prelib_champion"].includes(ST.stage) ? ST.stage : "hub";
+    render();
   },
 
   goPreLib(){ ST.tmpPrelibTeam=null; ST.stage="prelib_select"; render(); },
   pickPreLibTeam(name){ ST.tmpPrelibTeam=name; render(); },
-  confirmPreLibTeam(){
-    if(!ST.tmpPrelibTeam) return;
-    startPreLib(ST.tmpPrelibTeam);
-    render();
-  },
-  advancePreLib(){ stepPreLib(); render(); },
-  retryPreLib(){ retryPreLibSameTeam(); render(); },
-  beginPreLibCareer(){
+  confirmPreLibTeam(){ if(!ST.tmpPrelibTeam) return; ST.stage="prelib_manager_name"; render(); },
+  beginPreLibRun(){
     const inputEl = document.getElementById("mgrNameInput");
     const name = inputEl ? inputEl.value.trim() : "";
-    crownPreLibChampion(name || "Treinador");
+    startPreLib(ST.tmpPrelibTeam, name || "Treinador");
     render();
   },
+  retryPreLib(){ retryPreLibSameTeam(); render(); },
+  beginPreLibCareer(){ crownPreLibChampion(ST.managerName); render(); },
 
   setTab(id){ ST.hubTab=id; render(); },
   advance(){ advanceTournament(); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
