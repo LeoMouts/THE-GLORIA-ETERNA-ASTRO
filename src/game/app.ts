@@ -1183,6 +1183,22 @@ function ageWorld(){
     });
     team.players = newPlayers;
   });
+  // players outside the Libertadores (the global market pool — foreign clubs like Barcelona,
+  // Real Madrid etc.) never play a competition of their own in this game, but they still need
+  // to develop under the EXACT same rules as everyone else. Without this, a real wonderkid
+  // sitting in that pool stays frozen at his starting OVR forever while our own prospects
+  // (correctly) grow toward their potential every season — so a lesser talent we develop
+  // ends up passing a far bigger one who simply never ages in-game.
+  if(ST.world.globalMarket && ST.world.globalMarket.length){
+    const survivors = [];
+    ST.world.globalMarket.forEach(p=>{
+      const retireChance = p.age>=35 ? (p.age-34)*0.16 : 0;
+      if(p.age>=40 || rng()<retireChance) return; // retires out of the market, same as everyone else
+      E.ageOnePlayer(p, rng);
+      survivors.push(p);
+    });
+    ST.world.globalMarket = survivors;
+  }
 }
 
 function buildJobOffers(kind){
