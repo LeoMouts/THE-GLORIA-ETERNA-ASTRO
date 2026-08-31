@@ -188,11 +188,25 @@ function cornerWatermarks(){
 
 
 // ---------- storage shim (works with real window.storage or a memory fallback for testing) ----------
+// falls back to localStorage (durable across reloads/tab closes in this browser) when no
+// window.storage bridge is present — a pure in-memory object here would silently lose every
+// save the instant the page reloads, which is exactly the scenario "carreira salva" promises to survive.
 const memStore = {};
+let lsOk = true;
+try{ const t="__ls_test__"; window.localStorage.setItem(t,"1"); window.localStorage.removeItem(t); }catch(e){ lsOk=false; }
 const STORE = (window.storage) ? window.storage : {
-  async get(k){ return (k in memStore) ? {key:k, value:memStore[k]} : null; },
-  async set(k,v){ memStore[k]=v; return {key:k,value:v}; },
-  async delete(k){ delete memStore[k]; return {key:k,deleted:true}; },
+  async get(k){
+    if(lsOk){ try{ const v=window.localStorage.getItem(k); return v==null?null:{key:k,value:v}; }catch(e){} }
+    return (k in memStore) ? {key:k, value:memStore[k]} : null;
+  },
+  async set(k,v){
+    if(lsOk){ try{ window.localStorage.setItem(k,v); return {key:k,value:v}; }catch(e){} }
+    memStore[k]=v; return {key:k,value:v};
+  },
+  async delete(k){
+    if(lsOk){ try{ window.localStorage.removeItem(k); }catch(e){} }
+    delete memStore[k]; return {key:k,deleted:true};
+  },
 };
 
 const SAVE_KEY = "libertadores_career_v1";
