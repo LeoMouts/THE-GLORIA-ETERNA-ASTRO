@@ -713,16 +713,28 @@ function finishKnockoutLeg(){
   }
   // both legs done -> resolve ties
   const rng = E.makeRNG(nextSeed());
+  let drawnUserTie = null;
   round.ties.forEach(tie=>{
     const l1=tie.legs[0], l2=tie.legs[1];
     // leg1: home=teamB(runner) away=teamA(winner) ; leg2: home=teamA away=teamB
     const aggA = l1.as + l2.hs; // teamA goals across both legs
     const aggB = l1.hs + l2.as; // teamB goals across both legs
     tie.aggA=aggA; tie.aggB=aggB;
+    const isUserTie = tie.teamA===ST.teamId || tie.teamB===ST.teamId;
     if(aggA>aggB) tie.winner=tie.teamA;
     else if(aggB>aggA) tie.winner=tie.teamB;
-    else { tie.wentToPens=true; tie.winner = rng()<0.5?tie.teamA:tie.teamB; }
+    else if(isUserTie){
+      // resolved once the interactive shootout below finishes, not here
+      tie.wentToPens = true;
+      drawnUserTie = tie;
+    } else {
+      tie.wentToPens=true; tie.winner = rng()<0.5?tie.teamA:tie.teamB;
+    }
   });
+  if(drawnUserTie){
+    startShootout(drawnUserTie.teamA, drawnUserTie.teamB, {type:"knockoutTie", tieId:drawnUserTie.id});
+    return;
+  }
   const comp = ST.competition;
   const userTie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
   if(userTie && userTie.winner!==ST.teamId && !comp.userEliminated){
@@ -732,6 +744,95 @@ function finishKnockoutLeg(){
     return;
   }
   progressBracket();
+}
+
+// ============================================================
+// PENALTY SHOOTOUT — interactive, animated, name-by-name reveal
+// ============================================================
+// best takers first (by shooting skill), goalkeeper never in the rotation; cycles back through
+// the outfield order if a shootout somehow runs past everyone once (extended sudden death).
+function pickShootoutOrder(lineup, teamObj){
+  const pool = (lineup && lineup.length ? lineup : teamObj.players).filter(Boolean);
+  const gk = pool.find(p=>p.pos==="GK") || teamObj.players.find(p=>p.pos==="GK");
+  const outfield = pool.filter(p=>p.pos!=="GK");
+  const sorted = outfield.slice().sort((a,b)=>(b.sho||b.ovr)-(a.sho||a.ovr));
+  return { gk, kickers: sorted.length ? sorted : (gk?[gk]:[]) };
+}
+function buildShootoutKick(team, shooter, gkPlayer, rng){
+  const {scored, flavor} = E.resolvePenaltyKick(shooter, gkPlayer, rng);
+  return { team, playerId: shooter?shooter.id:null, name: shooter?shooter.name:"—", scored, flavor };
+}
+// standard shootout stopping rule: in the first 5 rounds, stop as soon as the trailing side
+// can no longer catch up even if they score every remaining kick; after 5-5, sudden death ends
+// the instant the two sides' tallies differ with equal kicks taken.
+function shootoutDecided(s){
+  const kicksA = s.kicks.slice(0, s.revealIdx+1).filter(k=>k.team==="A").length;
+  const kicksB = s.kicks.slice(0, s.revealIdx+1).filter(k=>k.team==="B").length;
+  if(kicksA<5 || kicksB<5){
+    const remA = 5-kicksA, remB = 5-kicksB;
+    if(s.scoreA > s.scoreB + remB) return true;
+    if(s.scoreB > s.scoreA + remA) return true;
+    return false;
+  }
+  if(kicksA===kicksB && s.scoreA!==s.scoreB) return true;
+  return false;
+}
+// kicks off an interactive shootout screen — pass what to do once it resolves via resolveCtx
+// ({type:"knockoutTie", tieId} or {type:"final"}).
+function startShootout(teamAName, teamBName, resolveCtx){
+  const rng = E.makeRNG(nextSeed());
+  const teamAObj = ST.world.teams[teamAName];
+  const teamBObj = ST.world.teams[teamBName];
+  function lineupFor(teamObj, teamName){
+    if(teamName===ST.teamId) return lineupPlayers().filter(Boolean);
+    return E.bestAvailableXI(teamObj, "4-3-3").lineup.filter(Boolean);
+  }
+  const orderA = pickShootoutOrder(lineupFor(teamAObj, teamAName), teamAObj);
+  const orderB = pickShootoutOrder(lineupFor(teamBObj, teamBName), teamBObj);
+
+  const kicks = [];
+  const ROUNDS = 15; // far more than any realistic shootout needs
+  for(let r=0;r<ROUNDS;r++){
+    const shooterA = orderA.kickers.length ? orderA.kickers[r % orderA.kickers.length] : null;
+    const shooterB = orderB.kickers.length ? orderB.kickers[r % orderB.kickers.length] : null;
+    kicks.push(buildShootoutKick("A", shooterA, orderB.gk, rng));
+    kicks.push(buildShootoutKick("B", shooterB, orderA.gk, rng));
+  }
+
+  ST.penaltyShootout = {
+    teamAName, teamBName, kicks,
+    revealIdx: 0, nameShown: [], resultShown: [],
+    scoreA: 0, scoreB: 0,
+    phase: "kicking",
+    resolveCtx,
+  };
+  ST.stage = "penaltyShootout";
+  ST.uiModal = null;
+  setTimeout(()=>{ Game.tickShootout(); }, 700);
+}
+// applies the shootout's winner into the actual tie/final it was resolving, then continues
+// exactly the flow that would have run if the score had never been level.
+function applyShootoutResult(ctx, winner){
+  if(ctx.type==="knockoutTie"){
+    const round = currentKnockoutRound();
+    const tie = round.ties.find(t=>t.id===ctx.tieId);
+    if(tie) tie.winner = winner;
+    const comp = ST.competition;
+    const userTie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    if(userTie && userTie.winner!==ST.teamId && !comp.userEliminated){
+      comp.userEliminated = true;
+      comp.placementReached = stageLabelFor(comp.phase);
+      autoFinishRest();
+      return;
+    }
+    progressBracket();
+  } else if(ctx.type==="final"){
+    ST.competition.phase = "done";
+    ST.competition.placementReached = winner===ST.teamId ? "Campeão" : "Vice-campeão";
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    endOfSeason();
+  }
 }
 
 // fixed-slot bracket advancement: round-robin adjacency within each half so the
@@ -865,8 +966,10 @@ function simulatePendingMatch(){
   const oppXI = E.bestAvailableXI(ST.world.teams[oppName], "4-3-3");
   const homeXI = userIsHome ? myXI : oppXI;
   const awayXI = userIsHome ? oppXI : myXI;
-  const result = E.simulateDetailedMatch(ST.world.teams[home], ST.world.teams[away], homeXI.lineup, awayXI.lineup, homeXI.slots, {seed:nextSeed()}, awayXI.slots);
+  const seed = nextSeed();
+  const result = E.simulateDetailedMatch(ST.world.teams[home], ST.world.teams[away], homeXI.lineup, awayXI.lineup, homeXI.slots, {seed}, awayXI.slots);
   pm.result = result;
+  pm.seed = seed;
   pm.ref.hs = result.homeScore;
   pm.ref.as = result.awayScore;
   pm.ref.played = true;
@@ -879,6 +982,71 @@ function simulatePendingMatch(){
   ST.matchAnimIdx = 0;
 }
 
+// a stable-but-cosmetic "energia" reading for the penalty-taker picker — deterministic per
+// player+match (so it doesn't jump around on re-render) without a full stamina system.
+function pseudoFatigue(playerId, seed){
+  const h = Math.abs(hashStr(playerId+"_"+(seed||0)));
+  return 60 + (h % 41); // 60-100%
+}
+
+// Resolves one "penalty_pending" event in place — turns it into a real goal/miss event with a
+// flavor line, updates the live score, and feeds the scorer tally. Pass a playerId to let the
+// user's own pick take the kick; pass null/undefined for an auto-picked (weighted) taker, used
+// for the opponent's penalties and for fast-forwarding through the match.
+function resolvePendingPenaltyEvent(pm, idx, takerPlayerId){
+  const ev = pm.result.events[idx];
+  if(!ev || ev.type!=="penalty_pending") return null;
+  const isHomeSide = ev.side==="home";
+  const atkTeamName = isHomeSide ? pm.ref.home : pm.ref.away;
+  const defTeamName = isHomeSide ? pm.ref.away : pm.ref.home;
+  const atkLineupLite = isHomeSide ? pm.homeLineup : pm.awayLineup;
+  const atkSlots = isHomeSide ? pm.homeSlots : pm.awaySlots;
+  const defLineupLite = isHomeSide ? pm.awayLineup : pm.homeLineup;
+  const defSlots = isHomeSide ? pm.awaySlots : pm.homeSlots;
+
+  const rng = E.makeRNG(nextSeed());
+  let shooter = null;
+  if(takerPlayerId){
+    shooter = playerById(atkTeamName, Number(takerPlayerId));
+  }
+  if(!shooter){
+    const candidates = atkLineupLite
+      .map((p,i)=> p && atkSlots[i]!=="GK" ? playerById(atkTeamName, p.id) : null)
+      .filter(Boolean);
+    if(candidates.length) shooter = E.weightedChoice(rng, candidates, p=>Math.pow(1.03, p.sho||p.ovr));
+  }
+  const gkIdx = defSlots.indexOf("GK");
+  const gkLite = gkIdx>=0 ? defLineupLite[gkIdx] : null;
+  const gkPlayer = gkLite ? playerById(defTeamName, gkLite.id) : null;
+
+  const {scored, flavor} = E.resolvePenaltyKick(shooter, gkPlayer, rng);
+
+  ev.type = scored ? "goal" : "miss";
+  ev.player = shooter ? shooter.name : "Cobrador";
+  ev.penalty = true;
+  ev.flavor = flavor;
+  ev.assist = null;
+
+  if(scored){
+    pm.result.stats[ev.side].goals++;
+    if(shooter) addScorerGoal(atkTeamName, shooter.id);
+  }
+  pm.result.homeScore = pm.result.stats.home.goals;
+  pm.result.awayScore = pm.result.stats.away.goals;
+  pm.ref.hs = pm.result.homeScore;
+  pm.ref.as = pm.result.awayScore;
+
+  return { scored, flavor, playerName: ev.player };
+}
+// fast-forward safety net: any penalty still unresolved when the match is skipped/instantly
+// finished gets auto-resolved (never left dangling as an uncounted goal).
+function resolveAllPendingPenalties(pm){
+  if(!pm || !pm.result) return;
+  pm.result.events.forEach((ev,idx)=>{
+    if(ev.type==="penalty_pending") resolvePendingPenaltyEvent(pm, idx, null);
+  });
+}
+
 // used by the "Próximo Jogo" card on the Competição tab: resolves the round's other
 // fixtures, then immediately simulates the user's own match at the chosen pace —
 // "slow" reveals the event ticker live, "fast" jumps straight to the final result.
@@ -887,6 +1055,7 @@ function advanceWithSpeed(speed){
   if(ST.stage==="match" && ST.pendingMatch && !ST.pendingMatch.result){
     simulatePendingMatch();
     if(speed==="fast"){
+      resolveAllPendingPenalties(ST.pendingMatch);
       ST.matchAnimIdx = ST.pendingMatch.result.events.length;
     }
   }
@@ -902,6 +1071,12 @@ function finishPendingMatch(){
     finishGroupRound();
   } else if(ctx.type==="final"){
     const f = ST.competition.knockout.final;
+    if(f.hs===f.as){
+      // a level final goes to penalties too — previously this silently defaulted to the away
+      // team, which was a real bug as well as skipping the whole shootout experience.
+      startShootout(f.home, f.away, {type:"final"});
+      return;
+    }
     ST.competition.phase="done";
     ST.competition.placementReached = (f.hs>f.as ? f.home : f.away)===ST.teamId ? "Campeão" : "Vice-campeão";
     endOfSeason();
@@ -1277,12 +1452,30 @@ function render(){
     else if(ST.stage==="season_end") html = renderSeasonEndScreen();
     else if(ST.stage==="job_offers") html = renderJobOffers();
     else if(ST.stage==="career_over") html = renderCareerOver();
+    else if(ST.stage==="penaltyShootout") html = renderPenaltyShootoutScreen();
     else html = `<div class="empty-state">Estado desconhecido: ${esc(ST.stage)}</div>`;
     app.innerHTML = html + renderModal();
     const tickerEl = document.getElementById("ticker");
     if(tickerEl) tickerEl.scrollTop = tickerEl.scrollHeight;
     if(ST && ST.stage==="match" && ST.pendingMatch && ST.pendingMatch.result && !matchAnimDone()){
-      tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, 620);
+      const pm = ST.pendingMatch;
+      const nextEvent = pm.result.events[ST.matchAnimIdx];
+      if(nextEvent && nextEvent.type==="penalty_pending"){
+        const atkTeam = nextEvent.side==="home" ? pm.ref.home : pm.ref.away;
+        if(atkTeam===ST.teamId){
+          // the user's own penalty — pause the ticker and let them pick the taker
+          if(!ST.uiModal || ST.uiModal.type!=="penaltyPicker"){
+            ST.uiModal = {type:"penaltyPicker", eventIndex: ST.matchAnimIdx};
+            tickTimer = setTimeout(()=>{ render(); }, 0); // re-render once more so the modal paints
+          }
+        } else {
+          // the opponent's penalty — resolve it live but without pausing for input
+          resolvePendingPenaltyEvent(pm, ST.matchAnimIdx, null);
+          tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, 900);
+        }
+      } else {
+        tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, 620);
+      }
     }
   }catch(err){
     console.error("Render error, offering recovery:", err);
@@ -2090,7 +2283,7 @@ function renderScoutTab(){
 }
 
 // ---------------- MATCH DAY ----------------
-const EVENT_ICON = { goal:"⚽", miss:"🚫", save:"🧤", block:"🛑", yellow:"🟨", red:"🟥", injury:"🚑" };
+const EVENT_ICON = { goal:"⚽", miss:"🚫", save:"🧤", block:"🛑", yellow:"🟨", red:"🟥", injury:"🚑", penalty_pending:"🎯" };
 function renderMomentumWave(wave, homeName, awayName, uptoMinute){
   if(!wave) return "";
   const W = 400, H = 130, midY = H/2, amp = 50;
@@ -2127,6 +2320,10 @@ function renderMomentumWave(wave, homeName, awayName, uptoMinute){
 }
 function eventText(ev, homeName, awayName){
   const team = ev.side==="home"?homeName:awayName;
+  if(ev.penalty){
+    const verb = ev.type==="goal" ? "GOL DE PÊNALTI!" : "PÊNALTI PERDIDO!";
+    return `<b>${verb}</b> ${esc(ev.flavor||ev.player)} — ${esc(team)}`;
+  }
   switch(ev.type){
     case "goal": return `<b>GOL!</b> ${esc(ev.player)} balança as redes${ev.assist?` (assistência de ${esc(ev.assist)})`:''} — ${esc(team)}`;
     case "miss": return `${esc(ev.player)} chuta para fora`;
@@ -2135,6 +2332,7 @@ function eventText(ev, homeName, awayName){
     case "yellow": return `Cartão amarelo para ${esc(ev.player)} (${esc(team)})`;
     case "red": return `<b>CARTÃO VERMELHO!</b> ${esc(ev.player)} é expulso (${esc(team)})`;
     case "injury": return `${esc(ev.player)} sente lesão e sai de campo (fora por ${ev.matchesOut} jogo(s))`;
+    case "penalty_pending": return `Pênalti será cobrado por ${esc(team)}...`;
     default: return esc(ev.type);
   }
 }
@@ -2249,7 +2447,7 @@ function renderMatch(){
     <div class="ticker" id="ticker">
       ${visibleEvents.length===0?`<div class="tick-row"><span class="dim">Bola rolando...</span></div>`:""}
       ${visibleEvents.map(ev=>`<div class="tick-row ${ev.type==='goal'?'goal':''}">
-        <span class="tick-min">${ev.minute}'</span><span class="tick-icon">${EVENT_ICON[ev.type]||"•"}</span>
+        <span class="tick-min">${ev.minute}'</span><span class="tick-icon">${ev.penalty?"🎯":(EVENT_ICON[ev.type]||"•")}</span>
         <span>${eventText(ev, home, away)}</span>
       </div>`).join("")}
     </div>
@@ -2272,6 +2470,58 @@ function renderMatch(){
         <div class="lineup-col-title tac">${esc(away)}</div>
         ${awayLineupList}
       </div>
+    </div>
+  </div>`;
+}
+
+// two-column, name-by-name shootout reveal: kickers alternate A/B, each row's name appears
+// first and — after the reveal pause — a green GOL or red ERROU lands next to it.
+function renderPenaltyShootoutScreen(){
+  const s = ST.penaltyShootout;
+  if(!s) return renderHub();
+  const teamA = s.teamAName, teamB = s.teamBName;
+  const maxRounds = Math.ceil((s.revealIdx+1)/2);
+  function rowFor(idx){
+    if(idx>=s.kicks.length || !s.nameShown[idx]) return `<div class="pen-shoot-row empty"></div>`;
+    const k = s.kicks[idx];
+    const shown = s.resultShown[idx];
+    return `<div class="pen-shoot-row">
+      <span class="pen-shoot-name">${esc(k.name)}</span>
+      <span class="pen-shoot-result ${shown?(k.scored?'goal':'miss'):'pending'}">${shown?(k.scored?'GOL':'ERROU'):'···'}</span>
+    </div>`;
+  }
+  let bodyRows = "";
+  for(let r=0;r<maxRounds;r++){
+    bodyRows += `<div class="pen-shoot-round">
+      <div class="pen-shoot-side">${rowFor(r*2)}</div>
+      <div class="pen-shoot-side right">${rowFor(r*2+1)}</div>
+    </div>`;
+  }
+  const done = s.phase==="done";
+  const curKick = s.kicks[s.revealIdx];
+  const statusText = done
+    ? `${esc(s.scoreA>s.scoreB?teamA:teamB)} vence a disputa de pênaltis!`
+    : (curKick && s.nameShown[s.revealIdx] && !s.resultShown[s.revealIdx] ? `${esc(curKick.name)} vai para a cobrança...` : `Preparando a próxima cobrança...`);
+  return `<div class="hero pen-shoot-screen" style="min-height:88vh;">
+    <div class="hero-badge">DISPUTA DE PÊNALTIS</div>
+    <div class="pen-shoot-scoreboard">
+      <div class="pen-shoot-team">
+        <span class="match-crest">${crestSVG(teamA,44)}</span>
+        <div class="bold">${esc(teamA)}</div>
+      </div>
+      <div class="score-num">${s.scoreA} - ${s.scoreB}</div>
+      <div class="pen-shoot-team">
+        <span class="match-crest">${crestSVG(teamB,44)}</span>
+        <div class="bold">${esc(teamB)}</div>
+      </div>
+    </div>
+    <div class="pen-shoot-status ${done?'gold bold':''}">${statusText}</div>
+    <div class="pen-shoot-list">
+      <div class="pen-shoot-round pen-shoot-header-row">
+        <div class="pen-shoot-side"><span class="faint tiny uc">${esc(teamA)}</span></div>
+        <div class="pen-shoot-side right"><span class="faint tiny uc">${esc(teamB)}</span></div>
+      </div>
+      ${bodyRows}
     </div>
   </div>`;
 }
@@ -2306,6 +2556,51 @@ function renderSquadCentralModal(){
     </div>
   </div>`;
 }
+// mid-match penalty — pauses the ticker on the user's own award and lets them pick who takes
+// it, showing overall and a stable-per-match "energia" (fatigue) reading per candidate.
+function renderPenaltyPickerModal(m){
+  const pm = ST.pendingMatch;
+  const ev = pm.result.events[m.eventIndex];
+  const isHomeSide = ev.side==="home";
+  const atkTeamName = isHomeSide ? pm.ref.home : pm.ref.away;
+  const atkLineupLite = isHomeSide ? pm.homeLineup : pm.awayLineup;
+  const atkSlots = isHomeSide ? pm.homeSlots : pm.awaySlots;
+  const candidates = atkLineupLite.map((lp,i)=>{
+    if(!lp || atkSlots[i]==="GK") return null;
+    const p = playerById(atkTeamName, lp.id);
+    return p ? {p, slot:atkSlots[i]} : null;
+  }).filter(Boolean).sort((a,b)=>b.p.ovr-a.p.ovr);
+  const rows = candidates.map(({p,slot})=>{
+    const fatigue = pseudoFatigue(p.id, pm.seed);
+    return `<div class="pen-pick-row" onclick="Game.takePenalty(${p.id})">
+      <span class="badge badge-pos">${slot}</span>
+      <span class="bold pen-pick-name">${esc(p.name)}</span>
+      <span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span>
+      <span class="pen-pick-fatigue">
+        <span class="faint tiny">Energia ${fatigue}%</span>
+        <div class="rep-bar-wrap"><div class="pen-pick-fatigue-fill" style="width:${fatigue}%;"></div></div>
+      </span>
+      <button class="btn btn-sm btn-gold">Bater</button>
+    </div>`;
+  }).join("");
+  return `<div class="modal-backdrop">
+    <div class="modal modal-wide pen-pick-modal">
+      <div class="hero-badge" style="margin:0 auto 10px;">PÊNALTI!</div>
+      <div class="panel-title" style="margin:0 0 12px;text-align:center;">Escolha o batedor — ${esc(atkTeamName)}</div>
+      <div class="pen-pick-list">${rows}</div>
+    </div>
+  </div>`;
+}
+// the outcome reveal for a mid-match penalty — same "written phrase" celebration language as
+// the shootout, just for a single kick.
+function renderPenaltyResultModal(m){
+  return `<div class="modal-backdrop">
+    <div class="contract-doc contract-doc-signing">
+      <div class="contract-sign-title ${m.scored?'green':'red'}">${m.scored?'GOL!':'PERDEU!'}</div>
+      <p class="pen-result-flavor">${esc(m.flavor)}</p>
+    </div>
+  </div>`;
+}
 // ---------------- MODAL ----------------
 function renderModal(){
   const m = ST.uiModal;
@@ -2316,6 +2611,8 @@ function renderModal(){
   if(m.type==="confirm") return renderConfirmModal(m);
   if(m.type==="incomingOffer") return renderIncomingOfferModal(m);
   if(m.type==="squadCentral") return renderSquadCentralModal();
+  if(m.type==="penaltyPicker") return renderPenaltyPickerModal(m);
+  if(m.type==="penaltyResult") return renderPenaltyResultModal(m);
   return "";
 }
 function renderIncomingOfferModal(m){
@@ -2703,8 +3000,67 @@ const Game = {
   generateScout(){ generateScoutReport(); render(); },
 
   simulateMatch(){ simulatePendingMatch(); render(); },
-  skipMatch(){ ST.matchAnimIdx = ST.pendingMatch.result.events.length; render(); },
+  skipMatch(){
+    resolveAllPendingPenalties(ST.pendingMatch);
+    ST.uiModal = null;
+    ST.matchAnimIdx = ST.pendingMatch.result.events.length;
+    render();
+  },
+  takePenalty(playerId){
+    const pm = ST.pendingMatch;
+    const m = ST.uiModal;
+    if(!pm || !m || m.type!=="penaltyPicker") return;
+    const outcome = resolvePendingPenaltyEvent(pm, m.eventIndex, Number(playerId));
+    if(!outcome) return;
+    const eventIndex = m.eventIndex;
+    ST.uiModal = {type:"penaltyResult", scored:outcome.scored, flavor:outcome.flavor, playerName:outcome.playerName};
+    scheduleSave();
+    render();
+    setTimeout(()=>{
+      if(ST.uiModal && ST.uiModal.type==="penaltyResult"){
+        ST.uiModal = null;
+        ST.matchAnimIdx = eventIndex + 1;
+        render();
+      }
+    }, 2600);
+  },
   continueAfterMatch(){ finishPendingMatch(); render(); },
+
+  // drives the penalty-shootout reveal, one beat at a time: name first, then (after a pause)
+  // the result — exactly like a real shootout broadcast graphic.
+  tickShootout(){
+    const s = ST.penaltyShootout;
+    if(!s || s.phase!=="kicking") return;
+    const i = s.revealIdx;
+    if(!s.nameShown[i]){
+      s.nameShown[i] = true;
+      render();
+      setTimeout(()=>Game.tickShootout(), 2000);
+      return;
+    }
+    if(!s.resultShown[i]){
+      s.resultShown[i] = true;
+      const k = s.kicks[i];
+      if(k.scored){ if(k.team==="A") s.scoreA++; else s.scoreB++; }
+      render();
+      if(shootoutDecided(s)){
+        s.phase = "done";
+        setTimeout(()=>Game.finishShootout(), 2400);
+      } else {
+        setTimeout(()=>{ s.revealIdx++; Game.tickShootout(); }, 1300);
+      }
+    }
+  },
+  finishShootout(){
+    const s = ST.penaltyShootout;
+    if(!s) return;
+    const winner = s.scoreA>s.scoreB ? s.teamAName : s.teamBName;
+    const ctx = s.resolveCtx;
+    ST.penaltyShootout = null;
+    applyShootoutResult(ctx, winner);
+    scheduleSave();
+    render();
+  },
 
   showNews(){ ST.uiModal={type:"news"}; render(); },
   continueSeason(){ continueFromSeasonEnd(); maybeIncomingOffer(0.30); render(); },
