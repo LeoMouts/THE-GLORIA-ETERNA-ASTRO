@@ -295,10 +295,11 @@ const PRELIB_QF_PAIRS = [
   {half:1, slot:1, teamA:"São Paulo", teamB:"Atlético Mineiro"},
 ];
 // the player is stuck with whichever team they pick — a failed campaign doesn't send them back
-// to team select, it just rolls the Sul-Americana forward a year for another shot. This caps
-// how many years they can keep trying before the window closes for good.
+// to team select, it just rolls the Sul-Americana forward a year for another shot. Two attempts
+// total: if the second one also falls short, the run doesn't dead-end — the team's Campeonato
+// Nacional form is judged strong enough to earn the same Libertadores slot a different way.
 const PRELIB_START_YEAR = 2026;
-const PRELIB_MAX_YEAR = 2035; // 10 attempts total (2026..2035)
+const PRELIB_MAX_YEAR = PRELIB_START_YEAR + 1; // 2 attempts total (2026, 2027)
 
 function freshPrelibWorld(){
   const teams = {};
@@ -355,9 +356,10 @@ function retryPreLibSameTeam(){
   const p = ST.prelib;
   if(!p || p.phase!=="eliminated") return;
   p.year += 1;
-  Object.values(ST.world.teams).forEach(t=>t.players.forEach(pl=>{
-    pl.injured=false; pl.suspended=false; pl.form=0; pl.suspendedMatches=0; pl.injuredMatches=0;
-  }));
+  // a full year passes — squads age, develop toward potential, and (rarely) retire into a
+  // fresh youth prospect, exactly like a real season; this also clears the injuries/suspensions
+  // /form left over from the last attempt.
+  ageWorld();
   const qf = PRELIB_QF_PAIRS.map(pr=>makePrelibTie(pr.teamA, pr.teamB, pr.half, pr.slot));
   p.qf = qf; p.sf = null; p.final = null; p.champion = null; p.phase = "qf";
   ST.stage = "hub"; ST.hubTab = "competicao";
@@ -410,7 +412,17 @@ function checkPrelibElimination(){
   const p = ST.prelib;
   const userTie = currentPrelibTies().find(t=>t.teamA===p.userTeam || t.teamB===p.userTeam);
   if(userTie && userTie.winner && userTie.winner!==p.userTeam){
-    p.phase = (p.year>=PRELIB_MAX_YEAR) ? "failed" : "eliminated";
+    if(p.year>=PRELIB_MAX_YEAR){
+      // last shot at the Sul-Americana itself didn't work out, but the team's form in the
+      // Campeonato Nacional is judged strong enough to earn the same Libertadores slot anyway —
+      // nobody is left permanently stuck outside the real career.
+      p.champion = p.userTeam;
+      p.viaNational = true;
+      p.phase = "done";
+      ST.stage = "prelib_champion";
+    } else {
+      p.phase = "eliminated";
+    }
     scheduleSave();
     return;
   }
@@ -499,9 +511,11 @@ function crownPreLibChampion(managerName){
   const tier = tierOf(ST.world, championName);
   ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tier];
   ST.history = [];
-  const triesNote = wonYear>PRELIB_START_YEAR ? ` após ${wonYear-PRELIB_START_YEAR+1} tentativas na Sul-Americana` : "";
+  const promoNews = p.viaNational
+    ? {title:"Vaga pelo Campeonato Nacional!", text:`${championName} não venceu a Sul-Americana, mas sua campanha no Campeonato Nacional de ${wonYear} garantiu vaga na Libertadores ${promotionYear} no lugar do ${worstTeamName}, dona da pior campanha na fase de grupos de ${wonYear}.`}
+    : {title:"Campeão da Pré-Libertadores!", text:`${championName} venceu o torneio classificatório de ${wonYear} e garantiu vaga na Libertadores ${promotionYear} no lugar do ${worstTeamName}, dona da pior campanha na fase de grupos de ${wonYear}.`};
   ST.newsLog = [
-    {title:"Campeão da Pré-Libertadores!", text:`${championName} venceu o torneio classificatório de ${wonYear}${triesNote} e garantiu vaga na Libertadores ${promotionYear} no lugar do ${worstTeamName}, dona da pior campanha na fase de grupos de ${wonYear}.`},
+    promoNews,
     {title:"Bem-vindo!", text:`${ST.managerName} assume o comando do ${championName} para a campanha de ${ST.seasonYear} da CONMEBOL Libertadores.`},
   ];
   ST.prelib = null;
@@ -1995,7 +2009,7 @@ function renderPreLibSelect(){
   <div style="padding:26px 20px 10px;">
     <button class="btn btn-ghost btn-sm" onclick="Game.goHome()">← Voltar</button>
     <h2 class="panel-title" style="font-size:22px;margin-top:18px;">🏆 Pré-Libertadores</h2>
-    <p class="dim small">8 clubes da Sul-Americana disputam um mata-mata rápido (jogo único, com pênaltis em caso de empate). Escolha seu time do coração: se ele for campeão em ${PRELIB_START_YEAR}, assume a vaga do pior time da fase de grupos da Libertadores e você já começa a carreira em ${PRELIB_START_YEAR+1} no comando dele. Se não conseguir, você continua com esse mesmo time — com acesso total ao elenco, transferências e olheiro pra se reforçar — tentando de novo no ano seguinte, até vencer.</p>
+    <p class="dim small">8 clubes da Sul-Americana disputam um mata-mata rápido (jogo único, com pênaltis em caso de empate). Escolha seu time do coração: se ele for campeão em ${PRELIB_START_YEAR}, assume a vaga do pior time da fase de grupos da Libertadores e você já começa a carreira em ${PRELIB_START_YEAR+1} no comando dele. Você tem ${PRELIB_MAX_YEAR-PRELIB_START_YEAR+1} tentativas (${PRELIB_START_YEAR} e ${PRELIB_MAX_YEAR}), com acesso total ao elenco, transferências e olheiro pra se reforçar entre uma e outra. Se não vencer em nenhuma delas, a vaga vem mesmo assim — pela campanha do time no Campeonato Nacional.</p>
     <div class="group-grid">${groupCards}</div>
   </div>
   <div style="position:sticky;bottom:0;background:linear-gradient(180deg,transparent,rgba(8,16,14,.97) 30%);padding:22px 20px 26px;text-align:center;">
@@ -2060,13 +2074,16 @@ function renderPreLibChampion(){
   const p = ST.prelib;
   const t = p.champion;
   const meta = ST.world.teams[t];
+  const viaNational = !!p.viaNational;
   return `
   <div class="hero" style="min-height:80vh;">
     ${trophyImg(90,0.9)}
-    <div class="hero-badge" style="margin-top:10px;">🏆 CAMPEÃO DA PRÉ-LIBERTADORES ${p.year}</div>
+    <div class="hero-badge" style="margin-top:10px;">${viaNational ? "🏅 CLASSIFICADO PELO CAMPEONATO NACIONAL" : `🏆 CAMPEÃO DA PRÉ-LIBERTADORES ${p.year}`}</div>
     <div style="margin:14px 0;">${crestSVG(t, 76)}</div>
     <h1 class="hero-title" style="font-size:clamp(28px,6vw,48px);">${esc(t)}</h1>
-    <p class="hero-sub">${esc(meta.flag)} ${esc(meta.country)} garantiu vaga direta na Libertadores ${p.year+1}, ${esc(ST.managerName)}!</p>
+    <p class="hero-sub">${viaNational
+      ? `A Sul-Americana não saiu, mas a campanha do ${esc(t)} no Campeonato Nacional garantiu vaga direta na Libertadores ${p.year+1}, ${esc(ST.managerName)}!`
+      : `${esc(meta.flag)} ${esc(meta.country)} garantiu vaga direta na Libertadores ${p.year+1}, ${esc(ST.managerName)}!`}</p>
     <div class="mt24">
       <button class="btn btn-gold btn-lg" onclick="Game.beginPreLibCareer()">Assinar contrato e começar a Libertadores ${p.year+1} →</button>
     </div>
@@ -2122,7 +2139,7 @@ function phaseLabel(phase){
 }
 function getNextUserPrelibMatch(){
   const p = ST.prelib;
-  if(!p || p.phase==="done" || p.phase==="eliminated" || p.phase==="failed") return null;
+  if(!p || p.phase==="done" || p.phase==="eliminated") return null;
   const tie = currentPrelibTies().find(t=>t.teamA===p.userTeam || t.teamB===p.userTeam);
   if(!tie || tie.played) return null;
   const roundLabel = {qf:"Quartas de Final", sf:"Semifinal", final:"Final"}[p.phase] || p.phase;
@@ -2183,16 +2200,11 @@ function renderPreLibCompeticaoTab(){
   const bracketPanel = `<div class="panel"><div class="panel-title">🏆 Pré-Libertadores ${p.year}</div>${renderPreLibBracketColumns(p)}</div>`;
 
   let statusPanel;
-  if(p.phase==="failed"){
-    statusPanel = `<div class="panel tac">
-      <div class="bold" style="font-size:15px;margin-bottom:8px;">${esc(p.userTeam)} não conseguiu a classificação em nenhuma das ${PRELIB_MAX_YEAR-PRELIB_START_YEAR+1} tentativas.</div>
-      <p class="dim small">A janela pra essa vaga se fechou. Comece uma nova jornada pelo menu inicial.</p>
-      <button class="btn btn-gold mt8" onclick="Game.goHome()">Voltar ao início</button>
-    </div>`;
-  } else if(p.phase==="eliminated"){
+  if(p.phase==="eliminated"){
+    const isLastChance = (p.year+1)>=PRELIB_MAX_YEAR;
     statusPanel = `<div class="panel tac">
       <div class="bold" style="font-size:15px;margin-bottom:8px;">${esc(p.userTeam)} foi eliminado da Sul-Americana ${p.year}.</div>
-      <p class="dim small">Reforce o elenco em Transferências e tente de novo — a próxima chance é ${p.year+1}.</p>
+      <p class="dim small">Reforce o elenco em Transferências e tente de novo — a próxima chance é ${p.year+1}${isLastChance?" (última tentativa; se não der, a vaga vem pelo Campeonato Nacional)":""}.</p>
       <button class="btn btn-gold mt8" onclick="Game.retryPreLib()">🔁 Tentar novamente (${p.year+1})</button>
     </div>`;
   } else {
