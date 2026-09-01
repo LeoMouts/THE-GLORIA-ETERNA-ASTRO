@@ -343,6 +343,7 @@ function startPreLib(teamName, managerName){
   ST.world = freshPrelibWorld();
   ST.teamId = teamName;
   ST.managerName = managerName || "Treinador";
+  ST.careerStats = {goals:{}, assists:{}, signings:[]}; // a fresh managerial journey starts here too — goals/assists/signings from the Sul-Americana onward all count toward "under your command"
   const tier = tierOf(ST.world, teamName);
   ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tier];
   ST.reputation = 50;
@@ -695,6 +696,7 @@ function newCareerState(){
     xferFilter:{pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null, mode:"buy", sort:"ovr", page:1},
     matchAnimIdx:0,
     matchPlaying:false,
+    careerStats:{goals:{}, assists:{}, signings:[]},
   };
 }
 
@@ -757,6 +759,7 @@ window.__forceReset__ = () => { resetCareer(); };
 function startCareer(teamId, managerName){
   ST.prelib = null; // a real career always fully replaces any in-progress Pré-Libertadores run —
   // without this, the hub keeps thinking it's still showing the Sul-Americana bracket.
+  ST.careerStats = {goals:{}, assists:{}, signings:[]};
   ST.world = freshWorld();
   ensureGlobalMarket();
   ST.teamId = teamId;
@@ -913,6 +916,23 @@ function decrementAvailability(){
   }));
 }
 
+// career-long goal/assist ledger, spanning every club the manager has been in charge of —
+// unlike ST.competition.scorers (which is league-wide and resets every season), this only ever
+// grows across the whole 10-season career and only counts a player's team when it's ST.teamId,
+// i.e. strictly "while under this manager's command".
+function ensureCareerStats(){
+  // lazy-init so a save from before this feature existed still starts tracking from here on,
+  // instead of never getting a summary at all.
+  if(!ST.careerStats) ST.careerStats = {goals:{}, assists:{}, signings:[]};
+  return ST.careerStats;
+}
+function recordCareerStat(bucket, name){
+  const b = ensureCareerStats()[bucket];
+  b[name] = (b[name]||0) + 1;
+}
+function recordCareerSigning(name, price){
+  ensureCareerStats().signings.push({name, price, team:ST.teamId, year:ST.seasonYear});
+}
 function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, awayLineup, result){
   const allP = homeLineup.filter(Boolean).concat(awayLineup.filter(Boolean));
   allP.forEach(p=>{
@@ -925,7 +945,14 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
     if(!p) return;
     if(ev.type==="red"){ p.suspended=true; p.suspendedMatches=Math.max(p.suspendedMatches,1); }
     if(ev.type==="injury"){ p.injured=true; p.injuredMatches=Math.max(p.injuredMatches,ev.matchesOut); }
-    if(ev.type==="goal"){ addScorerGoal(ev.side==="home"?homeTeamName:awayTeamName, p.id); }
+    if(ev.type==="goal"){
+      const scoringTeam = ev.side==="home"?homeTeamName:awayTeamName;
+      addScorerGoal(scoringTeam, p.id);
+      if(scoringTeam===ST.teamId){
+        recordCareerStat("goals", p.name);
+        if(ev.assist) recordCareerStat("assists", ev.assist);
+      }
+    }
   });
 }
 
@@ -1648,6 +1675,7 @@ function makeOffer(playerId, sellerTeamName, offer){
     myTeam().players.push(p);
     ST.budget -= offer;
     ST.newsLog.unshift({title:"Transferência concluída", text:`${p.name} contratado do ${sellerTeamName} por ${fmtMoney(offer)}.`});
+    recordCareerSigning(p.name, offer);
     if(ST.lineup.length===0) autoFillLineup();
     scheduleSave();
     return {ok:true, msg:`Negócio fechado! ${p.name} é reforço do seu time.`};
@@ -1689,6 +1717,7 @@ function buyGlobalPlayer(playerId, offer){
     myTeam().players.push(joined);
     ST.budget -= offer;
     ST.newsLog.unshift({title:"Contratação internacional!", text:`${p.name} (${p.club}) assina com o ${ST.teamId} por ${fmtMoney(offer)}.`});
+    recordCareerSigning(p.name, offer);
     scheduleSave();
     return {ok:true, msg:`Negócio fechado! ${p.name} chega do ${p.club}.`};
   } else if(offer>=ask*0.85){
@@ -3382,10 +3411,19 @@ function renderJobOffers(){
     ${!ST.fired?`<button class="btn btn-ghost mt24" onclick="Game.stayJob()">Permanecer no ${esc(ST.teamId)}</button>`:""}
   </div>`;
 }
+// ranked "#N name — value" rows shared by the three career-stats lists below.
+function renderStatRankList(rows, valueFmt){
+  if(rows.length===0) return `<div class="faint tiny">Nenhum registro nesta carreira.</div>`;
+  return rows.map((r,i)=>`<div class="kv"><span>${i+1}. ${esc(r.name)}</span><span class="bold gold">${valueFmt(r.value)}</span></div>`).join("");
+}
 function renderCareerOver(){
   const titles = ST.history.filter(h=>h.result==="Campeão");
   const teams = [...new Set(ST.history.map(h=>h.team))];
   const peakRep = Math.max(50, ...ST.history.map(h=>h.reputation));
+  const cs = ST.careerStats || {goals:{}, assists:{}, signings:[]};
+  const topGoals = Object.entries(cs.goals).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value).slice(0,3);
+  const topAssists = Object.entries(cs.assists).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value).slice(0,3);
+  const topSignings = cs.signings.slice().sort((a,b)=>b.price-a.price).slice(0,5).map(s=>({name:s.name, value:s.price}));
   return `${cornerWatermarks()}
   ${titles.length>0?`<img src="${GOAT_MASCOT_URI}" alt="Mascote GOAT" class="goat-mascot" style="position:absolute;left:-30px;bottom:0;height:min(48vh,380px);width:auto;z-index:1;pointer-events:none;filter:drop-shadow(0 12px 30px rgba(0,0,0,.55));" />`:""}
   <div class="hero" style="position:relative;z-index:2;">
@@ -3399,6 +3437,17 @@ function renderCareerOver(){
       <div class="kv"><span>Reputação de pico</span><span class="bold">${peakRep}</span></div>
       <div class="divider"></div>
       ${ST.history.map(h=>`<div class="kv"><span>${h.year} — ${esc(h.team)}</span><span>${esc(h.result)}</span></div>`).join("")}
+    </div>
+    <div class="panel mt24" style="max-width:480px;text-align:left;">
+      <div class="panel-title">Estatísticas da carreira (todos os times comandados)</div>
+      <div class="tiny faint uc" style="margin-top:4px;">⚽ Top 3 artilheiros</div>
+      ${renderStatRankList(topGoals, v=>v+(v===1?" gol":" gols"))}
+      <div class="divider"></div>
+      <div class="tiny faint uc">🥾 Top 3 garçons</div>
+      ${renderStatRankList(topAssists, v=>v+(v===1?" assistência":" assistências"))}
+      <div class="divider"></div>
+      <div class="tiny faint uc">💰 Top 5 contratações mais caras</div>
+      ${renderStatRankList(topSignings, v=>fmtMoney(v))}
     </div>
     <button class="btn btn-gold btn-lg mt24" onclick="Game.newCareerFromOver()">Começar nova carreira</button>
   </div>`;
