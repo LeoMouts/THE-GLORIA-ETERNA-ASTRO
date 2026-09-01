@@ -519,6 +519,7 @@ function crownPreLibChampion(managerName){
   const championIds = new Set(championRoster.map(pl=>pl.id));
   world.globalMarket = world.globalMarket.filter(pl=>!championIds.has(pl.id));
 
+  const prelibBudget = ST.budget; // whatever the club actually earned across the Sul-Americana run
   ST.world = world;
   ST.teamId = championName;
   ST.managerName = managerName || "Treinador";
@@ -526,7 +527,10 @@ function crownPreLibChampion(managerName){
   ST.seasonNum = Math.min(10, promotionYear - 2025);
   ST.reputation = 50;
   const tier = tierOf(ST.world, championName);
-  ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tier];
+  const tierBudget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tier];
+  // promotion never wipes out money the club actually earned — keep the higher of the two,
+  // just capped so a huge Pré-Libertadores war chest doesn't break the Libertadores economy.
+  ST.budget = Math.min(26000000, Math.max(prelibBudget, tierBudget));
   ST.history = [];
   const promoNews = p.viaNational
     ? {title:"Vaga pelo Campeonato Nacional!", text:`${championName} não venceu a Sul-Americana, mas sua campanha no Campeonato Nacional de ${wonYear} garantiu vaga na Libertadores ${promotionYear} no lugar do ${worstTeamName}, dona da pior campanha na fase de grupos de ${wonYear}.`}
