@@ -3425,31 +3425,37 @@ function renderCareerOver(){
   const topAssists = Object.entries(cs.assists).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value).slice(0,3);
   const topSignings = cs.signings.slice().sort((a,b)=>b.price-a.price).slice(0,5).map(s=>({name:s.name, value:s.price}));
   return `${cornerWatermarks()}
-  ${titles.length>0?`<img src="${GOAT_MASCOT_URI}" alt="Mascote GOAT" class="goat-mascot" style="position:absolute;left:-30px;bottom:0;height:min(48vh,380px);width:auto;z-index:1;pointer-events:none;filter:drop-shadow(0 12px 30px rgba(0,0,0,.55));" />`:""}
-  <div class="hero" style="position:relative;z-index:2;">
-    <div class="trophy-glow" style="background:radial-gradient(circle at 40% 30%, #F5F6F8, #ADB5BD 55%, #6B7280 100%); box-shadow:0 0 90px 10px rgba(200,205,210,.35), inset 0 -10px 30px rgba(0,0,0,.35);">${trophyImg(128, titles.length>0?1:0.55)}</div>
-    <div class="hero-badge">CARREIRA ENCERRADA — 10 TEMPORADAS</div>
-    <h1 class="hero-title" style="font-size:clamp(28px,6vw,54px);">${titles.length>0? titles.length+" TÍTULO"+(titles.length>1?"S":"")+" DE LIBERTADORES" : "FIM DE CICLO"}</h1>
-    <div class="panel mt24" style="max-width:480px;text-align:left;">
-      <div class="panel-title">Resumo de ${esc(ST.managerName)}</div>
-      <div class="kv"><span>Times comandados</span><span class="bold">${teams.length} (${esc(teams.join(", "))})</span></div>
-      <div class="kv"><span>Títulos de Libertadores</span><span class="bold gold">${titles.length}</span></div>
-      <div class="kv"><span>Reputação de pico</span><span class="bold">${peakRep}</span></div>
-      <div class="divider"></div>
-      ${ST.history.map(h=>`<div class="kv"><span>${h.year} — ${esc(h.team)}</span><span>${esc(h.result)}</span></div>`).join("")}
+  ${titles.length>0?`<img src="${GOAT_MASCOT_URI}" alt="Mascote GOAT" class="goat-mascot" style="position:absolute;left:-30px;bottom:0;height:min(38vh,300px);width:auto;z-index:1;pointer-events:none;filter:drop-shadow(0 12px 30px rgba(0,0,0,.55));" />`:""}
+  <div class="hero" style="position:relative;z-index:2;padding-top:24px;">
+    <div class="trophy-glow" style="width:84px;height:84px;background:radial-gradient(circle at 40% 30%, #F5F6F8, #ADB5BD 55%, #6B7280 100%); box-shadow:0 0 60px 8px rgba(200,205,210,.35), inset 0 -8px 22px rgba(0,0,0,.35);">${trophyImg(84, titles.length>0?1:0.55)}</div>
+    <div class="hero-badge" style="margin-top:8px;">CARREIRA ENCERRADA — 10 TEMPORADAS</div>
+    <h1 class="hero-title" style="font-size:clamp(24px,5vw,40px);margin:4px 0 16px;">${titles.length>0? titles.length+" TÍTULO"+(titles.length>1?"S":"")+" DE LIBERTADORES" : "FIM DE CICLO"}</h1>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;justify-content:center;align-items:flex-start;width:100%;max-width:760px;">
+      <div class="panel" style="flex:1 1 320px;max-width:360px;text-align:left;">
+        <div class="panel-title">Resumo de ${esc(ST.managerName)}</div>
+        <div class="kv"><span>Times comandados</span><span class="bold">${teams.length} (${esc(teams.join(", "))})</span></div>
+        <div class="kv"><span>Títulos de Libertadores</span><span class="bold gold">${titles.length}</span></div>
+        <div class="kv"><span>Reputação de pico</span><span class="bold">${peakRep}</span></div>
+      </div>
+      <div class="panel" style="flex:1 1 320px;max-width:360px;text-align:left;">
+        <div class="panel-title">Estatísticas da carreira</div>
+        <div class="tiny faint uc" style="margin-top:2px;">⚽ Top 3 artilheiros</div>
+        ${renderStatRankList(topGoals, v=>v+(v===1?" gol":" gols"))}
+        <div class="divider"></div>
+        <div class="tiny faint uc">🥾 Top 3 garçons</div>
+        ${renderStatRankList(topAssists, v=>v+(v===1?" assistência":" assistências"))}
+        <div class="divider"></div>
+        <div class="tiny faint uc">💰 Top 5 contratações mais caras</div>
+        ${renderStatRankList(topSignings, v=>fmtMoney(v))}
+      </div>
     </div>
-    <div class="panel mt24" style="max-width:480px;text-align:left;">
-      <div class="panel-title">Estatísticas da carreira (todos os times comandados)</div>
-      <div class="tiny faint uc" style="margin-top:4px;">⚽ Top 3 artilheiros</div>
-      ${renderStatRankList(topGoals, v=>v+(v===1?" gol":" gols"))}
-      <div class="divider"></div>
-      <div class="tiny faint uc">🥾 Top 3 garçons</div>
-      ${renderStatRankList(topAssists, v=>v+(v===1?" assistência":" assistências"))}
-      <div class="divider"></div>
-      <div class="tiny faint uc">💰 Top 5 contratações mais caras</div>
-      ${renderStatRankList(topSignings, v=>fmtMoney(v))}
+    <div class="panel mt16" style="max-width:760px;width:100%;text-align:left;">
+      <div class="panel-title">Temporada a temporada</div>
+      <div style="max-height:150px;overflow-y:auto;">
+        ${ST.history.map(h=>`<div class="kv"><span>${h.year} — ${esc(h.team)}</span><span>${esc(h.result)}</span></div>`).join("")}
+      </div>
     </div>
-    <button class="btn btn-gold btn-lg mt24" onclick="Game.newCareerFromOver()">Começar nova carreira</button>
+    <button class="btn btn-gold btn-lg mt16" onclick="Game.newCareerFromOver()">Começar nova carreira</button>
   </div>`;
 }
 
