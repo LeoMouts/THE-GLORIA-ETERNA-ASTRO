@@ -1740,12 +1740,18 @@ function generateScoutReport(){
 const ARAB_FICTIONAL_CLUBS = ["Al-Wasl City FC", "Desert Falcons FC", "Gulf Elite FC", "Sandstorm United", "Al-Sahra SC", "Crescent Bay FC"];
 const EURO_SA_FICTIONAL_CLUBS = ["Continental FC (Europa)", "Riverside Athletic (Europa)", "Northgate United (Europa)", "Atlético del Plata (Am. do Sul)", "Estrella del Norte (Am. do Sul)", "Puerto Real FC (Am. do Sul)"];
 
-function maybeIncomingOffer(chance){
+function maybeIncomingOffer(baseChance){
   if(ST.uiModal) return; // don't stack on top of something else
-  const rng = E.makeRNG(nextSeed());
-  if(rng() >= chance) return;
   const squad = myTeam().players.filter(p=>p.ovr>=70);
   if(squad.length===0) return;
+  // a squad playing well draws more attention from other clubs — recent match form (already
+  // tracked per player, decaying back toward 0 over time) pushes the offer chance up, never down,
+  // so a hot streak means noticeably more approaches without ever punishing a rough patch.
+  const avgForm = squad.reduce((a,p)=>a+(p.form||0),0) / squad.length;
+  const formBoost = E.clamp(Math.max(0, avgForm) * 0.15, 0, 0.35);
+  const chance = E.clamp(baseChance + formBoost, 0, 0.6);
+  const rng = E.makeRNG(nextSeed());
+  if(rng() >= chance) return;
   const target = weightedPickByOvr(squad, rng);
   const roll = rng();
   let category, club, mult;
@@ -3250,7 +3256,7 @@ function renderContractSigning(message){
   return `<div class="modal-backdrop">
     <div class="contract-doc contract-doc-signing">
       <div class="contract-sign-title">${esc(message)}</div>
-      <div class="signature-wrap"><span class="signature-text">Grupo The Fenômeno</span></div>
+      <div class="signature-wrap"><span class="signature-text">${esc(ST.managerName || "Treinador")}</span></div>
       <div class="contract-sign-stamp">Contrato assinado</div>
     </div>
   </div>`;
