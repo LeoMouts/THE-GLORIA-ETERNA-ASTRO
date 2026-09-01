@@ -562,6 +562,47 @@ function fmtMoney(v){
   if(v>=1000) return "US$ " + Math.round(v/1000) + "mil";
   return "US$ " + v;
 }
+// spells a number out in Portuguese ("1460000" -> "um milhão e quatrocentos e sessenta mil") —
+// a live caption under free-typed money fields so a stray/missing zero jumps out immediately,
+// instead of the user having to count digits to tell a mil from a milhão.
+const PT_UNITS = ["", "um","dois","três","quatro","cinco","seis","sete","oito","nove"];
+const PT_TEENS = ["dez","onze","doze","treze","catorze","quinze","dezesseis","dezessete","dezoito","dezenove"];
+const PT_TENS = ["", "", "vinte","trinta","quarenta","cinquenta","sessenta","setenta","oitenta","noventa"];
+const PT_HUNDREDS = ["", "cento","duzentos","trezentos","quatrocentos","quinhentos","seiscentos","setecentos","oitocentos","novecentos"];
+function pt999(v){
+  if(v===0) return "";
+  if(v===100) return "cem";
+  const h = Math.floor(v/100), rest = v%100;
+  const parts = [];
+  if(h>0) parts.push(PT_HUNDREDS[h]);
+  if(rest>0){
+    if(rest<10) parts.push(PT_UNITS[rest]);
+    else if(rest<20) parts.push(PT_TEENS[rest-10]);
+    else {
+      const t = Math.floor(rest/10), u = rest%10;
+      parts.push(PT_TENS[t] + (u>0 ? " e " + PT_UNITS[u] : ""));
+    }
+  }
+  return parts.join(" e ");
+}
+function numberToWordsPT(nRaw){
+  let n = Math.round(Number(nRaw) || 0);
+  if(n===0) return "zero";
+  if(n<0) return "menos " + numberToWordsPT(-n);
+  if(n>=1e12) return n.toLocaleString('pt-BR'); // absurdly large — just show the digits, grouped
+  let rem = n;
+  const billions = Math.floor(rem/1e9); rem -= billions*1e9;
+  const millions = Math.floor(rem/1e6); rem -= millions*1e6;
+  const thousands = Math.floor(rem/1e3); rem -= thousands*1e3;
+  const units = rem;
+  const parts = [];
+  if(billions>0) parts.push(billions===1 ? "um bilhão" : pt999(billions)+" bilhões");
+  if(millions>0) parts.push(millions===1 ? "um milhão" : pt999(millions)+" milhões");
+  if(thousands>0) parts.push(thousands===1 ? "mil" : pt999(thousands)+" mil");
+  if(units>0) parts.push(pt999(units));
+  if(parts.length===1) return parts[0];
+  return parts.slice(0,-1).join(", ") + " e " + parts[parts.length-1];
+}
 const XFER_PRICE_MAX = 20000000;
 const XFER_PRICE_STEP = 100000;
 function renderPriceFilter(f){
@@ -3253,7 +3294,8 @@ function renderBuyOfferModal(m){
         <p class="contract-advisor"><b>Comentários do Gerente de Futebol:</b><br>${transferAdvisorLine(p, lo, hi)}</p>
         <div class="contract-kv"><span>Orç. de transferência</span><span class="gold bold">${fmtMoney(ST.budget)}</span></div>
         <label class="tiny faint mt16" style="display:block;">Valor da proposta (US$)</label>
-        <input id="offerInput" type="number" class="input-inline" style="width:100%;" value="${ask}" step="10000"/>
+        <input id="offerInput" type="number" class="input-inline" style="width:100%;" value="${ask}" step="10000" oninput="Game.updateOfferWords(this.value)"/>
+        <div id="offerWords" class="tiny faint mt4">${esc(numberToWordsPT(ask))}</div>
         <div id="offerMsg" class="small mt8"></div>
         <div class="btn-row mt16">
           <button class="btn btn-gold grow" onclick="Game.submitOffer(${p.id},'${escJs(m.team)}')">✒️ Enviar Proposta</button>
@@ -3459,6 +3501,10 @@ const Game = {
     setTimeout(()=>{ acceptIncomingOffer(); render(); }, 2200);
   },
   declineIncomingOffer(){ declineIncomingOffer(); render(); },
+  updateOfferWords(val){
+    const el = document.getElementById("offerWords");
+    if(el) el.textContent = numberToWordsPT(val);
+  },
   submitOffer(playerId, team){
     const m = ST.uiModal;
     if(!m || m.signing) return;
