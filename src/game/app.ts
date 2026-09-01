@@ -708,6 +708,8 @@ window.resetCareer = () => {
 window.__forceReset__ = () => { resetCareer(); };
 
 function startCareer(teamId, managerName){
+  ST.prelib = null; // a real career always fully replaces any in-progress Pré-Libertadores run —
+  // without this, the hub keeps thinking it's still showing the Sul-Americana bracket.
   ST.world = freshWorld();
   ensureGlobalMarket();
   ST.teamId = teamId;
