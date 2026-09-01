@@ -370,6 +370,12 @@ function retryPreLibSameTeam(){
   // fresh youth prospect, exactly like a real season; this also clears the injuries/suspensions
   // /form left over from the last attempt.
   ageWorld();
+  // a new Sul-Americana season also means a fresh budget injection on top of whatever's left —
+  // the club's finances grow year over year, same idea as a real season's income, just simpler
+  // since there's no group-stage prize money to factor in for a campaign that fell short.
+  const tier = tierOf(ST.world, p.userTeam);
+  const seasonInjection = [0, 900000, 1900000, 3800000, 7500000, 13000000][tier];
+  ST.budget = Math.min(140000000, ST.budget + seasonInjection);
   const qf = PRELIB_QF_PAIRS.map(pr=>makePrelibTie(pr.teamA, pr.teamB, pr.half, pr.slot));
   p.qf = qf; p.sf = null; p.final = null; p.champion = null; p.phase = "qf";
   ST.stage = "hub"; ST.hubTab = "competicao";
