@@ -573,6 +573,11 @@ function fmtMoney(v){
   if(v>=1000) return "US$ " + Math.round(v/1000) + "mil";
   return "US$ " + v;
 }
+// the full, non-abbreviated figure with "." as the thousands separator (1.550.000 instead of
+// 1.55M) — used in e-mail bodies alongside fmtMoney so the exact number is always spelled out.
+function fmtMoneyFull(v){
+  return "US$ " + Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
 // spells a number out in Portuguese ("1460000" -> "um milhão e quatrocentos e sessenta mil") —
 // a live caption under free-typed money fields so a stray/missing zero jumps out immediately,
 // instead of the user having to count digits to tell a mil from a milhão.
@@ -709,6 +714,12 @@ function newCareerState(){
     mailSeq:0, // increasing counter used to mint unique inbox mail ids
     openMailId:null, // id of the inbox mail currently open in the E-mail tab, if any
     scoutedFixtureKey:null, // guards against sending the same opponent scouting report twice
+    scoutLevel:1, // 1-5, paid for out of the club budget — see SCOUT_LEVEL_COST
+    scoutReportETA:null, // {daysLeft} while a requested "Jogadores Promissores" report is in progress
+    scoutLastReportMatchCount:0, // matchesPlayedTotal at the last delivered report — enforces the "at least 1 match between reports" cooldown
+    matchesPlayedTotal:0, // incremented every time a match actually finishes (see finishPendingMatch)
+    observationQueue:[], // players currently being watched in the transfer market: [{key,playerId,team,playerName,daysLeft}]
+    observedKeys:[], // "team#playerId" keys whose true potential has been revealed
   };
 }
 
@@ -732,6 +743,11 @@ async function initApp(){
     if(!Array.isArray(ST.inbox)) ST.inbox = [];
     if(ST.calendarWeekdayIdx==null) ST.calendarWeekdayIdx = 1;
     if(ST.mailSeq==null) ST.mailSeq = 0;
+    if(ST.scoutLevel==null) ST.scoutLevel = 1;
+    if(ST.matchesPlayedTotal==null) ST.matchesPlayedTotal = 0;
+    if(ST.scoutLastReportMatchCount==null) ST.scoutLastReportMatchCount = 0;
+    if(!Array.isArray(ST.observationQueue)) ST.observationQueue = [];
+    if(!Array.isArray(ST.observedKeys)) ST.observedKeys = [];
     recomputeIdCounter();
   } else if(loaded){
     // an older/incompatible save from a previous version of the game — cannot be
@@ -1056,7 +1072,8 @@ function maybeGenerateScoutMail(){
 
 const OFFER_SUBJECTS_ARAB = ["Proposta inacreditável chegou","Oferta chocante de fora da Libertadores","Um clube árabe fez uma fortuna por ele"];
 const OFFER_SUBJECTS_EURO = ["Proposta pelo seu atleta","Sondagem de um clube de fora","Interesse por um dos seus titulares"];
-function queueOfferMail(playerId, playerName, club, category, value, offer, rng){
+function offerPosture(pl){ return OFFER_POSTURES.find(p=>p.id===pl.posture) || OFFER_POSTURES[1]; }
+function queueOfferMail(playerId, playerName, club, category, value, offer, rng, posture){
   const isArab = category==="arabe";
   const subjects = isArab ? OFFER_SUBJECTS_ARAB : OFFER_SUBJECTS_EURO;
   addMail({
@@ -1064,7 +1081,7 @@ function queueOfferMail(playerId, playerName, club, category, value, offer, rng)
     subject: subjects[Math.floor(rng()*subjects.length)],
     from: club,
     preview: `Proposta por ${playerName}: ${fmtMoney(offer)}.`,
-    payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0 },
+    payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0, posture: posture||OFFER_POSTURES[1].id },
   });
 }
 const OFFER_RAISE_LINES = [
@@ -1119,13 +1136,17 @@ function negotiateOffer(mailId, askedAmountRaw){
   const mail = findMail(mailId);
   if(!mail || mail.type!=="offer" || mail.payload.status!=="pending") return;
   const pl = mail.payload;
+  const posture = offerPosture(pl);
   const rng = E.makeRNG(nextSeed());
   const {minAsk, maxAsk} = offerAskRange(pl);
   const asked = Math.round(E.clamp(Number(askedAmountRaw)||minAsk, minAsk, maxAsk)/5000)*5000;
   pl.round++;
   const pushRatio = asked/pl.offer;
   const valueRatio = asked/pl.value;
-  const angerChance = E.clamp((pushRatio-1.15)*0.9 + Math.max(0, valueRatio-1.6)*0.55 + pl.round*0.05, 0, 0.85);
+  // this club's own posture scales how touchy it is about a big ask (angerMult) and how
+  // often it just says yes (acceptMult) — a "durão" club walks away far more readily than
+  // a "flexível" one asked for the exact same jump.
+  const angerChance = E.clamp(((pushRatio-1.15)*0.9 + Math.max(0, valueRatio-1.6)*0.55 + pl.round*0.05)*posture.angerMult, 0, 0.85);
   if(!mail.thread) mail.thread = [];
   if(rng() < angerChance){
     pl.status = "withdrawn";
@@ -1136,7 +1157,7 @@ function negotiateOffer(mailId, askedAmountRaw){
     pl.pendingReplyDays = 1 + Math.floor(rng()*3);
     mail.thread.push(OFFER_THINK_LINES[Math.floor(rng()*OFFER_THINK_LINES.length)]);
   } else {
-    const acceptChance = E.clamp(0.85 - (valueRatio-1.0)*0.55, 0.1, 0.92);
+    const acceptChance = E.clamp((0.85 - (valueRatio-1.0)*0.55)*posture.acceptMult, 0.06, 0.95);
     if(rng() < acceptChance){
       pl.offer = asked;
       mail.thread.push(OFFER_RAISE_LINES[Math.floor(rng()*OFFER_RAISE_LINES.length)]);
@@ -1153,17 +1174,18 @@ function tickPendingOfferReplies(){
   const rng = E.makeRNG(nextSeed());
   inboxList().filter(m=>m.type==="offer" && m.payload.status==="awaiting_reply").forEach(mail=>{
     const pl = mail.payload;
+    const posture = offerPosture(pl);
     pl.pendingReplyDays = (pl.pendingReplyDays==null?1:pl.pendingReplyDays)-1;
     if(pl.pendingReplyDays>0) return;
     const asked = pl.pendingAsk||pl.offer;
     const valueRatio = asked/pl.value;
-    const angerChance = E.clamp(Math.max(0, valueRatio-1.6)*0.5 + pl.round*0.04, 0, 0.7);
+    const angerChance = E.clamp((Math.max(0, valueRatio-1.6)*0.5 + pl.round*0.04)*posture.angerMult, 0, 0.7);
     let newOffer = pl.offer, status = "pending", verdictLine;
     if(rng() < angerChance){
       status = "withdrawn";
       verdictLine = OFFER_WITHDRAW_LINES[Math.floor(rng()*OFFER_WITHDRAW_LINES.length)];
     } else {
-      const acceptChance = E.clamp(0.6-(valueRatio-1.0)*0.4, 0.15, 0.85);
+      const acceptChance = E.clamp((0.6-(valueRatio-1.0)*0.4)*posture.acceptMult, 0.1, 0.88);
       if(rng() < acceptChance){
         newOffer = asked;
         verdictLine = OFFER_RAISE_LINES[Math.floor(rng()*OFFER_RAISE_LINES.length)];
@@ -1179,7 +1201,7 @@ function tickPendingOfferReplies(){
       from: pl.club,
       preview: status==="withdrawn" ? `A negociação por ${pl.playerName} não avançou.` : `Nova posição sobre ${pl.playerName}: ${fmtMoney(newOffer)}.`,
       thread:[verdictLine],
-      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0 },
+      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0, posture:pl.posture },
     });
   });
 }
@@ -1219,7 +1241,7 @@ function maybeGenerateOfferComeback(){
       from: pl.club,
       preview:`Nova proposta por ${pl.playerName}: ${fmtMoney(newOffer)}.`,
       thread:[OFFER_COMEBACK_LINES[Math.floor(rng()*OFFER_COMEBACK_LINES.length)]],
-      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1 },
+      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1, posture:pl.posture },
     });
     break; // at most one comeback mail per day, keeps the inbox from flooding
   }
@@ -1231,6 +1253,8 @@ function generateDailyMail(){
   maybeIncomingOffer(0.14);
   maybeGenerateOfferComeback();
   maybeGenerateTrainingInjury();
+  tickScoutReport();
+  tickObservations();
 }
 
 // career-long goal/assist ledger, spanning every club the manager has been in charge of —
@@ -1773,6 +1797,7 @@ function finishPendingMatch(){
   if(!pm) return; // guards against a stray double-invocation finding nothing left to finish
   generatePostMatchMail(pm); // injury recap for the user's own squad, if anyone got hurt
   ST.calendarDaysLeft = null; // the next fixture gets its own fresh 3-4 day countdown
+  ST.matchesPlayedTotal = (ST.matchesPlayedTotal||0)+1; // gates the scout-report cooldown
   const ctx = pm.context;
   ST.pendingMatch = null;
   if(String(ctx.type).indexOf("prelib_")===0){
@@ -1849,6 +1874,19 @@ function endOfSeason(){
   ST.jobOffers = null;
   if(ST.fired || ST.underdogOffer){
     ST.jobOffers = buildJobOffers(ST.fired ? "weaker" : "stronger");
+    // job interest also lands in the inbox as a record of who reached out — the actual
+    // decision still happens on the dedicated "job_offers" screen right after this summary.
+    const clubLines = ST.jobOffers.map(name=>`<b>${esc(name)}</b> (${esc(ST.world.teams[name].country)})`).join(", ");
+    addMail({
+      type:"job",
+      subject: ST.fired ? "Propostas após sua saída" : "Clubes de olho no seu trabalho",
+      from:"Agente / Mercado da bola",
+      preview: ST.fired ? "Você recebeu propostas para o próximo desafio." : "Clubes maiores estão de olho em você.",
+      body: (ST.fired
+        ? `Depois da saída do ${esc(ST.teamId)}, alguns clubes já entraram em contato: ${clubLines}.`
+        : `Sua reputação chamou atenção fora do ${esc(ST.teamId)}: ${clubLines}.`)
+        + ` Vá até a tela de propostas para decidir — aceitar um contrato ou permanecer.`,
+    });
   }
 
   ST.lastSeasonSummary = { placement, repChange, tier, newBudget:ST.budget, year:ST.seasonYear, reiDaAmerica };
@@ -2067,16 +2105,26 @@ function quickSell(playerId){
 // ============================================================
 // SCOUTING
 // ============================================================
+// cost (in budget) to reach a given level, and days a requested report takes at that level —
+// both indexed by level (1-5); every career starts at level 1 and pays gradually more to
+// climb toward 5, which also means faster, wider reports.
+const SCOUT_LEVEL_COST = [null, null, 500000, 1200000, 2400000, 4200000];
+const SCOUT_REPORT_DAYS = [null, 5, 4, 3, 2, 1];
+const SCOUT_LEVEL_LABELS = ["", "Iniciante", "Regional", "Nacional", "Continental", "Global"];
 function generateScoutReport(){
+  const level = ST.scoutLevel||1;
   const rng = E.makeRNG(nextSeed());
+  // a bigger network doesn't just work faster — it also casts a wider net, surfacing a few
+  // more (and slightly older, still-promising) prospects than a level-1 network ever would.
+  const ageMax = Math.min(23+(level-1), 27);
   const candidates = allPlayersList(ST.teamId)
-    .filter(({p})=>p.age<=23 && p.pot-p.ovr>=4);
+    .filter(({p})=>p.age<=ageMax && p.pot-p.ovr>=4);
   // weighted random sample (no replacement), favoring the higher-upside prospects but never
-  // deterministic — so hitting "Atualizar relatório" genuinely reshuffles who shows up, and
-  // different careers (a fresh RNG stream each time) don't all surface the same names.
+  // deterministic — so a fresh report genuinely reshuffles who shows up, and different careers
+  // (a fresh RNG stream each time) don't all surface the same names.
   const pool = candidates.map(c=>({c, score: Math.max(1, (c.p.pot-c.p.ovr)*2 + c.p.pot)}));
   const picked = [];
-  const n = Math.min(12, pool.length);
+  const n = Math.min(6+level*2, pool.length);
   for(let i=0;i<n;i++){
     const total = pool.reduce((a,it)=>a+it.score, 0);
     let r = rng()*total;
@@ -2090,16 +2138,106 @@ function generateScoutReport(){
   }
   ST.scoutReport = picked.map(c=>({playerId:c.p.id, team:c.team}));
   ST.scoutSeason = ST.seasonNum;
+  ST.scoutLastReportMatchCount = ST.matchesPlayedTotal||0;
+  ST.scoutReportETA = null;
+  scheduleSave();
+}
+// kicks off a new report request — it isn't delivered instantly: it takes
+// SCOUT_REPORT_DAYS[level] days, ticked down by tickScoutReport() on every AVANÇAR DIA.
+function requestScoutReport(){
+  if(ST.scoutReportETA) return; // already in progress
+  const level = ST.scoutLevel||1;
+  ST.scoutReportETA = { daysLeft: SCOUT_REPORT_DAYS[level] };
+  scheduleSave();
+}
+function tickScoutReport(){
+  if(!ST.scoutReportETA) return;
+  ST.scoutReportETA.daysLeft--;
+  if(ST.scoutReportETA.daysLeft>0) return;
+  generateScoutReport();
+  addMail({
+    type:"scout", subject:"Relatório de olheiros pronto",
+    from:"Departamento de Olheiros",
+    preview:"Nova lista de jogadores promissores disponível.",
+    body:"Seu relatório de olheiros está pronto — confira a aba Olheiro para ver os nomes.",
+  });
+}
+function upgradeScoutLevel(){
+  const level = ST.scoutLevel||1;
+  if(level>=5) return;
+  const cost = SCOUT_LEVEL_COST[level+1];
+  if(ST.budget < cost) return;
+  ST.budget -= cost;
+  ST.scoutLevel = level+1;
+  ST.newsLog.unshift({title:"Rede de olheiros ampliada", text:`Sua rede de olheiros subiu para o nível ${ST.scoutLevel} (${SCOUT_LEVEL_LABELS[ST.scoutLevel]}), por ${fmtMoney(cost)}.`});
+  scheduleSave();
+}
+
+// ---- "OBSERVAR" — market players' true potential stays locked until watched ----
+// a transfer-market player's Potencial column is hidden (🔒) until the manager spends a
+// few days observing him; a bigger scout network (ST.scoutLevel) watches faster.
+function marketPlayerLookup(teamKey, id){
+  if(teamKey==="global") return (ST.world.globalMarket||[]).find(p=>p.id===id);
+  return playerById(teamKey, id);
+}
+function observationKey(teamKey, id){ return teamKey+"#"+id; }
+function isObserved(teamKey, id){ return (ST.observedKeys||[]).includes(observationKey(teamKey,id)); }
+function queuedObservation(teamKey, id){
+  const key = observationKey(teamKey,id);
+  return (ST.observationQueue||[]).find(o=>o.key===key);
+}
+function observePlayer(teamKey, id){
+  if(isObserved(teamKey,id) || queuedObservation(teamKey,id)) return;
+  const p = marketPlayerLookup(teamKey, id);
+  if(!p) return;
+  const level = ST.scoutLevel||1;
+  const days = Math.max(1, 5-level); // level1=4d, level2=3d, level3=2d, level4/5=1d
+  if(!Array.isArray(ST.observationQueue)) ST.observationQueue = [];
+  ST.observationQueue.push({ key:observationKey(teamKey,id), playerId:id, team:teamKey, playerName:p.name, daysLeft:days });
+  scheduleSave();
+}
+function tickObservations(){
+  if(!Array.isArray(ST.observationQueue) || !ST.observationQueue.length) return;
+  const done = [];
+  ST.observationQueue.forEach(o=>{
+    o.daysLeft--;
+    if(o.daysLeft<=0) done.push(o);
+  });
+  if(!done.length){ scheduleSave(); return; }
+  ST.observationQueue = ST.observationQueue.filter(o=>o.daysLeft>0);
+  if(!Array.isArray(ST.observedKeys)) ST.observedKeys = [];
+  done.forEach(o=> ST.observedKeys.push(o.key));
+  const names = done.map(o=>o.playerName).join(", ");
+  addMail({
+    type:"scout", subject: done.length===1 ? `Observação concluída: ${done[0].playerName}` : "Observações concluídas",
+    from:"Departamento de Olheiros",
+    preview:`O potencial de ${names} foi revelado.`,
+    body:`Seu olheiro terminou de observar ${esc(names)} — o potencial real já aparece no mercado de transferências.`,
+  });
   scheduleSave();
 }
 
 // ============================================================
-// INCOMING TRANSFER OFFERS — fictional outside clubs sometimes bid big
-// money for one of your players, mid-season or between seasons.
+// INCOMING TRANSFER OFFERS — real clubs from outside the Libertadores (pulled straight
+// from the same global market data the transfer window uses) sometimes bid big money for
+// one of your players, mid-season or between seasons.
 // ============================================================
-const ARAB_FICTIONAL_CLUBS = ["Al-Wasl City FC", "Desert Falcons FC", "Gulf Elite FC", "Sandstorm United", "Al-Sahra SC", "Crescent Bay FC"];
-const EURO_SA_FICTIONAL_CLUBS = ["Continental FC (Europa)", "Riverside Athletic (Europa)", "Northgate United (Europa)", "Atlético del Plata (Am. do Sul)", "Estrella del Norte (Am. do Sul)", "Puerto Real FC (Am. do Sul)"];
-
+const REAL_ARAB_CLUBS = ["Al Hilal SFC","Al Nassr FC","Al Ittihad Club","Al Ahli Saudi FC","Al Ahli SC","Al Sadd SC","Al Duhail SC","Al Gharafa SC","Al Wahda FC","Al Wasl FC"];
+const REAL_EURO_CLUBS = ["Real Madrid","FC Barcelona","Manchester United","Manchester City","Liverpool","Chelsea","Arsenal","Tottenham Hotspur","AC Milan","Internazionale Milano","Napoli","S.S. Lazio","Atalanta BC","Paris Saint-Germain","Olympique de Marseille","Olympique Lyonnais","AS Monaco","Ajax","PSV","Feyenoord","FC Porto","SL Benfica","Sporting CP","Borussia Dortmund"];
+// how hard-nosed a given offer's club is about negotiating — picked once per offer and
+// carried forward through every counter/comeback/reply on that same thread. "estCeilingMult"
+// is only the SAFE estimate shown to the manager as a hint — the actual accept/anger math
+// (see negotiateOffer/tickPendingOfferReplies) always keeps a small chance of working even
+// well above that number, and a real chance of blowing up the deal if pushed too far.
+const OFFER_POSTURES = [
+  { id:"flexivel", label:"Flexível — parece disposto a pagar bem", angerMult:0.65, acceptMult:1.25, estCeilingMult:2.3 },
+  { id:"equilibrado", label:"Equilibrado — negocia dentro do razoável", angerMult:1.0, acceptMult:1.0, estCeilingMult:1.8 },
+  { id:"durao", label:"Durão — não gosta de ser pressionado", angerMult:1.45, acceptMult:0.75, estCeilingMult:1.35 },
+];
+function pickPosture(rng){
+  const roll = rng();
+  return roll<0.32 ? OFFER_POSTURES[0] : roll<0.72 ? OFFER_POSTURES[1] : OFFER_POSTURES[2];
+}
 // rolls for a new incoming transfer offer and, if one lands, drops it straight into the
 // inbox as a negotiable "offer" mail (see queueOfferMail/negotiateOffer) instead of
 // popping a blocking modal — the manager reads and negotiates it on their own time from
@@ -2120,15 +2258,15 @@ function maybeIncomingOffer(baseChance){
   let category, club, mult;
   if(roll < 0.35){
     category = "arabe";
-    club = ARAB_FICTIONAL_CLUBS[Math.floor(rng()*ARAB_FICTIONAL_CLUBS.length)];
+    club = REAL_ARAB_CLUBS[Math.floor(rng()*REAL_ARAB_CLUBS.length)];
     mult = 2.2 + rng()*1.0; // 2.2x - 3.2x
   } else {
     category = "euro_sa";
-    club = EURO_SA_FICTIONAL_CLUBS[Math.floor(rng()*EURO_SA_FICTIONAL_CLUBS.length)];
+    club = REAL_EURO_CLUBS[Math.floor(rng()*REAL_EURO_CLUBS.length)];
     mult = 1.3 + rng()*0.5; // 1.3x - 1.8x
   }
   const offer = Math.round(target.value*mult/5000)*5000;
-  queueOfferMail(target.id, target.name, club, category, target.value, offer, rng);
+  queueOfferMail(target.id, target.name, club, category, target.value, offer, rng, pickPosture(rng).id);
 }
 function weightedPickByOvr(players, rng){
   const total = players.reduce((a,p)=>a+Math.pow(1.06,p.ovr),0);
@@ -3111,6 +3249,14 @@ function renderXferSellSubTab(f){
     </div>
   </div>`;
 }
+// the "Potencial" cell for a market row: locked (button to start observing), in progress
+// (days left), or revealed (the real Pot chip) — see the OBSERVAR mechanic above.
+function renderPotCell(teamKey, p){
+  if(isObserved(teamKey, p.id)) return `<span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span>`;
+  const q = queuedObservation(teamKey, p.id);
+  if(q) return `<span class="tiny faint">🔎 ${q.daysLeft}d</span>`;
+  return `<button class="btn btn-sm" onclick="Game.observePlayer(${p.id},'${escJs(teamKey)}')">🔒 Observar</button>`;
+}
 function renderXferBuySubTab(f){
   const source = f.source || "libertadores";
   const posOptions = ["GK","CB","LB","RB","DMF","CM","AM","LM","RM","LW","RW","ST"];
@@ -3140,7 +3286,7 @@ function renderXferBuySubTab(f){
       <div class="xfer-main">
         <div class="dim tiny mb8">🌍 Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
         <div class="scroll-x"><table class="data"><thead><tr>
-          <th>Jogador</th><th>Clube (fora da Libertadores)</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Valor</th><th></th>
+          <th>Jogador</th><th>Clube (fora da Libertadores)</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Valor</th><th></th>
         </tr></thead><tbody>
         ${shown.map(p=>`<tr>
           <td class="bold">${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></td>
@@ -3148,6 +3294,7 @@ function renderXferBuySubTab(f){
           <td><span class="badge badge-pos">${p.pos}</span></td>
           <td class="tac">${p.age}</td>
           <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
+          <td class="tac">${renderPotCell("global",p)}</td>
           <td class="tac mono">${fmtMoney(p.value)}</td>
           <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'global')">Propor</button></td>
         </tr>`).join("")}
@@ -3177,7 +3324,7 @@ function renderXferBuySubTab(f){
     <div class="xfer-main">
       <div class="dim tiny mb8">Mostrando ${shown.length} de ${list.length} jogadores. Orçamento disponível: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
       <div class="scroll-x"><table class="data"><thead><tr>
-        <th>Jogador</th><th>Time</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Valor</th><th></th>
+        <th>Jogador</th><th>Time</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Valor</th><th></th>
       </tr></thead><tbody>
       ${shown.map(p=>`<tr>
         <td class="bold">${esc(p.name)} <span class="faint tiny">${p.nat}</span></td>
@@ -3185,6 +3332,7 @@ function renderXferBuySubTab(f){
         <td><span class="badge badge-pos">${p.pos}</span></td>
         <td class="tac">${p.age}</td>
         <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
+        <td class="tac">${renderPotCell(p._team,p)}</td>
         <td class="tac mono">${fmtMoney(p.value)}</td>
         <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(p._team)}')">Propor</button></td>
       </tr>`).join("")}
@@ -3204,23 +3352,29 @@ function scoutStars(p){
   return `<span class="star-rating" title="${score.toFixed(1)}/5">${"★".repeat(full)}${"☆".repeat(5-full)}</span>`;
 }
 function renderScoutTab(){
-  const scoutLevel = E.clamp(1+Math.floor(ST.reputation/20), 1, 5);
+  const level = ST.scoutLevel||1;
+  const nextCost = level<5 ? SCOUT_LEVEL_COST[level+1] : null;
   const levelBadge = `<div class="scout-level-badge">
     <div class="faint tiny uc" style="text-align:right;">Rede de Olheiros</div>
-    <div class="bold gold">🌐 Nível ${scoutLevel}</div>
+    <div class="bold gold">🌐 Nível ${level} — ${SCOUT_LEVEL_LABELS[level]}</div>
+    ${nextCost!=null
+      ? `<button class="btn btn-sm mt8" ${ST.budget<nextCost?"disabled":""} onclick="Game.upgradeScout()">Subir p/ nível ${level+1} (${fmtMoney(nextCost)})</button>`
+      : `<div class="tiny faint mt8">Nível máximo</div>`}
   </div>`;
-  const needsRefresh = !ST.scoutReport || ST.scoutSeason!==ST.seasonNum;
-  if(needsRefresh){
-    return `<div class="row between mb16">
-      <div class="panel-title" style="margin:0;">Jogadores Promissores</div>
-      ${levelBadge}
-    </div>
-    <div class="empty-state">
-      <p>Seu departamento de olheiros ainda não gerou o relatório desta temporada.</p>
-      <button class="btn btn-gold" onclick="Game.generateScout()">Gerar relatório de olheiros</button>
+  const canRequest = !ST.scoutReportETA && (!ST.scoutReport || ST.matchesPlayedTotal>ST.scoutLastReportMatchCount);
+  let statusPanel = "";
+  if(ST.scoutReportETA){
+    statusPanel = `<div class="empty-state">
+      <p>🔎 Seu olheiro está em campo — o relatório fica pronto em <b class="gold">${ST.scoutReportETA.daysLeft}</b> dia(s).</p>
+      <p class="dim small">Avance os dias na aba Competição para o tempo passar.</p>
+    </div>`;
+  } else if(!ST.scoutReport){
+    statusPanel = `<div class="empty-state">
+      <p>Seu departamento de olheiros ainda não gerou nenhum relatório.</p>
+      <button class="btn btn-gold" onclick="Game.generateScout()">Pedir relatório de olheiros (${SCOUT_REPORT_DAYS[level]} dia${SCOUT_REPORT_DAYS[level]===1?"":"s"})</button>
     </div>`;
   }
-  const rows = ST.scoutReport.map(r=>{
+  const rows = ST.scoutReport ? ST.scoutReport.map(r=>{
     const p = playerById(r.team, r.playerId);
     if(!p) return "";
     const t = ST.world.teams[r.team];
@@ -3237,24 +3391,29 @@ function renderScoutTab(){
       <td class="tac">${scoutStars(p)}</td>
       <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(r.team)}')">Propor</button></td>
     </tr>`;
-  }).join("");
+  }).join("") : "";
   return `<div class="row between mb16">
     <div>
       <div class="panel-title" style="margin:0;">Jogadores Promissores</div>
-      <div class="faint tiny">Relatório da temporada ${ST.seasonYear} — jovens talentos ao redor do continente.</div>
+      <div class="faint tiny">Jovens talentos ao redor do continente — cada relatório novo custa dias e pelo menos 1 partida desde o anterior.</div>
     </div>
     ${levelBadge}
   </div>
+  ${statusPanel}
+  ${ST.scoutReport ? `
   <div class="scroll-x"><table class="data"><thead><tr>
     <th>Jogador</th><th>Pos</th><th class="tac">Idade</th><th class="tac">Ger</th><th class="tac">Pot</th><th>Nacionalidade</th><th>Clube</th><th class="tac">Valor</th><th class="tac">Observação</th><th></th>
   </tr></thead><tbody>
   ${rows}
   </tbody></table></div>
-  <div class="row mt16"><button class="btn btn-sm" onclick="Game.generateScout()">🔄 Atualizar relatório</button></div>`;
+  <div class="row mt16">
+    <button class="btn btn-sm" ${canRequest?"":"disabled"} onclick="Game.generateScout()">🔄 Pedir novo relatório (${SCOUT_REPORT_DAYS[level]}d)</button>
+    ${!canRequest && !ST.scoutReportETA ? `<span class="tiny faint">Jogue pelo menos mais 1 partida antes de pedir outro.</span>` : ""}
+  </div>` : ""}`;
 }
 
 // ---------------- E-MAIL TAB ----------------
-const MAIL_ICON = { offer:"💰", injury:"🚑", scout:"🔎" };
+const MAIL_ICON = { offer:"💰", injury:"🚑", scout:"🔎", job:"💼" };
 function renderEmailTab(){
   const open = ST.openMailId ? findMail(ST.openMailId) : null;
   if(open) return renderMailDetail(open);
@@ -3297,6 +3456,8 @@ function offerStatusBanner(pl){
 }
 function renderOfferMailBody(m){
   const pl = m.payload;
+  const posture = offerPosture(pl);
+  const estMax = Math.round(pl.value*posture.estCeilingMult/5000)*5000;
   const pct = Math.round((pl.offer/pl.value-1)*100);
   const thread = (m.thread||[]).map(t=>`<div class="mail-thread-line">"${esc(t)}"</div>`).join("");
   const pending = pl.status==="pending";
@@ -3307,9 +3468,14 @@ function renderOfferMailBody(m){
       <div><div class="faint tiny uc">Clube interessado</div><div class="bold">${esc(pl.club)}</div></div>
       <div class="tar"><div class="faint tiny uc">Jogador</div><div class="bold">${esc(pl.playerName)}</div></div>
     </div>
-    <div class="contract-kv mt12"><span>Valor de mercado</span><span>${fmtMoney(pl.value)}</span></div>
-    <div class="contract-kv"><span>Proposta atual</span><span class="gold bold">${fmtMoney(pl.offer)}</span></div>
+    <div class="contract-kv mt12"><span>Valor de mercado</span><span>${fmtMoney(pl.value)} <span class="faint">(${fmtMoneyFull(pl.value)})</span></span></div>
+    <div class="contract-kv"><span>Proposta atual</span><span class="gold bold">${fmtMoney(pl.offer)} <span class="faint">(${fmtMoneyFull(pl.offer)})</span></span></div>
     <div class="contract-kv"><span>Acima do valor</span><span class="${pct>=0?"green":"red"} bold">${pct>=0?"+":""}${pct}%</span></div>
+    ${pending?`<div class="mail-posture-hint mt12">
+      <b>${esc(posture.label)}.</b> Nossa estimativa: dá pra pedir com boas chances até cerca de
+      <b class="gold">${fmtMoney(estMax)}</b> <span class="faint">(${fmtMoneyFull(estMax)})</span>.
+      Pedir acima disso às vezes funciona, mas nem sempre — o risco é a negociação melar.
+    </div>`:""}
     ${thread?`<div class="mt12">${thread}</div>`:""}
     ${offerStatusBanner(pl)}
     ${pending?`
@@ -3876,7 +4042,7 @@ function renderSeasonEndScreen(){
       <div class="kv"><span>Próxima temporada</span><span class="bold">${ST.seasonYear} (${ST.seasonNum}/10)</span></div>
     </div>
     ${s.reiDaAmerica ? renderReiDaAmericaPanel(s.reiDaAmerica) : ""}
-    <button class="btn btn-gold btn-lg mt24" onclick="Game.continueSeason()">Seguir para ${ST.seasonYear} →</button>
+    <button class="btn btn-gold btn-lg mt24" onclick="Game.continueSeason()">Ir para ${ST.seasonYear} →</button>
   </div>`;
 }
 // individual-award reveal — only shown when the tournament's outright top scorer plays for
@@ -4154,7 +4320,9 @@ const Game = {
     if(slider) slider.value = String(v);
     if(label) label.textContent = unlimited ? "Sem limite" : fmtMoney(Math.round(Number(val)||0));
   },
-  generateScout(){ generateScoutReport(); render(); },
+  generateScout(){ requestScoutReport(); render(); },
+  upgradeScout(){ upgradeScoutLevel(); render(); },
+  observePlayer(id, teamKey){ observePlayer(teamKey, Number(id)); render(); },
 
   simulateMatch(){ simulatePendingMatch(); render(); },
   openTimeConfig(){ ST.uiModal = {type:"timeConfig"}; render(); },
