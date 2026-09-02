@@ -1448,6 +1448,11 @@ function advanceWithSpeed(speed){
     if(speed==="fast"){
       resolveAllPendingPenalties(ST.pendingMatch);
       ST.matchAnimIdx = ST.pendingMatch.result.events.length;
+      // matchAnimDone() checks matchClockMinute (not matchAnimIdx) whenever the persisted
+      // ST.matchSpeed is "slow" — without this, "Ir para o Resultado" would still fall through
+      // to the minute-by-minute ticker (stuck at minute 0) instead of landing on the result
+      // instantly, if the user had "LENTA" selected in CONFIGURAÇÃO DE TEMPO.
+      ST.matchClockMinute = 90;
     }
   }
 }
