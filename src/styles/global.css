@@ -194,6 +194,41 @@ input,select{font-family:inherit;}
   font-family:var(--font-display);text-transform:uppercase;font-size:12.5px;
 }
 .tab-btn.active{background:var(--panel2);color:var(--marigold);border-bottom-color:var(--marigold);}
+.badge-mail{
+  display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;
+  padding:0 4px;border-radius:8px;background:var(--red);color:#fff;font-size:10px;font-weight:800;
+  font-family:var(--font-mono);margin-left:2px;vertical-align:2px;
+}
+
+/* ---------------- Calendar ("AVANÇAR DIA") ---------------- */
+.cal-strip{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
+.cal-day{
+  width:56px;padding:10px 4px 8px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel);display:flex;flex-direction:column;align-items:center;gap:6px;
+}
+.cal-day-label{font-family:var(--font-mono);font-size:11px;font-weight:800;letter-spacing:.03em;color:var(--text-dim);}
+.cal-day-icon{font-size:16px;height:18px;line-height:18px;}
+.cal-day-today{border-color:var(--marigold-dim);box-shadow:inset 0 0 0 1px var(--marigold-dim);}
+.cal-day-today .cal-day-label{color:var(--chalk);}
+.cal-day-match{background:linear-gradient(180deg,var(--marigold-bright),var(--marigold));border-color:var(--marigold);}
+.cal-day-match .cal-day-label{color:#241a04;}
+
+/* ---------------- E-mail inbox ---------------- */
+.mail-list{display:flex;flex-direction:column;gap:2px;}
+.mail-row{display:flex;align-items:center;gap:12px;padding:12px 10px;border-bottom:1px solid var(--line);cursor:pointer;position:relative;}
+.mail-row:hover{background:var(--panel);}
+.mail-row.unread .mail-row-top .bold{color:var(--marigold-bright);}
+.mail-row-icon{font-size:20px;flex:0 0 auto;width:28px;text-align:center;}
+.mail-row-body{min-width:0;flex:1;}
+.mail-row-top{display:flex;justify-content:space-between;gap:10px;}
+.mail-row-preview{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mail-dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex:0 0 auto;}
+.mail-detail-head{display:flex;align-items:center;gap:14px;}
+.mail-detail-meta{min-width:0;}
+.mail-thread-line{font-style:italic;color:var(--text-dim);font-size:13px;padding:6px 0;border-top:1px dashed var(--line);}
+.mail-status{margin-top:12px;padding:8px 10px;border-radius:4px;background:var(--panel);font-size:13px;}
+.mail-status-good{color:var(--green);border-left:2px solid var(--green);}
+.mail-status-bad{color:var(--red);border-left:2px solid var(--red);}
 .tab-content{
   background:var(--panel2);border:1px solid var(--line-strong);border-top:none;
   margin:0 18px 18px;padding:20px;overflow-x:hidden;
