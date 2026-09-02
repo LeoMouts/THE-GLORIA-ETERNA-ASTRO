@@ -49,51 +49,6 @@ function crestInitials(name){
   if(words.length===1) return words[0].slice(0,3).toUpperCase();
   return words.slice(0,3).map(w=>w[0]).join("").toUpperCase();
 }
-// broadcast-style 3-letter code (BOC, RIV, FLA...) — first three letters of the club's own
-// name, not an acronym of every word, matching how score bugs actually abbreviate clubs.
-const ACCENT_MAP = {"á":"a","à":"a","â":"a","ã":"a","ä":"a","é":"e","è":"e","ê":"e","ë":"e","í":"i","ì":"i","î":"i","ï":"i","ó":"o","ò":"o","ô":"o","õ":"o","ö":"o","ú":"u","ù":"u","û":"u","ü":"u","ç":"c","ñ":"n"};
-function stripAccents(s){
-  return s.split("").map(ch=>ACCENT_MAP[ch.toLowerCase()]||ch).join("");
-}
-function broadcastAbbr(name){
-  const stop = new Set(["de","del","da","dos","das","la","el","e","fc","sc","central","real"]);
-  const words = name.split(/\s+/).filter(w=>!stop.has(w.toLowerCase()));
-  const w = stripAccents(words[0]||name);
-  return w.slice(0,3).toUpperCase();
-}
-// the CONMEBOL-style score bug: team codes flanking the score with the trophy silhouette in the
-// middle, a thin colored flag stripe from each club's own palette at the outer edges, and the
-// match clock in its own chip below — used for both the live tick and the final result screen.
-function renderBroadcastScoreboard(homeName, awayName, scoreHome, scoreAway, clockLabel){
-  const [hc1,hc2] = TEAM_COLORS[homeName] || ["#3E8ED0","#122720"];
-  const [ac1,ac2] = TEAM_COLORS[awayName] || ["#3E8ED0","#122720"];
-  // a gold ribbon (tapered/pointed ends) with a black plaque inset inside it — the club-color
-  // flags peek out from behind the ribbon's points, the trophy floats centered on top of it,
-  // and the clock is its own small tab hanging off the bottom edge, all as one graphic unit.
-  const HEX = "polygon(4% 0,96% 0,100% 50%,96% 100%,4% 100%,0 50%)";
-  return `
-  <div style="position:relative;max-width:380px;margin:0 auto;padding:22px 0 18px;">
-    <div style="position:absolute;left:2px;top:24px;width:52px;height:38px;background:linear-gradient(135deg,${hc1},${hc2});clip-path:polygon(0 0,100% 0,30% 100%,0 100%);z-index:1;"></div>
-    <div style="position:absolute;right:2px;top:24px;width:52px;height:38px;background:linear-gradient(135deg,${ac1},${ac2});clip-path:polygon(100% 0,100% 100%,70% 100%,0 0);z-index:1;"></div>
-    <div style="position:relative;z-index:2;height:38px;margin:0 8px;background:linear-gradient(180deg,var(--marigold-bright),var(--marigold) 45%,var(--marigold-dim));clip-path:${HEX};display:flex;align-items:center;justify-content:center;">
-      <div style="width:calc(100% - 22px);height:30px;background:linear-gradient(180deg,#221d17,#0c0a08);clip-path:${HEX};display:flex;align-items:center;justify-content:center;gap:8px;">
-        <span style="font-family:var(--font-display);font-weight:800;font-size:14px;letter-spacing:.04em;color:#fff;">${esc(broadcastAbbr(homeName))}</span>
-        <span style="font-family:var(--font-display);font-weight:900;font-size:18px;color:#fff;min-width:14px;text-align:center;">${scoreHome}</span>
-        <span style="width:34px;flex-shrink:0;"></span>
-        <span style="font-family:var(--font-display);font-weight:900;font-size:18px;color:#fff;min-width:14px;text-align:center;">${scoreAway}</span>
-        <span style="font-family:var(--font-display);font-weight:800;font-size:14px;letter-spacing:.04em;color:#fff;">${esc(broadcastAbbr(awayName))}</span>
-      </div>
-    </div>
-    <div style="position:absolute;left:50%;top:2px;transform:translateX(-50%);width:38px;height:38px;z-index:3;display:flex;align-items:center;justify-content:center;">
-      ${trophyImg(34,1)}
-    </div>
-    <div style="position:absolute;left:50%;bottom:6px;transform:translate(-50%,50%);z-index:3;">
-      <span style="display:inline-block;background:linear-gradient(180deg,var(--marigold-bright),var(--marigold));border-radius:4px;padding:2px 3px;">
-        <span style="display:inline-block;background:#0c0a08;border-radius:2px;padding:2px 10px;font-family:var(--font-mono);font-size:12px;font-weight:700;color:#fff;letter-spacing:.03em;">${esc(clockLabel)}</span>
-      </span>
-    </div>
-  </div>`;
-}
 function crestSVG(teamName, size){
   size = size || 40;
   const logo = TEAM_LOGOS[teamName];
@@ -3075,10 +3030,19 @@ function renderMatch(){
   }
   const centerHtml = `
     <div class="tac faint tiny uc mb8">${esc(stageLbl)}</div>
-    ${renderBroadcastScoreboard(home, away, curHome, curAway, done?"FIM DE JOGO":lastMin+"'")}
-    <div class="row center" style="gap:28px;margin:10px 0 2px;">
-      <div class="tac"><span class="match-crest">${crestSVG(home,26)}</span><div class="tiny bold" style="margin-top:2px;">${esc(home)}</div></div>
-      <div class="tac"><span class="match-crest">${crestSVG(away,26)}</span><div class="tiny bold" style="margin-top:2px;">${esc(away)}</div></div>
+    <div class="scoreboard">
+      <div class="score-side">
+        <span class="match-crest">${crestSVG(home,40)}</span>
+        <div class="bold" style="font-size:15px;">${esc(home)}</div>
+      </div>
+      <div>
+        <div class="score-num">${curHome} - ${curAway}</div>
+        <div class="score-min tac">${done? "FIM DE JOGO" : lastMin+"'"}</div>
+      </div>
+      <div class="score-side">
+        <span class="match-crest">${crestSVG(away,40)}</span>
+        <div class="bold" style="font-size:15px;">${esc(away)}</div>
+      </div>
     </div>
     <div class="ticker" id="ticker">
       ${visibleEvents.length===0?`<div class="tick-row"><span class="dim">Bola rolando...</span></div>`:""}
