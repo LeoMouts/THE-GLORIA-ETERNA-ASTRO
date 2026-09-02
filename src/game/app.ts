@@ -578,6 +578,11 @@ function fmtMoney(v){
 function fmtMoneyFull(v){
   return "US$ " + Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
+// the abbreviated figure plus the full one in parentheses — the standard way money shows up
+// anywhere in the E-mail tab, so the exact number is never more than a glance away.
+function fmtMoneyBoth(v){
+  return `${fmtMoney(v)} (${fmtMoneyFull(v)})`;
+}
 // spells a number out in Portuguese ("1460000" -> "um milhão e quatrocentos e sessenta mil") —
 // a live caption under free-typed money fields so a stray/missing zero jumps out immediately,
 // instead of the user having to count digits to tell a mil from a milhão.
@@ -1080,7 +1085,7 @@ function queueOfferMail(playerId, playerName, club, category, value, offer, rng,
     type:"offer",
     subject: subjects[Math.floor(rng()*subjects.length)],
     from: club,
-    preview: `Proposta por ${playerName}: ${fmtMoney(offer)}.`,
+    preview: `Proposta por ${playerName}: ${fmtMoneyBoth(offer)}.`,
     payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0, posture: posture||OFFER_POSTURES[1].id },
   });
 }
@@ -1199,7 +1204,7 @@ function tickPendingOfferReplies(){
       type:"offer",
       subject: reSubject(mail.subject),
       from: pl.club,
-      preview: status==="withdrawn" ? `A negociação por ${pl.playerName} não avançou.` : `Nova posição sobre ${pl.playerName}: ${fmtMoney(newOffer)}.`,
+      preview: status==="withdrawn" ? `A negociação por ${pl.playerName} não avançou.` : `Nova posição sobre ${pl.playerName}: ${fmtMoneyBoth(newOffer)}.`,
       thread:[verdictLine],
       payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0, posture:pl.posture },
     });
@@ -1215,7 +1220,7 @@ function acceptMailOffer(mailId){
   ST.lineup = ST.lineup.map(id=> id===pl.playerId ? null : id);
   ST.budget += pl.offer;
   pl.status = "accepted";
-  ST.newsLog.unshift({title:"Venda concluída!", text:`${pl.playerName} foi vendido para o ${pl.club} por ${fmtMoney(pl.offer)}.`});
+  ST.newsLog.unshift({title:"Venda concluída!", text:`${pl.playerName} foi vendido para o ${pl.club} por ${fmtMoneyBoth(pl.offer)}.`});
   scheduleSave();
 }
 function rejectMailOffer(mailId){
@@ -1239,7 +1244,7 @@ function maybeGenerateOfferComeback(){
       type:"offer",
       subject: reSubject(mail.subject),
       from: pl.club,
-      preview:`Nova proposta por ${pl.playerName}: ${fmtMoney(newOffer)}.`,
+      preview:`Nova proposta por ${pl.playerName}: ${fmtMoneyBoth(newOffer)}.`,
       thread:[OFFER_COMEBACK_LINES[Math.floor(rng()*OFFER_COMEBACK_LINES.length)]],
       payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1, posture:pl.posture },
     });
@@ -2111,18 +2116,30 @@ function quickSell(playerId){
 const SCOUT_LEVEL_COST = [null, null, 500000, 1200000, 2400000, 4200000];
 const SCOUT_REPORT_DAYS = [null, 5, 4, 3, 2, 1];
 const SCOUT_LEVEL_LABELS = ["", "Iniciante", "Regional", "Nacional", "Continental", "Global"];
+// the "soft ceiling" a report at this level is built around — a candidate above it isn't
+// impossible, just heavily discounted the further over they are, so a level-1 network can
+// still get lucky once in a while but overwhelmingly surfaces sub-80-potential kids, while a
+// level-5 global network finds the very best prospects almost every time.
+const SCOUT_LEVEL_POT_CAP = [null, 78, 84, 88, 92, 99];
 function generateScoutReport(){
   const level = ST.scoutLevel||1;
+  const potCap = SCOUT_LEVEL_POT_CAP[level];
   const rng = E.makeRNG(nextSeed());
   // a bigger network doesn't just work faster — it also casts a wider net, surfacing a few
   // more (and slightly older, still-promising) prospects than a level-1 network ever would.
   const ageMax = Math.min(23+(level-1), 27);
   const candidates = allPlayersList(ST.teamId)
     .filter(({p})=>p.age<=ageMax && p.pot-p.ovr>=4);
-  // weighted random sample (no replacement), favoring the higher-upside prospects but never
-  // deterministic — so a fresh report genuinely reshuffles who shows up, and different careers
-  // (a fresh RNG stream each time) don't all surface the same names.
-  const pool = candidates.map(c=>({c, score: Math.max(1, (c.p.pot-c.p.ovr)*2 + c.p.pot)}));
+  // weighted random sample (no replacement), favoring higher-upside prospects but never
+  // deterministic — so a fresh report genuinely reshuffles who shows up. Potential above this
+  // level's ceiling gets multiplied down hard (0.35 per point over), which is what makes a
+  // level-1 report almost never turn up an 80+ potential kid while a level-5 one always can.
+  const pool = candidates.map(c=>{
+    const over = Math.max(0, c.p.pot-potCap);
+    const penalty = Math.pow(0.35, over);
+    const score = Math.max(0.01, ((c.p.pot-c.p.ovr)*2 + c.p.pot) * penalty);
+    return {c, score};
+  });
   const picked = [];
   const n = Math.min(6+level*2, pool.length);
   for(let i=0;i<n;i++){
@@ -2162,6 +2179,8 @@ function tickScoutReport(){
     body:"Seu relatório de olheiros está pronto — confira a aba Olheiro para ver os nomes.",
   });
 }
+// leveling up is a paid, deliberate upgrade — it pays off immediately with a fresh report
+// built around the new (higher) potential ceiling, no waiting and no cooldown gate.
 function upgradeScoutLevel(){
   const level = ST.scoutLevel||1;
   if(level>=5) return;
@@ -2169,7 +2188,16 @@ function upgradeScoutLevel(){
   if(ST.budget < cost) return;
   ST.budget -= cost;
   ST.scoutLevel = level+1;
+  ST.scoutReportETA = null; // a paid upgrade always wins over a report already in progress
+  const hadReport = !!ST.scoutReport;
+  generateScoutReport();
   ST.newsLog.unshift({title:"Rede de olheiros ampliada", text:`Sua rede de olheiros subiu para o nível ${ST.scoutLevel} (${SCOUT_LEVEL_LABELS[ST.scoutLevel]}), por ${fmtMoney(cost)}.`});
+  addMail({
+    type:"scout", subject:`Olheiros nível ${ST.scoutLevel}: novo relatório`,
+    from:"Departamento de Olheiros",
+    preview:`Rede ampliada para o nível ${ST.scoutLevel} — relatório ${hadReport?"atualizado":"gerado"} na hora.`,
+    body:`Com a rede de olheiros no nível ${ST.scoutLevel} (${SCOUT_LEVEL_LABELS[ST.scoutLevel]}), já preparamos um relatório novo — e melhor — pra você. Confira a aba Olheiro.`,
+  });
   scheduleSave();
 }
 
@@ -3445,7 +3473,7 @@ function renderMailDetail(m){
   return `${header}<div class="panel mt16">${m.body}</div>`;
 }
 function offerStatusBanner(pl){
-  if(pl.status==="accepted") return `<div class="mail-status mail-status-good">✅ Venda concluída — ${fmtMoney(pl.offer)} creditados ao orçamento.</div>`;
+  if(pl.status==="accepted") return `<div class="mail-status mail-status-good">✅ Venda concluída — ${fmtMoneyBoth(pl.offer)} creditados ao orçamento.</div>`;
   if(pl.status==="rejected") return `<div class="mail-status">Você recusou esta proposta.</div>`;
   if(pl.status==="withdrawn") return `<div class="mail-status mail-status-bad">O clube retirou a proposta após a negociação.</div>`;
   if(pl.status==="superseded") return `<div class="mail-status">Substituída por uma proposta mais recente.</div>`;
@@ -3468,12 +3496,12 @@ function renderOfferMailBody(m){
       <div><div class="faint tiny uc">Clube interessado</div><div class="bold">${esc(pl.club)}</div></div>
       <div class="tar"><div class="faint tiny uc">Jogador</div><div class="bold">${esc(pl.playerName)}</div></div>
     </div>
-    <div class="contract-kv mt12"><span>Valor de mercado</span><span>${fmtMoney(pl.value)} <span class="faint">(${fmtMoneyFull(pl.value)})</span></span></div>
-    <div class="contract-kv"><span>Proposta atual</span><span class="gold bold">${fmtMoney(pl.offer)} <span class="faint">(${fmtMoneyFull(pl.offer)})</span></span></div>
+    <div class="contract-kv mt12"><span>Valor de mercado</span><span>${fmtMoneyBoth(pl.value)}</span></div>
+    <div class="contract-kv"><span>Proposta atual</span><span class="gold bold">${fmtMoneyBoth(pl.offer)}</span></div>
     <div class="contract-kv"><span>Acima do valor</span><span class="${pct>=0?"green":"red"} bold">${pct>=0?"+":""}${pct}%</span></div>
     ${pending?`<div class="mail-posture-hint mt12">
       <b>${esc(posture.label)}.</b> Nossa estimativa: dá pra pedir com boas chances até cerca de
-      <b class="gold">${fmtMoney(estMax)}</b> <span class="faint">(${fmtMoneyFull(estMax)})</span>.
+      <b class="gold">${fmtMoneyBoth(estMax)}</b>.
       Pedir acima disso às vezes funciona, mas nem sempre — o risco é a negociação melar.
     </div>`:""}
     ${thread?`<div class="mt12">${thread}</div>`:""}
@@ -3483,7 +3511,7 @@ function renderOfferMailBody(m){
       <button class="btn btn-gold grow" onclick="Game.acceptMailOffer('${m.id}')">✒️ Aceitar (${fmtMoney(pl.offer)})</button>
     </div>
     <div class="mt16">
-      <div class="tiny faint uc mb8">Pedir outro valor (entre ${fmtMoney(range.minAsk)} e ${fmtMoney(range.maxAsk)})</div>
+      <div class="tiny faint uc mb8">Pedir outro valor — entre ${fmtMoneyBoth(range.minAsk)} e ${fmtMoneyBoth(range.maxAsk)}</div>
       <div class="row" style="gap:8px;">
         <input id="askInput_${m.id}" type="number" class="input-inline grow" value="${suggested}" min="${range.minAsk}" max="${range.maxAsk}" step="5000"/>
         <button class="btn btn-sm" onclick="Game.negotiateOffer('${m.id}', document.getElementById('askInput_${m.id}').value)">Pedir esse valor</button>
