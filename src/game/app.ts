@@ -1090,26 +1090,53 @@ const OFFER_COMEBACK_LINES = [
   "Depois da sua recusa, a diretoria autorizou um valor maior.",
   "Ainda temos interesse — aqui vai uma nova oferta.",
 ];
-// counters for a while — "pedir um pouco mais" asks modestly and rarely upsets the buyer;
-// "pedir muito mais" swings for a much bigger number but risks the club getting fed up
-// and pulling the offer entirely, especially the more times it's been pushed already.
-function negotiateOffer(mailId, mode){
+const OFFER_THINK_LINES = [
+  "Precisamos de alguns dias para levar isso à diretoria.",
+  "Vamos conversar internamente e te respondemos em breve.",
+  "Deixa a gente pensar com calma sobre esse valor.",
+  "Repassamos ao departamento financeiro — aguarde nossa resposta.",
+];
+const OFFER_COUNTER_LINES = [
+  "Pensamos bastante e chegamos a um novo valor.",
+  "Depois de avaliar com calma, essa é a nossa contraproposta.",
+  "Não é bem o que você pediu, mas é o que conseguimos oferecer agora.",
+];
+// a subject only ever gets one "RE: " on it, even through a long back-and-forth thread.
+function reSubject(subject){ return subject.indexOf("RE: ")===0 ? subject : "RE: "+subject; }
+// the range the manager is allowed to type into the "pedir outro valor" box — can't ask for
+// less than what's already on the table (that's what Aceitar is for), and capped well above
+// market value so an absurd ask is possible but not infinite.
+function offerAskRange(pl){
+  const minAsk = Math.round(pl.offer*1.05/5000)*5000;
+  const maxAsk = Math.max(minAsk+5000, Math.round(pl.value*3/5000)*5000);
+  return { minAsk, maxAsk };
+}
+// the manager types in the exact value they want to ask for (clamped to offerAskRange).
+// About half the time the club doesn't answer on the spot — it asks for a few days to think
+// it over (see tickPendingOfferReplies) — otherwise it reacts immediately: raises to meet the
+// ask, holds firm, or — if the ask was pushed too far, too many times — gets fed up and walks.
+function negotiateOffer(mailId, askedAmountRaw){
   const mail = findMail(mailId);
   if(!mail || mail.type!=="offer" || mail.payload.status!=="pending") return;
   const pl = mail.payload;
   const rng = E.makeRNG(nextSeed());
+  const {minAsk, maxAsk} = offerAskRange(pl);
+  const asked = Math.round(E.clamp(Number(askedAmountRaw)||minAsk, minAsk, maxAsk)/5000)*5000;
   pl.round++;
-  const pct = mode==="big" ? (0.22+rng()*0.18) : (0.08+rng()*0.09);
-  const asked = Math.round(pl.offer*(1+pct)/5000)*5000;
-  const ratio = asked/pl.value;
-  const pushRisk = (mode==="big"?0.16:0.05)*pl.round + Math.max(0, ratio-1.6)*0.7;
-  const angerChance = E.clamp(pushRisk, 0, 0.85);
+  const pushRatio = asked/pl.offer;
+  const valueRatio = asked/pl.value;
+  const angerChance = E.clamp((pushRatio-1.15)*0.9 + Math.max(0, valueRatio-1.6)*0.55 + pl.round*0.05, 0, 0.85);
   if(!mail.thread) mail.thread = [];
   if(rng() < angerChance){
     pl.status = "withdrawn";
     mail.thread.push(OFFER_WITHDRAW_LINES[Math.floor(rng()*OFFER_WITHDRAW_LINES.length)]);
+  } else if(rng() < 0.5){
+    pl.status = "awaiting_reply";
+    pl.pendingAsk = asked;
+    pl.pendingReplyDays = 1 + Math.floor(rng()*3);
+    mail.thread.push(OFFER_THINK_LINES[Math.floor(rng()*OFFER_THINK_LINES.length)]);
   } else {
-    const acceptChance = E.clamp(0.85 - (ratio-1.0)*0.55, 0.1, 0.92);
+    const acceptChance = E.clamp(0.85 - (valueRatio-1.0)*0.55, 0.1, 0.92);
     if(rng() < acceptChance){
       pl.offer = asked;
       mail.thread.push(OFFER_RAISE_LINES[Math.floor(rng()*OFFER_RAISE_LINES.length)]);
@@ -1118,6 +1145,43 @@ function negotiateOffer(mailId, mode){
     }
   }
   scheduleSave();
+}
+// resolves every negotiation the club asked "a few days to think about" once its countdown
+// reaches zero — a brand-new "RE: <assunto original>" mail arrives with the actual verdict,
+// same as a real e-mail reply thread, instead of the answer just appearing silently.
+function tickPendingOfferReplies(){
+  const rng = E.makeRNG(nextSeed());
+  inboxList().filter(m=>m.type==="offer" && m.payload.status==="awaiting_reply").forEach(mail=>{
+    const pl = mail.payload;
+    pl.pendingReplyDays = (pl.pendingReplyDays==null?1:pl.pendingReplyDays)-1;
+    if(pl.pendingReplyDays>0) return;
+    const asked = pl.pendingAsk||pl.offer;
+    const valueRatio = asked/pl.value;
+    const angerChance = E.clamp(Math.max(0, valueRatio-1.6)*0.5 + pl.round*0.04, 0, 0.7);
+    let newOffer = pl.offer, status = "pending", verdictLine;
+    if(rng() < angerChance){
+      status = "withdrawn";
+      verdictLine = OFFER_WITHDRAW_LINES[Math.floor(rng()*OFFER_WITHDRAW_LINES.length)];
+    } else {
+      const acceptChance = E.clamp(0.6-(valueRatio-1.0)*0.4, 0.15, 0.85);
+      if(rng() < acceptChance){
+        newOffer = asked;
+        verdictLine = OFFER_RAISE_LINES[Math.floor(rng()*OFFER_RAISE_LINES.length)];
+      } else {
+        newOffer = Math.round((pl.offer+asked)/2/5000)*5000;
+        verdictLine = OFFER_COUNTER_LINES[Math.floor(rng()*OFFER_COUNTER_LINES.length)];
+      }
+    }
+    pl.status = "answered"; // this mail is now historical — the reply below carries the live thread
+    addMail({
+      type:"offer",
+      subject: reSubject(mail.subject),
+      from: pl.club,
+      preview: status==="withdrawn" ? `A negociação por ${pl.playerName} não avançou.` : `Nova posição sobre ${pl.playerName}: ${fmtMoney(newOffer)}.`,
+      thread:[verdictLine],
+      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0 },
+    });
+  });
 }
 function acceptMailOffer(mailId){
   const mail = findMail(mailId);
@@ -1151,9 +1215,10 @@ function maybeGenerateOfferComeback(){
     pl.status = "superseded";
     addMail({
       type:"offer",
-      subject: OFFER_COMEBACK_LINES[Math.floor(rng()*OFFER_COMEBACK_LINES.length)],
+      subject: reSubject(mail.subject),
       from: pl.club,
       preview:`Nova proposta por ${pl.playerName}: ${fmtMoney(newOffer)}.`,
+      thread:[OFFER_COMEBACK_LINES[Math.floor(rng()*OFFER_COMEBACK_LINES.length)]],
       payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1 },
     });
     break; // at most one comeback mail per day, keeps the inbox from flooding
@@ -1162,6 +1227,7 @@ function maybeGenerateOfferComeback(){
 // runs once per "AVANÇAR DIA" click — everything that can land in the inbox on a given day.
 function generateDailyMail(){
   maybeGenerateScoutMail();
+  tickPendingOfferReplies();
   maybeIncomingOffer(0.14);
   maybeGenerateOfferComeback();
   maybeGenerateTrainingInjury();
@@ -2555,7 +2621,9 @@ function getNextUserMatch(){
 // days, with a ball icon dropped on whichever cell the next match actually falls on
 // (nothing is shown on the strip itself once the match is more than 4 days out; the
 // caption line below it still says exactly how many days remain).
-function renderCalendarStrip(){
+// the match-day cell shows the actual opponent's crest (not a generic ball icon) — a tiny
+// preview of who's up, right on the calendar itself.
+function renderCalendarStrip(oppName){
   const days = ST.calendarDaysLeft;
   const todayIdx = ST.calendarWeekdayIdx;
   let cells = "";
@@ -2564,16 +2632,39 @@ function renderCalendarStrip(){
     const isMatchDay = i===days;
     cells += `<div class="cal-day${isMatchDay?' cal-day-match':''}${i===0?' cal-day-today':''}">
       <div class="cal-day-label">${WEEKDAYS[wIdx]}</div>
-      <div class="cal-day-icon">${isMatchDay?'⚽':''}</div>
+      <div class="cal-day-icon">${isMatchDay?crestSVG(oppName,20):''}</div>
     </div>`;
   }
-  return `<div class="cal-strip mt24">${cells}</div>`;
+  return `<div class="cal-panel mt16">
+    <div class="cal-panel-title">Avançar</div>
+    <div class="cal-strip">${cells}</div>
+  </div>`;
 }
 function renderNextMatchCard(){
   const nm = getNextUserMatch();
   if(!nm) return "";
   ensureCalendarCountdown();
   const days = ST.calendarDaysLeft;
+  const oppName = nm.home===ST.teamId ? nm.away : nm.home;
+  // match day itself drops the calendar entirely and goes back to exactly how this card
+  // worked before AVANÇAR DIA existed: simulate straight away, at whatever pace/speed.
+  const actionBlock = days<=0
+    ? `<div class="gold bold uc tac mt16" style="letter-spacing:.06em;">⚽ Dia do jogo!</div>
+       <div class="btn-row center mt16">
+         <button class="btn btn-gold" onclick="Game.advanceSlow()">▶ Simulação Lenta</button>
+         <button class="btn" onclick="Game.advanceFast()">⏭ Ir para o Resultado</button>
+       </div>
+       <div class="btn-row center mt8">
+         <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
+       </div>`
+    : `${renderCalendarStrip(oppName)}
+       <div class="tac dim small mt8">Próximo jogo em ${days} dia${days===1?"":"s"}</div>
+       <div class="btn-row center mt16">
+         <button class="btn btn-gold btn-lg" onclick="Game.advanceDay()">AVANÇAR DIA</button>
+       </div>
+       <div class="btn-row center mt8">
+         <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
+       </div>`;
   return `<div class="panel" style="text-align:center;">
     <div class="faint tiny uc mb12">${esc(nm.label)}</div>
     <div class="row center" style="gap:28px;">
@@ -2587,14 +2678,7 @@ function renderNextMatchCard(){
         <div class="bold small mt8">${esc(nm.away)}</div>
       </div>
     </div>
-    ${renderCalendarStrip()}
-    <div class="tac dim small mt8">${days<=0?"Hoje tem jogo!":`Próximo jogo em ${days} dia${days===1?"":"s"}`}</div>
-    <div class="btn-row center mt16">
-      <button class="btn btn-gold btn-lg" onclick="Game.advanceDay()">AVANÇAR DIA</button>
-    </div>
-    <div class="btn-row center mt8">
-      <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
-    </div>
+    ${actionBlock}
   </div>`;
 }
 // the Pré-Libertadores flavor of the Competição tab: same "próximo jogo" card (with its
@@ -3207,6 +3291,8 @@ function offerStatusBanner(pl){
   if(pl.status==="withdrawn") return `<div class="mail-status mail-status-bad">O clube retirou a proposta após a negociação.</div>`;
   if(pl.status==="superseded") return `<div class="mail-status">Substituída por uma proposta mais recente.</div>`;
   if(pl.status==="void") return `<div class="mail-status mail-status-bad">O jogador já não está mais disponível.</div>`;
+  if(pl.status==="awaiting_reply") return `<div class="mail-status">⏳ O clube pediu um tempo para pensar — responde em até ${pl.pendingReplyDays||1} dia(s). Avance os dias em Competição para receber a resposta.</div>`;
+  if(pl.status==="answered") return `<div class="mail-status">Essa negociação já teve resposta — confira o e-mail mais recente na caixa de entrada.</div>`;
   return "";
 }
 function renderOfferMailBody(m){
@@ -3214,6 +3300,8 @@ function renderOfferMailBody(m){
   const pct = Math.round((pl.offer/pl.value-1)*100);
   const thread = (m.thread||[]).map(t=>`<div class="mail-thread-line">"${esc(t)}"</div>`).join("");
   const pending = pl.status==="pending";
+  const range = offerAskRange(pl);
+  const suggested = E.clamp(Math.round(pl.offer*1.2/5000)*5000, range.minAsk, range.maxAsk);
   return `<div class="panel mt16">
     <div class="row" style="justify-content:space-between;">
       <div><div class="faint tiny uc">Clube interessado</div><div class="bold">${esc(pl.club)}</div></div>
@@ -3228,11 +3316,14 @@ function renderOfferMailBody(m){
     <div class="btn-row mt16">
       <button class="btn btn-gold grow" onclick="Game.acceptMailOffer('${m.id}')">✒️ Aceitar (${fmtMoney(pl.offer)})</button>
     </div>
-    <div class="btn-row mt8">
-      <button class="btn btn-sm" onclick="Game.negotiateOffer('${m.id}','small')">Pedir um pouco mais</button>
-      <button class="btn btn-sm" onclick="Game.negotiateOffer('${m.id}','big')">Pedir muito mais</button>
+    <div class="mt16">
+      <div class="tiny faint uc mb8">Pedir outro valor (entre ${fmtMoney(range.minAsk)} e ${fmtMoney(range.maxAsk)})</div>
+      <div class="row" style="gap:8px;">
+        <input id="askInput_${m.id}" type="number" class="input-inline grow" value="${suggested}" min="${range.minAsk}" max="${range.maxAsk}" step="5000"/>
+        <button class="btn btn-sm" onclick="Game.negotiateOffer('${m.id}', document.getElementById('askInput_${m.id}').value)">Pedir esse valor</button>
+      </div>
     </div>
-    <div class="btn-row mt8">
+    <div class="btn-row mt16">
       <button class="btn btn-sm btn-danger" onclick="Game.rejectMailOffer('${m.id}')">Recusar</button>
     </div>`:""}
   </div>`;
@@ -3931,24 +4022,27 @@ const Game = {
   // leave the screen stuck mid-transition; routing through a proper Game method fixes that.)
   goEditLineup(){ ST.hubTab='elenco'; ST.stage='hub'; render(); },
   advance(){ advanceTournament(); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
+  // match-day buttons — back to their pre-AVANÇAR-DIA behavior: simulate right away, at
+  // whichever pace, once the calendar has actually counted down to the day of the match.
+  advanceSlow(){ advanceWithSpeed("slow"); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
+  advanceFast(){ advanceWithSpeed("fast"); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
   // "AVANÇAR DIA": ticks the calendar forward one day, rolls whatever mail that day
-  // brings, and — once the countdown hits zero — hands off to the existing
-  // advanceTournament() flow exactly as the old speed buttons used to.
+  // brings, and — once the countdown hits zero — swaps this card over to the match-day
+  // buttons above instead of jumping into the match itself.
   advanceDay(){
     ensureCalendarCountdown();
-    ST.calendarDaysLeft--;
+    if(ST.calendarDaysLeft>0) ST.calendarDaysLeft--;
     ST.calendarWeekdayIdx = (ST.calendarWeekdayIdx+1)%7;
     generateDailyMail();
-    if(ST.calendarDaysLeft<=0){
-      ST.calendarDaysLeft = null;
-      advanceTournament();
-    }
+    // calendarDaysLeft hitting 0 just flips the card over to "DIA DO JOGO" — the actual
+    // advanceTournament() call happens when the player clicks one of those buttons, exactly
+    // like it always did before AVANÇAR DIA existed.
     scheduleSave();
     render();
   },
   openMail(id){ const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
   closeMail(){ ST.openMailId=null; render(); },
-  negotiateOffer(id, mode){ negotiateOffer(id, mode); render(); },
+  negotiateOffer(id, askedAmount){ negotiateOffer(id, askedAmount); render(); },
   acceptMailOffer(id){ acceptMailOffer(id); render(); },
   rejectMailOffer(id){ rejectMailOffer(id); render(); },
 
