@@ -703,6 +703,12 @@ function newCareerState(){
     careerStats:{goals:{}, assists:{}, signings:[]},
     matchSpeed:"normal", // "slow" | "normal" | "fast" — how quickly live events tick across the screen
     matchClockMinute:0, // only actually driven in "slow" mode's minute-by-minute clock
+    calendarDaysLeft:null, // days left until the next match — see ensureCalendarCountdown()
+    calendarWeekdayIdx:1, // 0=SEG..6=DOM — which weekday "today" currently is
+    inbox:[], // E-mail tab: [{id,type,subject,from,dayLabel,read,preview,body?,payload?,thread?}]
+    mailSeq:0, // increasing counter used to mint unique inbox mail ids
+    openMailId:null, // id of the inbox mail currently open in the E-mail tab, if any
+    scoutedFixtureKey:null, // guards against sending the same opponent scouting report twice
   };
 }
 
@@ -721,6 +727,11 @@ async function initApp(){
     // "prelib_bracket" was a standalone screen from an earlier build — the bracket now lives
     // inside the normal hub's Competição tab, so an old save pointing at it just resumes there.
     if(ST.stage==="prelib_bracket"){ ST.stage="hub"; ST.hubTab="competicao"; }
+    // backfill for saves from before the day-calendar / e-mail inbox existed — lets an
+    // older save resume normally instead of needing a full reset.
+    if(!Array.isArray(ST.inbox)) ST.inbox = [];
+    if(ST.calendarWeekdayIdx==null) ST.calendarWeekdayIdx = 1;
+    if(ST.mailSeq==null) ST.mailSeq = 0;
     recomputeIdCounter();
   } else if(loaded){
     // an older/incompatible save from a previous version of the game — cannot be
@@ -920,6 +931,240 @@ function decrementAvailability(){
     if(p.injuredMatches>0){ p.injuredMatches--; if(p.injuredMatches<=0){p.injuredMatches=0; p.injured=false;} }
     if(p.form) p.form = Math.round(p.form*0.5*10)/10;
   }));
+}
+
+// ============================================================
+// CALENDAR ("AVANÇAR DIA") + E-MAIL INBOX
+// ============================================================
+// A lightweight day-by-day pacing layer sitting on top of the existing round-based
+// tournament advance: the hub's next-match card now counts down 3-4 days (instead of
+// jumping straight into the match), and every day advanced has a chance to drop new
+// mail — transfer offers, injury updates, opponent scouting — into the inbox. When the
+// countdown reaches zero, advanceTournament() runs exactly as it always did, landing on
+// the existing pre-match "Confirmar escalação" screen (with its own speed picker).
+const WEEKDAYS = ["SEG","TER","QUA","QUI","SEX","SÁB","DOM"];
+function ensureCalendarCountdown(){
+  if(ST.calendarDaysLeft==null){
+    const rng = E.makeRNG(nextSeed());
+    ST.calendarDaysLeft = 3 + Math.floor(rng()*2); // 3 or 4 days until the next match
+  }
+}
+function mintMailId(){ ST.mailSeq = (ST.mailSeq||0)+1; return "mail"+ST.mailSeq; }
+function inboxList(){ return Array.isArray(ST.inbox) ? ST.inbox : (ST.inbox=[]); }
+function findMail(id){ return inboxList().find(m=>m.id===id); }
+function unreadMailCount(){ return inboxList().filter(m=>!m.read).length; }
+// every new mail lands with today's weekday stamped on it and unread — callers only
+// need to supply {type, subject, from, preview, body?, payload?}.
+function addMail(mail){
+  mail.id = mintMailId();
+  mail.dayLabel = WEEKDAYS[ST.calendarWeekdayIdx];
+  mail.read = false;
+  inboxList().unshift(mail);
+  scheduleSave();
+}
+
+const MEDICAL_SUBJECTS = ["Boletim médico","Departamento Médico informa","Atualização do DM","Informe do fisioterapeuta"];
+const INJURY_KINDS = [
+  "lesão muscular na coxa","entorse no tornozelo","lesão no joelho","desgaste na panturrilha",
+  "contusão no ombro","lesão na virilha","dores lombares","corte no supercílio (levou pontos)",
+  "luxação no dedo","estiramento no posterior de coxa","pancada no tornozelo","fadiga muscular",
+];
+// summarizes any of the user's own players hurt in the match that just finished — pulled
+// straight from that match's own injury events, so it never invents anything the engine
+// didn't already simulate.
+function generatePostMatchMail(pm){
+  if(!pm || !pm.result) return;
+  const mySide = pm.ref.home===ST.teamId ? "home" : "away";
+  const injuries = pm.result.events.filter(ev=>ev.type==="injury" && ev.side===mySide);
+  if(!injuries.length) return;
+  const rng = E.makeRNG(nextSeed());
+  const lines = injuries.map(ev=>{
+    const kind = INJURY_KINDS[Math.floor(rng()*INJURY_KINDS.length)];
+    const days = Math.round(ev.matchesOut*(3+rng()));
+    return `<b>${esc(ev.player)}</b> sofreu ${kind} e deve desfalcar o time por cerca de ${ev.matchesOut} jogo(s) (~${days} dias).`;
+  });
+  addMail({
+    type:"injury",
+    subject: MEDICAL_SUBJECTS[Math.floor(rng()*MEDICAL_SUBJECTS.length)],
+    from:"Departamento Médico",
+    preview: injuries.length===1 ? `${injuries[0].player} está fora por lesão.` : `${injuries.length} jogadores machucados na partida.`,
+    body: lines.join("<br><br>"),
+  });
+}
+const TRAINING_INJURY_LINES = [
+  "sentiu um desconforto durante o treino de hoje",
+  "torceu o tornozelo em um treino de finalização",
+  "precisou ser poupado após sentir a coxa",
+  "levou uma pancada no treino tático e passa por avaliação",
+];
+// a small, independent chance of a training knock on a rest day — separate from
+// match-day injuries, purely to give the days between matches some real content.
+function maybeGenerateTrainingInjury(){
+  const squad = myTeam().players.filter(p=>!p.injured && !p.suspended);
+  if(!squad.length) return;
+  const rng = E.makeRNG(nextSeed());
+  if(rng() >= 0.05) return; // ~5% per day
+  const p = squad[Math.floor(rng()*squad.length)];
+  const days = 1 + Math.floor(rng()*3); // out for 1-3 games, same semantics as a match injury
+  p.injured = true; p.injuredMatches = Math.max(p.injuredMatches||0, days);
+  addMail({
+    type:"injury",
+    subject: MEDICAL_SUBJECTS[Math.floor(rng()*MEDICAL_SUBJECTS.length)],
+    from:"Departamento Médico",
+    preview:`${p.name} desfalca o time.`,
+    body:`<b>${esc(p.name)}</b> ${TRAINING_INJURY_LINES[Math.floor(rng()*TRAINING_INJURY_LINES.length)]} e vai desfalcar o time por cerca de ${days} jogo(s).`,
+  });
+}
+function oppStrengthWord(avg){
+  return avg>=82 ? "um elenco de altíssimo nível" : avg>=76 ? "um elenco forte" : avg>=70 ? "um elenco equilibrado" : "um elenco mais modesto";
+}
+const SCOUT_OPENERS = [
+  "Fica o alerta antes do jogo:",
+  "Relatório do olheiro:",
+  "Nosso olheiro voltou da viagem com boas informações:",
+  "Antes de enfrentá-los, vale a pena saber:",
+];
+// sends one scouting report per fixture, a couple of days out — guarded by
+// scoutedFixtureKey so it never fires twice for the same match.
+function maybeGenerateScoutMail(){
+  const nm = getNextUserMatch();
+  if(!nm || ST.calendarDaysLeft!==2) return;
+  const key = nm.home+"-"+nm.away+"-"+ST.seasonYear+"-"+(ST.competition&&ST.competition.phase)+"-"+(ST.prelib?ST.prelib.phase:"");
+  if(ST.scoutedFixtureKey===key) return;
+  ST.scoutedFixtureKey = key;
+  const oppName = nm.home===ST.teamId ? nm.away : nm.home;
+  const opp = ST.world.teams[oppName];
+  if(!opp) return;
+  const rng = E.makeRNG(nextSeed());
+  const best = opp.players.slice().sort((a,b)=>b.ovr-a.ovr)[0];
+  const topScorer = Object.values(ST.competition.scorers||{}).filter(s=>s.team===oppName).sort((a,b)=>b.goals-a.goals)[0];
+  const avg = teamAvgOvr(opp);
+  const lines = [
+    SCOUT_OPENERS[Math.floor(rng()*SCOUT_OPENERS.length)],
+    `${esc(oppName)} tem ${oppStrengthWord(avg)} (média ${avg.toFixed(0)} de overall) e costuma jogar no 4-3-3.`,
+    best ? `Fique de olho em <b>${esc(best.name)}</b> (${esc(best.pos)}, ${best.ovr} de overall) — é o melhor jogador deles.` : "",
+    topScorer ? `${esc(topScorer.name)} é o artilheiro do time na temporada, com ${topScorer.goals} gol(s).` : "Ainda não têm um artilheiro destacado nesta temporada.",
+  ].filter(Boolean);
+  addMail({
+    type:"scout",
+    subject:`Análise: ${oppName}`,
+    from:"Olheiro-chefe",
+    preview:`Relatório sobre o ${oppName} antes do próximo jogo.`,
+    body: lines.join("<br><br>"),
+  });
+}
+
+const OFFER_SUBJECTS_ARAB = ["Proposta inacreditável chegou","Oferta chocante de fora da Libertadores","Um clube árabe fez uma fortuna por ele"];
+const OFFER_SUBJECTS_EURO = ["Proposta pelo seu atleta","Sondagem de um clube de fora","Interesse por um dos seus titulares"];
+function queueOfferMail(playerId, playerName, club, category, value, offer, rng){
+  const isArab = category==="arabe";
+  const subjects = isArab ? OFFER_SUBJECTS_ARAB : OFFER_SUBJECTS_EURO;
+  addMail({
+    type:"offer",
+    subject: subjects[Math.floor(rng()*subjects.length)],
+    from: club,
+    preview: `Proposta por ${playerName}: ${fmtMoney(offer)}.`,
+    payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0 },
+  });
+}
+const OFFER_RAISE_LINES = [
+  "Certo, aceitamos subir a proposta.",
+  "Conversamos com a diretoria e topamos esse valor.",
+  "Fechado — vamos até esse valor.",
+  "Está um pouco acima do que queríamos, mas aceitamos.",
+];
+const OFFER_HOLD_LINES = [
+  "Esse é o nosso limite por enquanto.",
+  "Não temos como subir mais que isso agora.",
+  "Vamos manter a proposta como está.",
+  "Precisamos pensar — por ora, mantemos o valor oferecido.",
+];
+const OFFER_WITHDRAW_LINES = [
+  "Isso está muito acima do que consideramos razoável. Vamos retirar a proposta.",
+  "Achamos que o pedido ficou exagerado. Desistimos, por ora.",
+  "Não vamos continuar essa negociação nesses termos.",
+  "A diretoria decidiu encerrar as conversas por aqui.",
+];
+const OFFER_COMEBACK_LINES = [
+  "Reconsideramos e voltamos com uma proposta melhor.",
+  "Depois da sua recusa, a diretoria autorizou um valor maior.",
+  "Ainda temos interesse — aqui vai uma nova oferta.",
+];
+// counters for a while — "pedir um pouco mais" asks modestly and rarely upsets the buyer;
+// "pedir muito mais" swings for a much bigger number but risks the club getting fed up
+// and pulling the offer entirely, especially the more times it's been pushed already.
+function negotiateOffer(mailId, mode){
+  const mail = findMail(mailId);
+  if(!mail || mail.type!=="offer" || mail.payload.status!=="pending") return;
+  const pl = mail.payload;
+  const rng = E.makeRNG(nextSeed());
+  pl.round++;
+  const pct = mode==="big" ? (0.22+rng()*0.18) : (0.08+rng()*0.09);
+  const asked = Math.round(pl.offer*(1+pct)/5000)*5000;
+  const ratio = asked/pl.value;
+  const pushRisk = (mode==="big"?0.16:0.05)*pl.round + Math.max(0, ratio-1.6)*0.7;
+  const angerChance = E.clamp(pushRisk, 0, 0.85);
+  if(!mail.thread) mail.thread = [];
+  if(rng() < angerChance){
+    pl.status = "withdrawn";
+    mail.thread.push(OFFER_WITHDRAW_LINES[Math.floor(rng()*OFFER_WITHDRAW_LINES.length)]);
+  } else {
+    const acceptChance = E.clamp(0.85 - (ratio-1.0)*0.55, 0.1, 0.92);
+    if(rng() < acceptChance){
+      pl.offer = asked;
+      mail.thread.push(OFFER_RAISE_LINES[Math.floor(rng()*OFFER_RAISE_LINES.length)]);
+    } else {
+      mail.thread.push(OFFER_HOLD_LINES[Math.floor(rng()*OFFER_HOLD_LINES.length)]);
+    }
+  }
+  scheduleSave();
+}
+function acceptMailOffer(mailId){
+  const mail = findMail(mailId);
+  if(!mail || mail.type!=="offer" || mail.payload.status!=="pending") return;
+  const pl = mail.payload;
+  const t = myTeam();
+  if(!t.players.some(p=>p.id===pl.playerId)){ pl.status="void"; scheduleSave(); return; }
+  t.players = t.players.filter(p=>p.id!==pl.playerId);
+  ST.lineup = ST.lineup.map(id=> id===pl.playerId ? null : id);
+  ST.budget += pl.offer;
+  pl.status = "accepted";
+  ST.newsLog.unshift({title:"Venda concluída!", text:`${pl.playerName} foi vendido para o ${pl.club} por ${fmtMoney(pl.offer)}.`});
+  scheduleSave();
+}
+function rejectMailOffer(mailId){
+  const mail = findMail(mailId);
+  if(!mail || mail.type!=="offer" || mail.payload.status!=="pending") return;
+  mail.payload.status = "rejected";
+  scheduleSave();
+}
+// a declined offer sometimes isn't the end of it — the buying club can come back days
+// later with a noticeably better number, up to twice per player, before giving up for good.
+function maybeGenerateOfferComeback(){
+  const rng = E.makeRNG(nextSeed());
+  const candidates = inboxList().filter(m=>m.type==="offer" && m.payload.status==="rejected" && (m.payload.comebackCount||0)<2);
+  for(const mail of candidates){
+    if(rng() >= 0.25) continue;
+    const pl = mail.payload;
+    if(!myTeam().players.some(p=>p.id===pl.playerId)) continue; // sold/gone since
+    const newOffer = Math.round(pl.offer*(1.12+rng()*0.18)/5000)*5000;
+    pl.status = "superseded";
+    addMail({
+      type:"offer",
+      subject: OFFER_COMEBACK_LINES[Math.floor(rng()*OFFER_COMEBACK_LINES.length)],
+      from: pl.club,
+      preview:`Nova proposta por ${pl.playerName}: ${fmtMoney(newOffer)}.`,
+      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1 },
+    });
+    break; // at most one comeback mail per day, keeps the inbox from flooding
+  }
+}
+// runs once per "AVANÇAR DIA" click — everything that can land in the inbox on a given day.
+function generateDailyMail(){
+  maybeGenerateScoutMail();
+  maybeIncomingOffer(0.14);
+  maybeGenerateOfferComeback();
+  maybeGenerateTrainingInjury();
 }
 
 // career-long goal/assist ledger, spanning every club the manager has been in charge of —
@@ -1460,6 +1705,8 @@ function advanceWithSpeed(speed){
 function finishPendingMatch(){
   const pm = ST.pendingMatch;
   if(!pm) return; // guards against a stray double-invocation finding nothing left to finish
+  generatePostMatchMail(pm); // injury recap for the user's own squad, if anyone got hurt
+  ST.calendarDaysLeft = null; // the next fixture gets its own fresh 3-4 day countdown
   const ctx = pm.context;
   ST.pendingMatch = null;
   if(String(ctx.type).indexOf("prelib_")===0){
@@ -1787,8 +2034,11 @@ function generateScoutReport(){
 const ARAB_FICTIONAL_CLUBS = ["Al-Wasl City FC", "Desert Falcons FC", "Gulf Elite FC", "Sandstorm United", "Al-Sahra SC", "Crescent Bay FC"];
 const EURO_SA_FICTIONAL_CLUBS = ["Continental FC (Europa)", "Riverside Athletic (Europa)", "Northgate United (Europa)", "Atlético del Plata (Am. do Sul)", "Estrella del Norte (Am. do Sul)", "Puerto Real FC (Am. do Sul)"];
 
+// rolls for a new incoming transfer offer and, if one lands, drops it straight into the
+// inbox as a negotiable "offer" mail (see queueOfferMail/negotiateOffer) instead of
+// popping a blocking modal — the manager reads and negotiates it on their own time from
+// the E-mail tab.
 function maybeIncomingOffer(baseChance){
-  if(ST.uiModal) return; // don't stack on top of something else
   const squad = myTeam().players.filter(p=>p.ovr>=70);
   if(squad.length===0) return;
   // a squad playing well draws more attention from other clubs — recent match form (already
@@ -1812,8 +2062,7 @@ function maybeIncomingOffer(baseChance){
     mult = 1.3 + rng()*0.5; // 1.3x - 1.8x
   }
   const offer = Math.round(target.value*mult/5000)*5000;
-  ST.uiModal = { type:"incomingOffer", playerId: target.id, playerName: target.name, club, category, offer, value: target.value };
-  scheduleSave();
+  queueOfferMail(target.id, target.name, club, category, target.value, offer, rng);
 }
 function weightedPickByOvr(players, rng){
   const total = players.reduce((a,p)=>a+Math.pow(1.06,p.ovr),0);
@@ -2252,12 +2501,14 @@ function renderHub(){
     ${tabBtn("elenco","Elenco")}
     ${tabBtn("transfers","Transferências")}
     ${tabBtn("scout","Olheiro")}
+    ${tabBtn("email","✉ E-mail"+(unreadMailCount()?` <span class="badge-mail">${unreadMailCount()}</span>`:""))}
   </div>
   <div class="tab-content">
     ${ST.hubTab==="competicao"?renderCompeticaoTab():""}
     ${ST.hubTab==="elenco"?renderElencoTab():""}
     ${ST.hubTab==="transfers"?renderTransfersTab():""}
     ${ST.hubTab==="scout"?renderScoutTab():""}
+    ${ST.hubTab==="email"?renderEmailTab():""}
   </div>`;
 }
 function tabBtn(id,label){
@@ -2300,9 +2551,29 @@ function getNextUserMatch(){
   }
   return null;
 }
+// builds the 5-cell weekday strip for the "AVANÇAR DIA" widget — today plus the next 4
+// days, with a ball icon dropped on whichever cell the next match actually falls on
+// (nothing is shown on the strip itself once the match is more than 4 days out; the
+// caption line below it still says exactly how many days remain).
+function renderCalendarStrip(){
+  const days = ST.calendarDaysLeft;
+  const todayIdx = ST.calendarWeekdayIdx;
+  let cells = "";
+  for(let i=0;i<5;i++){
+    const wIdx = (todayIdx+i)%7;
+    const isMatchDay = i===days;
+    cells += `<div class="cal-day${isMatchDay?' cal-day-match':''}${i===0?' cal-day-today':''}">
+      <div class="cal-day-label">${WEEKDAYS[wIdx]}</div>
+      <div class="cal-day-icon">${isMatchDay?'⚽':''}</div>
+    </div>`;
+  }
+  return `<div class="cal-strip mt24">${cells}</div>`;
+}
 function renderNextMatchCard(){
   const nm = getNextUserMatch();
   if(!nm) return "";
+  ensureCalendarCountdown();
+  const days = ST.calendarDaysLeft;
   return `<div class="panel" style="text-align:center;">
     <div class="faint tiny uc mb12">${esc(nm.label)}</div>
     <div class="row center" style="gap:28px;">
@@ -2316,18 +2587,19 @@ function renderNextMatchCard(){
         <div class="bold small mt8">${esc(nm.away)}</div>
       </div>
     </div>
-    <div class="btn-row center mt24">
-      <button class="btn btn-gold" onclick="Game.advanceSlow()">▶ Simulação Lenta</button>
-      <button class="btn" onclick="Game.advanceFast()">⏭ Ir para o Resultado</button>
+    ${renderCalendarStrip()}
+    <div class="tac dim small mt8">${days<=0?"Hoje tem jogo!":`Próximo jogo em ${days} dia${days===1?"":"s"}`}</div>
+    <div class="btn-row center mt16">
+      <button class="btn btn-gold btn-lg" onclick="Game.advanceDay()">AVANÇAR DIA</button>
     </div>
     <div class="btn-row center mt8">
       <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
     </div>
   </div>`;
 }
-// the Pré-Libertadores flavor of the Competição tab: same "próximo jogo" card and the same
-// Simulação Lenta / Ir para o Resultado buttons as a real career, just showing the knockout
-// bracket instead of a group table, plus whatever status the run is currently in.
+// the Pré-Libertadores flavor of the Competição tab: same "próximo jogo" card (with its
+// AVANÇAR DIA calendar) as a real career, just showing the knockout bracket instead of a
+// group table, plus whatever status the run is currently in.
 function renderPreLibCompeticaoTab(){
   const p = ST.prelib;
   const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
@@ -2895,6 +3167,75 @@ function renderScoutTab(){
   ${rows}
   </tbody></table></div>
   <div class="row mt16"><button class="btn btn-sm" onclick="Game.generateScout()">🔄 Atualizar relatório</button></div>`;
+}
+
+// ---------------- E-MAIL TAB ----------------
+const MAIL_ICON = { offer:"💰", injury:"🚑", scout:"🔎" };
+function renderEmailTab(){
+  const open = ST.openMailId ? findMail(ST.openMailId) : null;
+  if(open) return renderMailDetail(open);
+  const box = inboxList();
+  if(!box.length){
+    return `<div class="empty-state"><p>Sua caixa de entrada está vazia.</p><p class="dim small">Clique em AVANÇAR DIA na aba Competição para receber propostas, boletins médicos e relatórios de olheiro.</p></div>`;
+  }
+  return `<div class="mail-list">${box.map(renderMailRow).join("")}</div>`;
+}
+function renderMailRow(m){
+  return `<div class="mail-row${m.read?"":" unread"}" onclick="Game.openMail('${m.id}')">
+    <div class="mail-row-icon">${MAIL_ICON[m.type]||"✉️"}</div>
+    <div class="mail-row-body">
+      <div class="mail-row-top"><span class="bold">${esc(m.subject)}</span><span class="tiny faint">${esc(m.dayLabel)}</span></div>
+      <div class="tiny dim mail-row-preview">${esc(m.from)} — ${esc(m.preview||"")}</div>
+    </div>
+    ${!m.read?'<div class="mail-dot"></div>':""}
+  </div>`;
+}
+function renderMailDetail(m){
+  const header = `<div class="mail-detail-head">
+    <button class="btn btn-sm" onclick="Game.closeMail()">← Voltar</button>
+    <div class="mail-detail-meta">
+      <div class="bold">${esc(m.subject)}</div>
+      <div class="tiny faint">${esc(m.from)} · ${esc(m.dayLabel)}</div>
+    </div>
+  </div>`;
+  if(m.type==="offer") return header + renderOfferMailBody(m);
+  return `${header}<div class="panel mt16">${m.body}</div>`;
+}
+function offerStatusBanner(pl){
+  if(pl.status==="accepted") return `<div class="mail-status mail-status-good">✅ Venda concluída — ${fmtMoney(pl.offer)} creditados ao orçamento.</div>`;
+  if(pl.status==="rejected") return `<div class="mail-status">Você recusou esta proposta.</div>`;
+  if(pl.status==="withdrawn") return `<div class="mail-status mail-status-bad">O clube retirou a proposta após a negociação.</div>`;
+  if(pl.status==="superseded") return `<div class="mail-status">Substituída por uma proposta mais recente.</div>`;
+  if(pl.status==="void") return `<div class="mail-status mail-status-bad">O jogador já não está mais disponível.</div>`;
+  return "";
+}
+function renderOfferMailBody(m){
+  const pl = m.payload;
+  const pct = Math.round((pl.offer/pl.value-1)*100);
+  const thread = (m.thread||[]).map(t=>`<div class="mail-thread-line">"${esc(t)}"</div>`).join("");
+  const pending = pl.status==="pending";
+  return `<div class="panel mt16">
+    <div class="row" style="justify-content:space-between;">
+      <div><div class="faint tiny uc">Clube interessado</div><div class="bold">${esc(pl.club)}</div></div>
+      <div class="tar"><div class="faint tiny uc">Jogador</div><div class="bold">${esc(pl.playerName)}</div></div>
+    </div>
+    <div class="contract-kv mt12"><span>Valor de mercado</span><span>${fmtMoney(pl.value)}</span></div>
+    <div class="contract-kv"><span>Proposta atual</span><span class="gold bold">${fmtMoney(pl.offer)}</span></div>
+    <div class="contract-kv"><span>Acima do valor</span><span class="${pct>=0?"green":"red"} bold">${pct>=0?"+":""}${pct}%</span></div>
+    ${thread?`<div class="mt12">${thread}</div>`:""}
+    ${offerStatusBanner(pl)}
+    ${pending?`
+    <div class="btn-row mt16">
+      <button class="btn btn-gold grow" onclick="Game.acceptMailOffer('${m.id}')">✒️ Aceitar (${fmtMoney(pl.offer)})</button>
+    </div>
+    <div class="btn-row mt8">
+      <button class="btn btn-sm" onclick="Game.negotiateOffer('${m.id}','small')">Pedir um pouco mais</button>
+      <button class="btn btn-sm" onclick="Game.negotiateOffer('${m.id}','big')">Pedir muito mais</button>
+    </div>
+    <div class="btn-row mt8">
+      <button class="btn btn-sm btn-danger" onclick="Game.rejectMailOffer('${m.id}')">Recusar</button>
+    </div>`:""}
+  </div>`;
 }
 
 // ---------------- MATCH DAY ----------------
@@ -3590,8 +3931,26 @@ const Game = {
   // leave the screen stuck mid-transition; routing through a proper Game method fixes that.)
   goEditLineup(){ ST.hubTab='elenco'; ST.stage='hub'; render(); },
   advance(){ advanceTournament(); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
-  advanceSlow(){ advanceWithSpeed("slow"); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
-  advanceFast(){ advanceWithSpeed("fast"); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
+  // "AVANÇAR DIA": ticks the calendar forward one day, rolls whatever mail that day
+  // brings, and — once the countdown hits zero — hands off to the existing
+  // advanceTournament() flow exactly as the old speed buttons used to.
+  advanceDay(){
+    ensureCalendarCountdown();
+    ST.calendarDaysLeft--;
+    ST.calendarWeekdayIdx = (ST.calendarWeekdayIdx+1)%7;
+    generateDailyMail();
+    if(ST.calendarDaysLeft<=0){
+      ST.calendarDaysLeft = null;
+      advanceTournament();
+    }
+    scheduleSave();
+    render();
+  },
+  openMail(id){ const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
+  closeMail(){ ST.openMailId=null; render(); },
+  negotiateOffer(id, mode){ negotiateOffer(id, mode); render(); },
+  acceptMailOffer(id){ acceptMailOffer(id); render(); },
+  rejectMailOffer(id){ rejectMailOffer(id); render(); },
 
   openSlotPicker(idx){ ST.uiModal={type:"slotPicker", slotIndex:idx}; render(); },
   setCaptain(playerId){ ST.captainId = playerId; render(); },
