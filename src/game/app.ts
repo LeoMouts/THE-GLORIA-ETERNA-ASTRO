@@ -1922,8 +1922,10 @@ function matchAnimDone(){
 }
 // how long to hold the next event on screen before advancing — "Rápida" is the game's original
 // pace, "Muito rápida" is a snappier fixed tick, and "Lenta" paces itself against the real gap
-// (in simulated match-minutes) between the two events, i.e. one real minute per game-minute,
-// capped so a long lull between chances never leaves the screen looking frozen.
+// (in simulated match-minutes) between the two events — one real SECOND per game-minute of
+// gap, clamped to a range that still reads as "slow" without ever looking frozen (a literal
+// one-real-minute-per-game-minute pace was tried first and made the match look stuck for
+// several real minutes at a time, which is exactly the bug this was rewritten to fix).
 function matchTickDelay(pm, idx){
   const speed = ST.matchSpeed || "normal";
   if(speed==="fast") return 150;
@@ -1932,7 +1934,7 @@ function matchTickDelay(pm, idx){
     const cur = events[idx];
     const prevMinute = idx>0 ? (events[idx-1].minute||0) : 0;
     const gapMinutes = Math.max(1, (cur&&cur.minute||0) - prevMinute);
-    return Math.min(480000, gapMinutes*60000);
+    return Math.min(8000, Math.max(1200, gapMinutes*1000));
   }
   return 620;
 }
