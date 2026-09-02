@@ -67,20 +67,31 @@ function broadcastAbbr(name){
 function renderBroadcastScoreboard(homeName, awayName, scoreHome, scoreAway, clockLabel){
   const [hc1,hc2] = TEAM_COLORS[homeName] || ["#3E8ED0","#122720"];
   const [ac1,ac2] = TEAM_COLORS[awayName] || ["#3E8ED0","#122720"];
+  // a gold ribbon (tapered/pointed ends) with a black plaque inset inside it — the club-color
+  // flags peek out from behind the ribbon's points, the trophy floats centered on top of it,
+  // and the clock is its own small tab hanging off the bottom edge, all as one graphic unit.
+  const HEX = "polygon(4% 0,96% 0,100% 50%,96% 100%,4% 100%,0 50%)";
   return `
-  <div style="display:flex;align-items:stretch;height:44px;max-width:400px;margin:0 auto;">
-    <div style="width:16px;flex-shrink:0;background:linear-gradient(135deg,${hc1},${hc2});clip-path:polygon(0 0,100% 0,55% 100%,0 100%);"></div>
-    <div style="flex:1;min-width:0;background:linear-gradient(180deg,#221d17,#100d0a);border-top:2px solid var(--marigold);border-bottom:2px solid var(--marigold);display:flex;align-items:center;justify-content:center;gap:8px;padding:0 6px;">
-      <span style="font-family:var(--font-display);font-weight:800;font-size:14px;letter-spacing:.04em;color:#fff;">${esc(broadcastAbbr(homeName))}</span>
-      <span style="font-family:var(--font-display);font-weight:900;font-size:19px;color:var(--marigold-bright);min-width:16px;text-align:center;">${scoreHome}</span>
-      <span style="width:22px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">${trophyImg(26,0.95)}</span>
-      <span style="font-family:var(--font-display);font-weight:900;font-size:19px;color:var(--marigold-bright);min-width:16px;text-align:center;">${scoreAway}</span>
-      <span style="font-family:var(--font-display);font-weight:800;font-size:14px;letter-spacing:.04em;color:#fff;">${esc(broadcastAbbr(awayName))}</span>
+  <div style="position:relative;max-width:380px;margin:0 auto;padding:22px 0 18px;">
+    <div style="position:absolute;left:2px;top:24px;width:52px;height:38px;background:linear-gradient(135deg,${hc1},${hc2});clip-path:polygon(0 0,100% 0,30% 100%,0 100%);z-index:1;"></div>
+    <div style="position:absolute;right:2px;top:24px;width:52px;height:38px;background:linear-gradient(135deg,${ac1},${ac2});clip-path:polygon(100% 0,100% 100%,70% 100%,0 0);z-index:1;"></div>
+    <div style="position:relative;z-index:2;height:38px;margin:0 8px;background:linear-gradient(180deg,var(--marigold-bright),var(--marigold) 45%,var(--marigold-dim));clip-path:${HEX};display:flex;align-items:center;justify-content:center;">
+      <div style="width:calc(100% - 22px);height:30px;background:linear-gradient(180deg,#221d17,#0c0a08);clip-path:${HEX};display:flex;align-items:center;justify-content:center;gap:8px;">
+        <span style="font-family:var(--font-display);font-weight:800;font-size:14px;letter-spacing:.04em;color:#fff;">${esc(broadcastAbbr(homeName))}</span>
+        <span style="font-family:var(--font-display);font-weight:900;font-size:18px;color:#fff;min-width:14px;text-align:center;">${scoreHome}</span>
+        <span style="width:34px;flex-shrink:0;"></span>
+        <span style="font-family:var(--font-display);font-weight:900;font-size:18px;color:#fff;min-width:14px;text-align:center;">${scoreAway}</span>
+        <span style="font-family:var(--font-display);font-weight:800;font-size:14px;letter-spacing:.04em;color:#fff;">${esc(broadcastAbbr(awayName))}</span>
+      </div>
     </div>
-    <div style="width:16px;flex-shrink:0;background:linear-gradient(135deg,${ac1},${ac2});clip-path:polygon(100% 0,100% 100%,45% 100%,0 0);"></div>
-  </div>
-  <div class="tac" style="margin-top:4px;">
-    <span style="display:inline-block;background:#100d0a;border:1px solid var(--marigold);border-radius:4px;padding:2px 10px;font-family:var(--font-mono);font-size:12px;font-weight:700;color:#fff;letter-spacing:.03em;">${esc(clockLabel)}</span>
+    <div style="position:absolute;left:50%;top:2px;transform:translateX(-50%);width:38px;height:38px;z-index:3;display:flex;align-items:center;justify-content:center;">
+      ${trophyImg(34,1)}
+    </div>
+    <div style="position:absolute;left:50%;bottom:6px;transform:translate(-50%,50%);z-index:3;">
+      <span style="display:inline-block;background:linear-gradient(180deg,var(--marigold-bright),var(--marigold));border-radius:4px;padding:2px 3px;">
+        <span style="display:inline-block;background:#0c0a08;border-radius:2px;padding:2px 10px;font-family:var(--font-mono);font-size:12px;font-weight:700;color:#fff;letter-spacing:.03em;">${esc(clockLabel)}</span>
+      </span>
+    </div>
   </div>`;
 }
 function crestSVG(teamName, size){
