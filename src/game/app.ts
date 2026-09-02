@@ -702,6 +702,7 @@ function newCareerState(){
     matchPlaying:false,
     careerStats:{goals:{}, assists:{}, signings:[]},
     matchSpeed:"normal", // "slow" | "normal" | "fast" — how quickly live events tick across the screen
+    matchClockMinute:0, // only actually driven in "slow" mode's minute-by-minute clock
   };
 }
 
@@ -1360,6 +1361,7 @@ function simulatePendingMatch(){
   applyDetailedResultToWorld(home, away, homeXI.lineup, awayXI.lineup, result);
   ST.matchPlaying = true;
   ST.matchAnimIdx = 0;
+  ST.matchClockMinute = 0; // only actually driven in "slow" mode — see matchTickDelay/matchAnimDone
 }
 
 // a stable-but-cosmetic "energia" reading for the penalty-taker picker — deterministic per
@@ -1887,7 +1889,12 @@ function render(){
       // instead of waiting for the card's own timer to dismiss it first.
       const pm = ST.pendingMatch;
       const nextEvent = pm.result.events[ST.matchAnimIdx];
-      if(nextEvent && nextEvent.type==="penalty_pending"){
+      // "Lenta" runs its own minute-by-minute clock (1', 2', 3'...) instead of jumping straight
+      // event-to-event like the other speeds — an event only gets revealed once the clock has
+      // actually reached its minute; until then the clock just keeps advancing on its own, one
+      // quiet minute at a time, with nothing written to the ticker.
+      const clockReady = ST.matchSpeed!=="slow" || !nextEvent || nextEvent.minute<=(ST.matchClockMinute||0);
+      if(nextEvent && nextEvent.type==="penalty_pending" && clockReady){
         const atkTeam = nextEvent.side==="home" ? pm.ref.home : pm.ref.away;
         if(atkTeam===ST.teamId){
           // the user's own penalty — pause the ticker and let them pick the taker
@@ -1900,8 +1907,13 @@ function render(){
           resolvePendingPenaltyEvent(pm, ST.matchAnimIdx, null);
           tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, 900);
         }
+      } else if(nextEvent && clockReady){
+        const delay = ST.matchSpeed==="slow" ? 120 : matchTickDelay(pm, ST.matchAnimIdx);
+        tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, delay);
       } else {
-        tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, matchTickDelay(pm, ST.matchAnimIdx));
+        // nothing left to reveal at the current minute — just tick the clock forward (only
+        // reachable in "slow" mode; every other speed always has clockReady===true above).
+        tickTimer = setTimeout(()=>{ ST.matchClockMinute = Math.min(90, (ST.matchClockMinute||0)+1); render(); }, 450);
       }
     }
   }catch(err){
@@ -1918,24 +1930,21 @@ function render(){
 
 function matchAnimDone(){
   const pm = ST.pendingMatch;
-  return !pm.result || ST.matchAnimIdx >= pm.result.events.length;
+  if(!pm.result) return true;
+  // "Lenta" runs its own minute-by-minute clock all the way to 90' even through quiet stretches
+  // with no event to show, so it isn't "done" the instant the last event happens to be revealed —
+  // only once the clock itself gets there (every event's minute is <=90, so by then everything
+  // has necessarily been revealed too).
+  if(ST.matchSpeed==="slow") return (ST.matchClockMinute||0) >= 90;
+  return ST.matchAnimIdx >= pm.result.events.length;
 }
-// how long to hold the next event on screen before advancing — "Rápida" is the game's original
-// pace, "Muito rápida" is a snappier fixed tick, and "Lenta" paces itself against the real gap
-// (in simulated match-minutes) between the two events — one real SECOND per game-minute of
-// gap, clamped to a range that still reads as "slow" without ever looking frozen (a literal
-// one-real-minute-per-game-minute pace was tried first and made the match look stuck for
-// several real minutes at a time, which is exactly the bug this was rewritten to fix).
+// how long to hold the next event on screen before advancing — used for "Rápida" (the game's
+// original pace) and "Muito rápida" (a snappier fixed tick). "Lenta" no longer uses this: it
+// runs a real minute-by-minute clock (see matchClockMinute / matchAnimDone / render()'s tick
+// block) instead of jumping event-to-event with a scaled delay.
 function matchTickDelay(pm, idx){
   const speed = ST.matchSpeed || "normal";
   if(speed==="fast") return 150;
-  if(speed==="slow"){
-    const events = pm.result.events;
-    const cur = events[idx];
-    const prevMinute = idx>0 ? (events[idx-1].minute||0) : 0;
-    const gapMinutes = Math.max(1, (cur&&cur.minute||0) - prevMinute);
-    return Math.min(8000, Math.max(1200, gapMinutes*1000));
-  }
   return 620;
 }
 
@@ -2943,6 +2952,8 @@ function renderMatch(){
     const lp = lineupPlayers();
     const missing = lp.filter(p=>!p).length;
     const unavailable = lp.filter(p=>p && (p.injured||p.suspended)).length;
+    const speed = ST.matchSpeed || "normal";
+    const speedBtn = (id,label)=>`<button class="btn btn-sm${speed===id?' btn-gold':''}" onclick="Game.setMatchSpeed('${id}')">${label}</button>`;
     return `
     <div style="padding:24px 20px;max-width:760px;margin:0 auto;">
       <div class="tac faint tiny uc mb8">${esc(stageLbl)}</div>
@@ -2965,6 +2976,12 @@ function renderMatch(){
         <button class="btn btn-sm mt8" onclick="Game.goEditLineup()">✏️ Editar escalação</button>
       </div>
       <div class="tac mt24">
+        <div class="tiny faint uc mb8">Velocidade da partida</div>
+        <div class="btn-row center mb16">
+          ${speedBtn("slow","LENTA")}
+          ${speedBtn("normal","RÁPIDA")}
+          ${speedBtn("fast","MUITO RÁPIDA")}
+        </div>
         <button class="btn btn-gold btn-lg" onclick="Game.simulateMatch()">▶ Simular Partida</button>
       </div>
     </div>`;
@@ -2972,10 +2989,13 @@ function renderMatch(){
   const res = pm.result;
   const idx = ST.matchAnimIdx;
   const visibleEvents = res.events.slice(0, idx);
-  const done = idx>=res.events.length;
+  const done = matchAnimDone();
   const curHome = visibleEvents.filter(e=>e.side==="home"&&e.type==="goal").length;
   const curAway = visibleEvents.filter(e=>e.side==="away"&&e.type==="goal").length;
-  const lastMin = visibleEvents.length? visibleEvents[visibleEvents.length-1].minute : 0;
+  // "Lenta" shows its own running minute clock even through quiet stretches; the other speeds
+  // still show the last revealed event's own minute, exactly as before.
+  const lastMin = ST.matchSpeed==="slow" ? (ST.matchClockMinute||0)
+    : (visibleEvents.length? visibleEvents[visibleEvents.length-1].minute : 0);
 
   let ratingsHtml = "";
   let motmId = null;
@@ -3026,10 +3046,6 @@ function renderMatch(){
     ${momentumSvg}
   </div>`;
 
-  const speed = ST.matchSpeed || "normal";
-  function speedBtn(id, label){
-    return `<button class="btn btn-sm${speed===id?' btn-gold':''}" onclick="Game.setMatchSpeed('${id}')">${label}</button>`;
-  }
   const centerHtml = `
     <div class="tac faint tiny uc mb8">${esc(stageLbl)}</div>
     <div class="scoreboard">
@@ -3055,12 +3071,6 @@ function renderMatch(){
     </div>
     ${!done? `
     <div class="tac mt16">
-      <div class="tiny faint uc mb8">Velocidade da partida</div>
-      <div class="btn-row center">
-        ${speedBtn("slow","LENTA")}
-        ${speedBtn("normal","RÁPIDA")}
-        ${speedBtn("fast","MUITO RÁPIDA")}
-      </div>
       <button class="btn mt8" onclick="Game.skipMatch()">PULAR PARA O FINAL</button>
     </div>` : `
     <div class="tac mt16">
