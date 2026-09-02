@@ -2315,6 +2315,9 @@ function renderNextMatchCard(){
       <button class="btn btn-gold" onclick="Game.advanceSlow()">▶ Simulação Lenta</button>
       <button class="btn" onclick="Game.advanceFast()">⏭ Ir para o Resultado</button>
     </div>
+    <div class="btn-row center mt8">
+      <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
+    </div>
   </div>`;
 }
 // the Pré-Libertadores flavor of the Competição tab: same "próximo jogo" card and the same
@@ -3235,7 +3238,26 @@ function renderModal(){
   if(m.type==="squadCentral") return renderSquadCentralModal();
   if(m.type==="penaltyPicker") return renderPenaltyPickerModal(m);
   if(m.type==="penaltyResult") return renderPenaltyResultModal(m);
+  if(m.type==="timeConfig") return renderTimeConfigModal();
   return "";
+}
+function renderTimeConfigModal(){
+  const speed = ST.matchSpeed || "normal";
+  const speedBtn = (id,label)=>`<button class="btn${speed===id?' btn-gold':''}" style="width:100%;" onclick="Game.setMatchSpeed('${id}')">${label}</button>`;
+  return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
+    <div class="modal" style="max-width:380px;">
+      <div class="panel-title">Configuração de tempo</div>
+      <p class="small dim mt8">Escolha a velocidade das partidas. Vale para a Simulação Lenta e para a tela da partida, até você mudar de novo.</p>
+      <div class="mt16" style="display:flex;flex-direction:column;gap:8px;">
+        ${speedBtn("slow","LENTA")}
+        ${speedBtn("normal","RÁPIDA")}
+        ${speedBtn("fast","MUITO RÁPIDA")}
+      </div>
+      <div class="btn-row mt16">
+        <button class="btn grow" onclick="Game.closeModal()">Fechar</button>
+      </div>
+    </div>
+  </div>`;
 }
 function renderIncomingOfferModal(m){
   if(m.signing) return renderContractSigning(m.signMsg || "Venda concluída!");
@@ -3677,11 +3699,20 @@ const Game = {
   generateScout(){ generateScoutReport(); render(); },
 
   simulateMatch(){ simulatePendingMatch(); render(); },
-  setMatchSpeed(speed){ ST.matchSpeed = speed; render(); },
+  openTimeConfig(){ ST.uiModal = {type:"timeConfig"}; render(); },
+  setMatchSpeed(speed){
+    ST.matchSpeed = speed;
+    if(ST.uiModal && ST.uiModal.type==="timeConfig") ST.uiModal = null;
+    render();
+  },
   skipMatch(){
     resolveAllPendingPenalties(ST.pendingMatch);
     ST.uiModal = null;
     ST.matchAnimIdx = ST.pendingMatch.result.events.length;
+    // "slow" mode's matchAnimDone() checks the minute clock, not matchAnimIdx — without this
+    // the skip button revealed every event immediately but the clock kept grinding forward
+    // 1 minute at a time until it reached 90, making the skip look like it did nothing.
+    ST.matchClockMinute = 90;
     render();
   },
   takePenalty(playerId){
