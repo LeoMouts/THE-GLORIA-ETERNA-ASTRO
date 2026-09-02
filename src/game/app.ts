@@ -49,6 +49,40 @@ function crestInitials(name){
   if(words.length===1) return words[0].slice(0,3).toUpperCase();
   return words.slice(0,3).map(w=>w[0]).join("").toUpperCase();
 }
+// broadcast-style 3-letter code (BOC, RIV, FLA...) — first three letters of the club's own
+// name, not an acronym of every word, matching how score bugs actually abbreviate clubs.
+const ACCENT_MAP = {"á":"a","à":"a","â":"a","ã":"a","ä":"a","é":"e","è":"e","ê":"e","ë":"e","í":"i","ì":"i","î":"i","ï":"i","ó":"o","ò":"o","ô":"o","õ":"o","ö":"o","ú":"u","ù":"u","û":"u","ü":"u","ç":"c","ñ":"n"};
+function stripAccents(s){
+  return s.split("").map(ch=>ACCENT_MAP[ch.toLowerCase()]||ch).join("");
+}
+function broadcastAbbr(name){
+  const stop = new Set(["de","del","da","dos","das","la","el","e","fc","sc","central","real"]);
+  const words = name.split(/\s+/).filter(w=>!stop.has(w.toLowerCase()));
+  const w = stripAccents(words[0]||name);
+  return w.slice(0,3).toUpperCase();
+}
+// the CONMEBOL-style score bug: team codes flanking the score with the trophy silhouette in the
+// middle, a thin colored flag stripe from each club's own palette at the outer edges, and the
+// match clock in its own chip below — used for both the live tick and the final result screen.
+function renderBroadcastScoreboard(homeName, awayName, scoreHome, scoreAway, clockLabel){
+  const [hc1,hc2] = TEAM_COLORS[homeName] || ["#3E8ED0","#122720"];
+  const [ac1,ac2] = TEAM_COLORS[awayName] || ["#3E8ED0","#122720"];
+  return `
+  <div style="display:flex;align-items:stretch;height:44px;max-width:400px;margin:0 auto;">
+    <div style="width:16px;flex-shrink:0;background:linear-gradient(135deg,${hc1},${hc2});clip-path:polygon(0 0,100% 0,55% 100%,0 100%);"></div>
+    <div style="flex:1;min-width:0;background:linear-gradient(180deg,#221d17,#100d0a);border-top:2px solid var(--marigold);border-bottom:2px solid var(--marigold);display:flex;align-items:center;justify-content:center;gap:8px;padding:0 6px;">
+      <span style="font-family:var(--font-display);font-weight:800;font-size:14px;letter-spacing:.04em;color:#fff;">${esc(broadcastAbbr(homeName))}</span>
+      <span style="font-family:var(--font-display);font-weight:900;font-size:19px;color:var(--marigold-bright);min-width:16px;text-align:center;">${scoreHome}</span>
+      <span style="width:22px;flex-shrink:0;display:flex;align-items:center;justify-content:center;">${trophyImg(26,0.95)}</span>
+      <span style="font-family:var(--font-display);font-weight:900;font-size:19px;color:var(--marigold-bright);min-width:16px;text-align:center;">${scoreAway}</span>
+      <span style="font-family:var(--font-display);font-weight:800;font-size:14px;letter-spacing:.04em;color:#fff;">${esc(broadcastAbbr(awayName))}</span>
+    </div>
+    <div style="width:16px;flex-shrink:0;background:linear-gradient(135deg,${ac1},${ac2});clip-path:polygon(100% 0,100% 100%,45% 100%,0 0);"></div>
+  </div>
+  <div class="tac" style="margin-top:4px;">
+    <span style="display:inline-block;background:#100d0a;border:1px solid var(--marigold);border-radius:4px;padding:2px 10px;font-family:var(--font-mono);font-size:12px;font-weight:700;color:#fff;letter-spacing:.03em;">${esc(clockLabel)}</span>
+  </div>`;
+}
 function crestSVG(teamName, size){
   size = size || 40;
   const logo = TEAM_LOGOS[teamName];
@@ -701,6 +735,7 @@ function newCareerState(){
     matchAnimIdx:0,
     matchPlaying:false,
     careerStats:{goals:{}, assists:{}, signings:[]},
+    matchSpeed:"normal", // "slow" | "normal" | "fast" — how quickly live events tick across the screen
   };
 }
 
@@ -1900,7 +1935,7 @@ function render(){
           tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, 900);
         }
       } else {
-        tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, 620);
+        tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, matchTickDelay(pm, ST.matchAnimIdx));
       }
     }
   }catch(err){
@@ -1918,6 +1953,22 @@ function render(){
 function matchAnimDone(){
   const pm = ST.pendingMatch;
   return !pm.result || ST.matchAnimIdx >= pm.result.events.length;
+}
+// how long to hold the next event on screen before advancing — "Rápida" is the game's original
+// pace, "Muito rápida" is a snappier fixed tick, and "Lenta" paces itself against the real gap
+// (in simulated match-minutes) between the two events, i.e. one real minute per game-minute,
+// capped so a long lull between chances never leaves the screen looking frozen.
+function matchTickDelay(pm, idx){
+  const speed = ST.matchSpeed || "normal";
+  if(speed==="fast") return 150;
+  if(speed==="slow"){
+    const events = pm.result.events;
+    const cur = events[idx];
+    const prevMinute = idx>0 ? (events[idx-1].minute||0) : 0;
+    const gapMinutes = Math.max(1, (cur&&cur.minute||0) - prevMinute);
+    return Math.min(480000, gapMinutes*60000);
+  }
+  return 620;
 }
 
 // ---------------- HOME ----------------
@@ -3007,21 +3058,16 @@ function renderMatch(){
     ${momentumSvg}
   </div>`;
 
+  const speed = ST.matchSpeed || "normal";
+  function speedBtn(id, label){
+    return `<button class="btn btn-sm${speed===id?' btn-gold':''}" onclick="Game.setMatchSpeed('${id}')">${label}</button>`;
+  }
   const centerHtml = `
     <div class="tac faint tiny uc mb8">${esc(stageLbl)}</div>
-    <div class="scoreboard">
-      <div class="score-side">
-        <span class="match-crest">${crestSVG(home,40)}</span>
-        <div class="bold" style="font-size:15px;">${esc(home)}</div>
-      </div>
-      <div>
-        <div class="score-num">${curHome} - ${curAway}</div>
-        <div class="score-min tac">${done? "FIM DE JOGO" : lastMin+"'"}</div>
-      </div>
-      <div class="score-side">
-        <span class="match-crest">${crestSVG(away,40)}</span>
-        <div class="bold" style="font-size:15px;">${esc(away)}</div>
-      </div>
+    ${renderBroadcastScoreboard(home, away, curHome, curAway, done?"FIM DE JOGO":lastMin+"'")}
+    <div class="row center" style="gap:28px;margin:10px 0 2px;">
+      <div class="tac"><span class="match-crest">${crestSVG(home,26)}</span><div class="tiny bold" style="margin-top:2px;">${esc(home)}</div></div>
+      <div class="tac"><span class="match-crest">${crestSVG(away,26)}</span><div class="tiny bold" style="margin-top:2px;">${esc(away)}</div></div>
     </div>
     <div class="ticker" id="ticker">
       ${visibleEvents.length===0?`<div class="tick-row"><span class="dim">Bola rolando...</span></div>`:""}
@@ -3030,10 +3076,19 @@ function renderMatch(){
         <span>${eventText(ev, home, away)}</span>
       </div>`).join("")}
     </div>
+    ${!done? `
     <div class="tac mt16">
-      ${!done? `<button class="btn" onclick="Game.skipMatch()">⏭ Pular para o final</button>` :
-        `<button class="btn btn-gold btn-lg" onclick="Game.continueAfterMatch()">Continuar →</button>`}
-    </div>
+      <div class="tiny faint uc mb8">Velocidade da partida</div>
+      <div class="btn-row center">
+        ${speedBtn("slow","LENTA")}
+        ${speedBtn("normal","RÁPIDA")}
+        ${speedBtn("fast","MUITO RÁPIDA")}
+      </div>
+      <button class="btn mt8" onclick="Game.skipMatch()">PULAR PARA O FINAL</button>
+    </div>` : `
+    <div class="tac mt16">
+      <button class="btn btn-gold btn-lg" onclick="Game.continueAfterMatch()">Continuar →</button>
+    </div>`}
     ${statsHtml}
     ${ratingsHtml}`;
 
@@ -3102,6 +3157,7 @@ function renderPenaltyShootoutScreen(){
       </div>
       ${bodyRows}
     </div>
+    ${!done?`<div class="tac mt16"><button class="btn" onclick="Game.skipShootout()">PULAR DISPUTA DE PÊNALTIS</button></div>`:""}
   </div>`;
 }
 
@@ -3634,6 +3690,7 @@ const Game = {
   generateScout(){ generateScoutReport(); render(); },
 
   simulateMatch(){ simulatePendingMatch(); render(); },
+  setMatchSpeed(speed){ ST.matchSpeed = speed; render(); },
   skipMatch(){
     resolveAllPendingPenalties(ST.pendingMatch);
     ST.uiModal = null;
@@ -3687,6 +3744,25 @@ const Game = {
         setTimeout(()=>{ s.revealIdx++; Game.tickShootout(); }, 1300);
       }
     }
+  },
+  // resolves every remaining kick instantly, using the exact same scoring/stopping rule as the
+  // live reveal, then hands off to finishShootout() to apply the result — for players who just
+  // want the outcome instead of watching each kick land.
+  skipShootout(){
+    const s = ST.penaltyShootout;
+    if(!s || s.phase!=="kicking") return;
+    for(let i=s.revealIdx; i<s.kicks.length; i++){
+      s.revealIdx = i;
+      s.nameShown[i] = true;
+      if(!s.resultShown[i]){
+        s.resultShown[i] = true;
+        const k = s.kicks[i];
+        if(k.scored){ if(k.team==="A") s.scoreA++; else s.scoreB++; }
+      }
+      if(shootoutDecided(s)) break;
+    }
+    s.phase = "done";
+    Game.finishShootout();
   },
   finishShootout(){
     const s = ST.penaltyShootout;
