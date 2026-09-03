@@ -4760,13 +4760,14 @@ window.ST = null; // populated below after init for console/debug convenience
 
 // ============================================================
 // ACCESS GATE — a simple client-side login so the site isn't playable by
-// anyone who just stumbles on the URL. This is NOT real security (anyone who
-// opens dev tools can read the credentials below or skip straight to boot())
-// — it's just a lightweight "only people I gave the login to" filter.
+// anyone who just stumbles on the URL. Asked fresh on every single visit/reload
+// (nothing is remembered between page loads, on purpose). This is NOT real
+// security (anyone who opens dev tools can read the credentials below or skip
+// straight to boot()) — it's just a lightweight "only people I gave the login
+// to" filter.
 // ============================================================
 const ACCESS_USER = "GonzaloPlataPenta2026";
 const ACCESS_PASS = "platapontaburro";
-const ACCESS_KEY = "gloriaEterna_access_v1";
 function renderAccessGate(errorMsg){
   const app = document.getElementById("app");
   if(!app) return;
@@ -4790,7 +4791,6 @@ window.__tryAccessLogin__ = function(){
   const u = (document.getElementById("gateUser")||{}).value || "";
   const p = (document.getElementById("gatePass")||{}).value || "";
   if(u===ACCESS_USER && p===ACCESS_PASS){
-    try{ localStorage.setItem(ACCESS_KEY, "1"); }catch(e){}
     boot();
   } else {
     renderAccessGate("Usuário ou senha incorretos.");
@@ -4804,11 +4804,9 @@ async function boot(){
   await initApp();
   window.ST = ST;
 }
+// the login is never remembered — every fresh visit or reload starts back at the gate.
 function startBoot(){
-  let unlocked = false;
-  try{ unlocked = localStorage.getItem(ACCESS_KEY)==="1"; }catch(e){}
-  if(unlocked) boot();
-  else renderAccessGate();
+  renderAccessGate();
 }
 if(typeof document !== "undefined"){
   if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", startBoot);
