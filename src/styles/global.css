@@ -853,6 +853,27 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .pen-pick-fatigue{display:flex;flex-direction:column;gap:3px;width:110px;flex:0 0 auto;}
 .pen-pick-fatigue-fill{height:100%;background:linear-gradient(90deg,var(--terracotta),var(--marigold));}
 .pen-result-flavor{font-size:14px;color:var(--text-dim);line-height:1.6;max-width:420px;margin:0 auto;}
+.pen-kick-modal{max-width:360px;text-align:center;}
+.pen-kick-name{font-family:var(--font-display);text-transform:uppercase;letter-spacing:.04em;font-size:16px;color:var(--chalk);margin-bottom:22px;}
+.pen-kick-stage{position:relative;height:150px;width:100%;}
+.pen-kick-goal{
+  position:absolute;top:6px;left:50%;transform:translateX(-50%);
+  width:150px;height:68px;border:5px solid var(--chalk);border-bottom:none;
+  background:repeating-linear-gradient(45deg,rgba(241,237,225,.06) 0 6px,transparent 6px 12px);
+}
+.pen-kick-ball{
+  position:absolute;bottom:8px;left:50%;width:20px;height:20px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, #fff, #cfcfcf 60%, #8f8f8f);
+  box-shadow:0 2px 6px rgba(0,0,0,.5);
+  transform:translateX(-50%);
+  animation:penKickBall 3s cubic-bezier(.5,0,.55,1) forwards;
+}
+@keyframes penKickBall{
+  0%{bottom:8px;left:50%;width:20px;height:20px;opacity:1;}
+  70%{bottom:60px;left:41%;width:11px;height:11px;opacity:1;}
+  100%{bottom:66px;left:37%;width:8px;height:8px;opacity:.85;}
+}
+@media (prefers-reduced-motion: reduce){ .pen-kick-ball{animation-duration:.01s;animation-fill-mode:forwards;} }
 .contract-sign-title.green{color:#4CC97A;}
 .contract-sign-title.red{color:var(--red);}
 
