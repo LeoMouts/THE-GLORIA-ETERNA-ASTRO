@@ -624,6 +624,19 @@ function numberToWordsPT(nRaw){
   if(parts.length===1) return parts[0];
   return parts.slice(0,-1).join(", ") + " e " + parts[parts.length-1];
 }
+// live currency mask for every free-typed money field: as the user types, the digits get
+// re-grouped with "." thousand separators right there in the input (not just on values
+// already sitting on screen), and the words caption underneath stays in sync.
+function digitsFromMoneyInput(v){ return parseInt(String(v||"").replace(/\D/g,""),10) || 0; }
+function formatMoneyInputEl(el, wordsElId){
+  const n = digitsFromMoneyInput(el.value);
+  el.value = n ? String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ".") : "";
+  if(wordsElId){
+    const wordsEl = document.getElementById(wordsElId);
+    if(wordsEl) wordsEl.textContent = numberToWordsPT(n);
+  }
+  return n;
+}
 const XFER_PRICE_MAX = 20000000;
 const XFER_PRICE_STEP = 100000;
 function renderPriceFilter(f){
@@ -811,6 +824,34 @@ function startCareer(teamId, managerName){
   ST.newsLog = [{title:"Bem-vindo!", text:`${ST.managerName} assume o comando do ${teamId} para a campanha de ${ST.seasonYear} da CONMEBOL Libertadores.`}];
   ST.stage = "hub";
   ST.hubTab = "competicao";
+  ST.formation = "4-3-3";
+  ST.captainId = null;
+  ST.pendingMatch = null;
+  ST.uiModal = null;
+  ST.matchAnimIdx = 0;
+  ST.matchPlaying = false;
+  ST.matchClockMinute = 0;
+  ST.jobOffers = null;
+  ST.fired = false;
+  ST.underdogOffer = false;
+  ST.lastSeasonSummary = null;
+  // e-mail inbox, calendar and scouting are all per-career progress — a brand-new career
+  // (under any club) always starts these completely fresh, never carrying over whatever
+  // was sitting in the previous save.
+  ST.calendarDaysLeft = null;
+  ST.calendarWeekdayIdx = 1;
+  ST.inbox = [];
+  ST.mailSeq = 0;
+  ST.openMailId = null;
+  ST.scoutedFixtureKey = null;
+  ST.scoutLevel = 1;
+  ST.scoutReport = null;
+  ST.scoutReportETA = null;
+  ST.scoutSeason = 0;
+  ST.scoutLastReportMatchCount = 0;
+  ST.matchesPlayedTotal = 0;
+  ST.observationQueue = [];
+  ST.observedKeys = [];
   setupSeasonCompetition();
   autoFillLineup();
   scheduleSave();
@@ -1085,7 +1126,7 @@ function queueOfferMail(playerId, playerName, club, category, value, offer, rng,
     type:"offer",
     subject: subjects[Math.floor(rng()*subjects.length)],
     from: club,
-    preview: `Proposta por ${playerName}: ${fmtMoneyBoth(offer)}.`,
+    preview: `Proposta por ${playerName}: ${fmtMoney(offer)}.`,
     payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0, posture: posture||OFFER_POSTURES[1].id },
   });
 }
@@ -1204,7 +1245,7 @@ function tickPendingOfferReplies(){
       type:"offer",
       subject: reSubject(mail.subject),
       from: pl.club,
-      preview: status==="withdrawn" ? `A negociação por ${pl.playerName} não avançou.` : `Nova posição sobre ${pl.playerName}: ${fmtMoneyBoth(newOffer)}.`,
+      preview: status==="withdrawn" ? `A negociação por ${pl.playerName} não avançou.` : `Nova posição sobre ${pl.playerName}: ${fmtMoney(newOffer)}.`,
       thread:[verdictLine],
       payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0, posture:pl.posture },
     });
@@ -1220,7 +1261,7 @@ function acceptMailOffer(mailId){
   ST.lineup = ST.lineup.map(id=> id===pl.playerId ? null : id);
   ST.budget += pl.offer;
   pl.status = "accepted";
-  ST.newsLog.unshift({title:"Venda concluída!", text:`${pl.playerName} foi vendido para o ${pl.club} por ${fmtMoneyBoth(pl.offer)}.`});
+  ST.newsLog.unshift({title:"Venda concluída!", text:`${pl.playerName} foi vendido para o ${pl.club} por ${fmtMoney(pl.offer)}.`});
   scheduleSave();
 }
 function rejectMailOffer(mailId){
@@ -1244,7 +1285,7 @@ function maybeGenerateOfferComeback(){
       type:"offer",
       subject: reSubject(mail.subject),
       from: pl.club,
-      preview:`Nova proposta por ${pl.playerName}: ${fmtMoneyBoth(newOffer)}.`,
+      preview:`Nova proposta por ${pl.playerName}: ${fmtMoney(newOffer)}.`,
       thread:[OFFER_COMEBACK_LINES[Math.floor(rng()*OFFER_COMEBACK_LINES.length)]],
       payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1, posture:pl.posture },
     });
@@ -3473,7 +3514,7 @@ function renderMailDetail(m){
   return `${header}<div class="panel mt16">${m.body}</div>`;
 }
 function offerStatusBanner(pl){
-  if(pl.status==="accepted") return `<div class="mail-status mail-status-good">✅ Venda concluída — ${fmtMoneyBoth(pl.offer)} creditados ao orçamento.</div>`;
+  if(pl.status==="accepted") return `<div class="mail-status mail-status-good">✅ Venda concluída — ${fmtMoney(pl.offer)} creditados ao orçamento.</div>`;
   if(pl.status==="rejected") return `<div class="mail-status">Você recusou esta proposta.</div>`;
   if(pl.status==="withdrawn") return `<div class="mail-status mail-status-bad">O clube retirou a proposta após a negociação.</div>`;
   if(pl.status==="superseded") return `<div class="mail-status">Substituída por uma proposta mais recente.</div>`;
@@ -3496,12 +3537,12 @@ function renderOfferMailBody(m){
       <div><div class="faint tiny uc">Clube interessado</div><div class="bold">${esc(pl.club)}</div></div>
       <div class="tar"><div class="faint tiny uc">Jogador</div><div class="bold">${esc(pl.playerName)}</div></div>
     </div>
-    <div class="contract-kv mt12"><span>Valor de mercado</span><span>${fmtMoneyBoth(pl.value)}</span></div>
-    <div class="contract-kv"><span>Proposta atual</span><span class="gold bold">${fmtMoneyBoth(pl.offer)}</span></div>
+    <div class="contract-kv mt12"><span>Valor de mercado</span><span>${fmtMoney(pl.value)}</span></div>
+    <div class="contract-kv"><span>Proposta atual</span><span class="gold bold">${fmtMoney(pl.offer)}</span></div>
     <div class="contract-kv"><span>Acima do valor</span><span class="${pct>=0?"green":"red"} bold">${pct>=0?"+":""}${pct}%</span></div>
     ${pending?`<div class="mail-posture-hint mt12">
       <b>${esc(posture.label)}.</b> Nossa estimativa: dá pra pedir com boas chances até cerca de
-      <b class="gold">${fmtMoneyBoth(estMax)}</b>.
+      <b class="gold">${fmtMoney(estMax)}</b>.
       Pedir acima disso às vezes funciona, mas nem sempre — o risco é a negociação melar.
     </div>`:""}
     ${thread?`<div class="mt12">${thread}</div>`:""}
@@ -3511,11 +3552,12 @@ function renderOfferMailBody(m){
       <button class="btn btn-gold grow" onclick="Game.acceptMailOffer('${m.id}')">✒️ Aceitar (${fmtMoney(pl.offer)})</button>
     </div>
     <div class="mt16">
-      <div class="tiny faint uc mb8">Pedir outro valor — entre ${fmtMoneyBoth(range.minAsk)} e ${fmtMoneyBoth(range.maxAsk)}</div>
+      <div class="tiny faint uc mb8">Pedir outro valor — entre ${fmtMoney(range.minAsk)} e ${fmtMoney(range.maxAsk)}</div>
       <div class="row" style="gap:8px;">
-        <input id="askInput_${m.id}" type="number" class="input-inline grow" value="${suggested}" min="${range.minAsk}" max="${range.maxAsk}" step="5000"/>
-        <button class="btn btn-sm" onclick="Game.negotiateOffer('${m.id}', document.getElementById('askInput_${m.id}').value)">Pedir esse valor</button>
+        <input id="askInput_${m.id}" type="text" inputmode="numeric" class="input-inline grow" value="${String(suggested).replace(/\B(?=(\d{3})+(?!\d))/g,".")}" oninput="Game.updateAskWords(this,'${m.id}')"/>
+        <button class="btn btn-sm" onclick="Game.negotiateOfferFromInput('${m.id}')">Pedir esse valor</button>
       </div>
+      <div id="askWords_${m.id}" class="tiny faint mt4">${esc(numberToWordsPT(suggested))}</div>
     </div>
     <div class="btn-row mt16">
       <button class="btn btn-sm btn-danger" onclick="Game.rejectMailOffer('${m.id}')">Recusar</button>
@@ -4035,7 +4077,7 @@ function renderBuyOfferModal(m){
         <p class="contract-advisor"><b>Comentários do Gerente de Futebol:</b><br>${transferAdvisorLine(p, lo, hi)}</p>
         <div class="contract-kv"><span>Orç. de transferência</span><span class="gold bold">${fmtMoney(ST.budget)}</span></div>
         <label class="tiny faint mt16" style="display:block;">Valor da proposta (US$)</label>
-        <input id="offerInput" type="number" class="input-inline" style="width:100%;" value="${ask}" step="10000" oninput="Game.updateOfferWords(this.value)"/>
+        <input id="offerInput" type="text" inputmode="numeric" class="input-inline" style="width:100%;" value="${String(ask).replace(/\B(?=(\d{3})+(?!\d))/g,".")}" oninput="Game.updateOfferWords(this)"/>
         <div id="offerWords" class="tiny faint mt4">${esc(numberToWordsPT(ask))}</div>
         <div id="offerMsg" class="small mt8"></div>
         <div class="btn-row mt16">
@@ -4237,6 +4279,12 @@ const Game = {
   openMail(id){ const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
   closeMail(){ ST.openMailId=null; render(); },
   negotiateOffer(id, askedAmount){ negotiateOffer(id, askedAmount); render(); },
+  updateAskWords(inputEl, mailId){ formatMoneyInputEl(inputEl, "askWords_"+mailId); },
+  negotiateOfferFromInput(mailId){
+    const el = document.getElementById("askInput_"+mailId);
+    negotiateOffer(mailId, el ? digitsFromMoneyInput(el.value) : null);
+    render();
+  },
   acceptMailOffer(id){ acceptMailOffer(id); render(); },
   rejectMailOffer(id){ rejectMailOffer(id); render(); },
 
@@ -4289,15 +4337,12 @@ const Game = {
     setTimeout(()=>{ acceptIncomingOffer(); render(); }, 2200);
   },
   declineIncomingOffer(){ declineIncomingOffer(); render(); },
-  updateOfferWords(val){
-    const el = document.getElementById("offerWords");
-    if(el) el.textContent = numberToWordsPT(val);
-  },
+  updateOfferWords(inputEl){ formatMoneyInputEl(inputEl, "offerWords"); },
   submitOffer(playerId, team){
     const m = ST.uiModal;
     if(!m || m.signing) return;
     const input = document.getElementById("offerInput");
-    const offer = Math.max(0, Math.round(Number(input.value)||0));
+    const offer = Math.max(0, digitsFromMoneyInput(input.value));
     const res = team==="global" ? buyGlobalPlayer(playerId, offer) : makeOffer(playerId, team, offer);
     const msgEl = document.getElementById("offerMsg");
     if(res.ok){
@@ -4457,15 +4502,60 @@ window.Game = Game;
 window.ST = null; // populated below after init for console/debug convenience
 
 // ============================================================
+// ACCESS GATE — a simple client-side login so the site isn't playable by
+// anyone who just stumbles on the URL. This is NOT real security (anyone who
+// opens dev tools can read the credentials below or skip straight to boot())
+// — it's just a lightweight "only people I gave the login to" filter.
+// ============================================================
+const ACCESS_USER = "GonzaloPlataPenta2026";
+const ACCESS_PASS = "platapontaburro";
+const ACCESS_KEY = "gloriaEterna_access_v1";
+function renderAccessGate(errorMsg){
+  const app = document.getElementById("app");
+  if(!app) return;
+  app.innerHTML = `<div class="hero hero-home" style="min-height:100vh;">
+    <div class="hero-badge">ACESSO RESTRITO</div>
+    <h1 class="hero-title" style="font-size:clamp(30px,7vw,58px);">THE GLÓRIA ETERNA</h1>
+    <p class="hero-sub">Esse jogo é privado. Entre com usuário e senha para jogar.</p>
+    <div class="panel mt24" style="max-width:340px;width:100%;text-align:left;">
+      <label class="tiny faint uc" style="display:block;margin-bottom:4px;">Usuário</label>
+      <input id="gateUser" class="input-inline" style="width:100%;margin-bottom:12px;" autocomplete="off" autocapitalize="off" spellcheck="false"/>
+      <label class="tiny faint uc" style="display:block;margin-bottom:4px;">Senha</label>
+      <input id="gatePass" type="password" class="input-inline" style="width:100%;" autocomplete="off"/>
+      ${errorMsg ? `<p class="red small mt8">${esc(errorMsg)}</p>` : ""}
+      <button class="btn btn-gold btn-block mt16" onclick="window.__tryAccessLogin__()">Entrar</button>
+    </div>
+  </div>`;
+  const passEl = document.getElementById("gatePass");
+  if(passEl) passEl.addEventListener("keydown", e=>{ if(e.key==="Enter") window.__tryAccessLogin__(); });
+}
+window.__tryAccessLogin__ = function(){
+  const u = (document.getElementById("gateUser")||{}).value || "";
+  const p = (document.getElementById("gatePass")||{}).value || "";
+  if(u===ACCESS_USER && p===ACCESS_PASS){
+    try{ localStorage.setItem(ACCESS_KEY, "1"); }catch(e){}
+    boot();
+  } else {
+    renderAccessGate("Usuário ou senha incorretos.");
+  }
+};
+
+// ============================================================
 // BOOT
 // ============================================================
 async function boot(){
   await initApp();
   window.ST = ST;
 }
+function startBoot(){
+  let unlocked = false;
+  try{ unlocked = localStorage.getItem(ACCESS_KEY)==="1"; }catch(e){}
+  if(unlocked) boot();
+  else renderAccessGate();
+}
 if(typeof document !== "undefined"){
-  if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", boot);
-  else boot();
+  if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", startBoot);
+  else startBoot();
 }
 
 window.__APP_INTERNALS__ = { newCareerState, startCareer, advanceTournament, render, tierOf, buildJobOffers, teamAvgOvr, get ST(){return ST;}, set ST(v){ST=v;} };
