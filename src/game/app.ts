@@ -87,6 +87,64 @@ function crestSVG(teamName, size){
     <text x="50" y="54" font-family="Arial, sans-serif" font-weight="900" font-size="27" text-anchor="middle" fill="${textColor}">${esc(initials)}</text>
   </svg>`;
 }
+// ---------- Mercado Global crests (real clubs outside the Libertadores) ----------
+// Badges sourced from thefenomeno's public crest CDN (TheSMF-Group/thefenomeno-assets, served via
+// jsDelivr — that repo exists specifically to be linked to like this, so no local asset upload needed).
+// Covers every club we could confidently match a real crest for; anything not in this map still gets
+// the same initials-badge fallback used elsewhere (crestSVG), so every row always has *some* crest.
+const FENOMENO_CREST_CDN = "https://cdn.jsdelivr.net/gh/TheSMF-Group/thefenomeno-assets@main/crests/";
+const GLOBAL_TEAM_CRESTS = {
+  "AC Milan":"ac-milan", "AJ Auxerre":"auxerre", "AS Monaco":"monaco", "AS Saint-Étienne":"saint-etienne",
+  "AZ":"az-alkmaar", "Aberdeen FC":"aberdeen", "Ajax":"ajax", "Al Ahli SC":"al-ahli-sa",
+  "Al Ahli Saudi FC":"al-ahli-sa", "Al Duhail SC":"al-duhail", "Al Gharafa SC":"al-gharafa", "Al Hilal SFC":"al-hilal",
+  "Al Ittihad Club":"al-ittihad", "Al Nassr FC":"al-nassr", "Al Sadd SC":"al-sadd", "Albirex Niigata":"albirex-niigata",
+  "Angers SCO":"angers", "Antalyaspor":"antalyaspor", "Arsenal":"arsenal", "Aston Villa":"aston-villa",
+  "Atalanta BC":"atalanta", "Athletic Club":"athletic", "Avispa Fukuoka":"avispa-fukuoka", "Bayer 04 Leverkusen":"leverkusen",
+  "Borussia Dortmund":"dortmund", "Brighton & Hove Albion":"brighton", "Burnley":"burnley", "CA Boca Juniors":"boca",
+  "CA River Plate":"river", "CR Vasco da Gama":"vasco", "Casa Pia AC":"casa-pia", "Celtic FC":"celtic",
+  "Cerezo Osaka":"cerezo-osaka", "Chelsea":"chelsea", "Club América":"america", "Como 1907":"como",
+  "Consadole Sapporo":"consadole-sapporo", "Corendon Alanyaspor":"alanyaspor", "Crystal Palace":"crystal-palace", "Cádiz CF":"cadiz",
+  "Deportivo Alavés":"alaves", "Dundee FC":"dundee-fc", "Dundee United FC":"dundee-utd", "EC Bahia":"bahia",
+  "Eintracht Frankfurt":"frankfurt", "Esteghlal FC":"esteghlal", "Everton":"everton", "FC Arouca":"arouca",
+  "FC Barcelona":"barcelona", "FC Famalicão":"famalicao", "FC Machida Zelvia":"machida-zelvia", "FC Nantes":"nantes",
+  "FC Porto":"porto", "FC Seoul":"fc-seoul", "FC TOKYO":"fc-tokyo", "FC Twente":"twente",
+  "FC Utrecht":"utrecht", "Feyenoord":"feyenoord", "Fortuna Sittard":"fortuna-sittard", "GD Estoril Praia":"estoril",
+  "Gamba Osaka":"gamba-osaka", "Gaziantep FK":"gaziantep", "Getafe CF":"getafe", "Gil Vicente FC":"gil-vicente",
+  "Go Ahead Eagles":"go-ahead-eagles", "Heart of Midlothian FC":"hearts", "Hellas Verona FC":"verona", "Heracles Almelo":"heracles",
+  "Hibernian FC":"hibernian", "Internazionale Milano":"inter", "Jubilo Iwata":"jubilo-iwata", "Kashima Antlers":"kashima-antlers",
+  "Kashiwa Reysol":"kashiwa-reysol", "Kawasaki Frontale":"kawasaki-frontale", "Kilmarnock FC":"kilmarnock", "Konyaspor":"konyaspor",
+  "Kyoto Sanga F.C.":"kyoto-sanga", "LOSC Lille":"lille", "Leeds United":"leeds", "Leicester City":"leicester",
+  "Liverpool":"liverpool", "Macarthur FC":"macarthur-fc", "Manchester City":"man-city", "Manchester United":"man-utd",
+  "Melbourne City FC":"melbourne-city", "Montpellier Hérault SC":"montpellier", "Moreirense FC":"moreirense", "Motherwell FC":"motherwell",
+  "Nagoya Grampus":"nagoya-grampus", "Napoli":"napoli", "Newcastle United":"newcastle", "OGC Nice":"nice",
+  "Olympique Lyonnais":"lyon", "Olympique de Marseille":"marseille", "PEC Zwolle":"pec-zwolle", "PSV":"psv",
+  "Paris Saint-Germain":"psg", "Parma Calcio 1913":"parma", "RAMS Başakşehir FK":"basaksehir", "RC Lens":"lens",
+  "RC Strasbourg Alsace":"strasbourg", "Rangers FC":"rangers", "Real Madrid":"real-madrid", "Real Valladolid":"valladolid",
+  "Red Bull Bragantino":"bragantino", "Rio Ave FC":"rio-ave", "S.S. Lazio":"lazio", "SC Internacional":"internacional",
+  "SL Benfica":"benfica", "Samsunspor":"samsunspor", "Sanfrecce Hiroshima":"sanfrecce-hiroshima", "Santos FC":"santos",
+  "Sepahan SC":"sepahan", "Sevilla FC":"sevilla", "Sheffield United":"sheff-utd", "Shimizu S-Pulse":"shimizu-s-pulse",
+  "Southampton":"southampton", "Sparta Rotterdam":"sparta-rotterdam", "Sporting Braga":"braga", "Sporting CP":"sporting",
+  "St. Mirren FC":"st-mirren", "Stade Brestois 29":"brest", "Stade Rennais FC":"rennes", "Stade de Reims":"reims",
+  "São Paulo F.C.":"sao-paulo", "Tokyo Verdy":"tokyo-verdy", "Torino FC":"torino", "Tottenham Hotspur":"tottenham",
+  "Toulouse FC":"toulouse", "Trabzonspor":"trabzonspor", "Tractor FC":"tractor", "Udinese Calcio":"udinese",
+  "Ulsan HD FC":"ulsan-hd", "Valencia CF":"valencia", "Villarreal CF":"villarreal", "Vissel Kobe":"vissel-kobe",
+  "Vitória SC":"vitoria-sc", "West Bromwich Albion":"west-brom", "West Ham United":"west-ham", "Wolverhampton Wanderers":"wolves",
+  "Yokohama F. Marinos":"yokohama-f-marinos", "Zecorner Kayserispor":"kayserispor", "sc Heerenveen":"heerenveen",
+};
+let _globalCrestSeq = 0;
+function globalCrestImg(clubName, size){
+  size = size || 22;
+  const slug = GLOBAL_TEAM_CRESTS[clubName];
+  const fallback = crestSVG(clubName, size);
+  if(!slug) return fallback;
+  const fbId = "fb"+Math.abs(hashStr(clubName+"|"+slug))+"_"+(_globalCrestSeq++);
+  return `<span style="display:inline-flex;width:${size}px;height:${size}px;flex:0 0 auto;">
+    <img src="${FENOMENO_CREST_CDN}${slug}.webp" alt="${esc(clubName)}" width="${size}" height="${size}" loading="lazy"
+      style="display:block;width:${size}px;height:${size}px;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45));"
+      onerror="this.style.display='none';document.getElementById('${fbId}').style.display='block';"/>
+    <span id="${fbId}" style="display:none;width:${size}px;height:${size}px;">${fallback}</span>
+  </span>`;
+}
 // ---------- real kit renders (Elenco tab only) — camisa 1 of each Libertadores club, line + goalkeeper ----------
 const TEAM_KIT_OUTFIELD = {
   "Flamengo": "/images/kits/outfield/outfield/flamengo.png",
@@ -3705,7 +3763,7 @@ function renderXferBuySubTab(f){
         </tr></thead><tbody>
         ${shown.map(p=>`<tr>
           <td class="bold">${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></td>
-          <td class="dim">${esc(p.club)}</td>
+          <td class="dim"><span style="display:inline-flex;align-items:center;gap:7px;">${globalCrestImg(p.club,20)}<span>${esc(p.club)}</span></span></td>
           <td><span class="badge badge-pos">${p.pos}</span></td>
           <td class="tac">${p.age}</td>
           <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
