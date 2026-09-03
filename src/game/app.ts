@@ -130,11 +130,31 @@ const GLOBAL_TEAM_CRESTS = {
   "Ulsan HD FC":"ulsan-hd", "Valencia CF":"valencia", "Villarreal CF":"villarreal", "Vissel Kobe":"vissel-kobe",
   "Vitória SC":"vitoria-sc", "West Bromwich Albion":"west-brom", "West Ham United":"west-ham", "Wolverhampton Wanderers":"wolves",
   "Yokohama F. Marinos":"yokohama-f-marinos", "Zecorner Kayserispor":"kayserispor", "sc Heerenveen":"heerenveen",
+  // "generic" club names in market.json that are actually stand-ins for a real club (identified by hand) —
+  // same crest slug, just keyed by the in-game placeholder name instead of the real one.
+  "Miami BP":"inter-miami", "Madrid Rosas RB":"atletico", "Napoli A":"napoli", "Galatasaray SK":"galatasaray",
+  "Fenerbahçe SK":"fenerbahce", "Piemonte BN":"juventus", "Firenze V":"fiorentina", "Sunderland RWB":"sunderland",
+  "Los Angeles BY":"lafc", "Roma GR":"roma", "Vasco Gipuzkoa AB":"sociedad", "Sevilla Triana VB":"sevilla",
+  "Nottingham RW":"nottm-forest", "Atlanta RB":"atlanta-utd", "Fulham":"fulham", "Pamplona RA":"osasuna",
+  "Bologna RB":"bologna", "Bournemouth RB":"bournemouth", "Beşiktaş JK":"besiktas",
+};
+// a handful of real players who sit in the game's generic "Free Agents" pool (or under a placeholder
+// club) under their own real name — matched by hand against each club's actual current squad — so they
+// get that club's crest instead of no crest / the wrong one, keyed by exact player name.
+const PLAYER_CREST_OVERRIDE = {
+  "Mateo Retegui": "al-qadsiah",
+  // Bayern Munich's real first-team squad, hiding in "Free Agents" (Bayern isn't a pickable club in
+  // this game's market — its actual roster ended up dumped into the free-agent pool instead):
+  "Harry Kane":"bayern", "Michael Olise":"bayern", "Jamal Musiala":"bayern", "Joshua Kimmich":"bayern",
+  "Luis Díaz":"bayern", "Alphonso Davies":"bayern", "Dayot Upamecano":"bayern", "Manuel Neuer":"bayern",
+  "Jonathan Tah":"bayern", "Leon Goretzka":"bayern", "Alexander Nübel":"bayern", "Kim Min-Jae":"bayern",
+  "Konrad Laimer":"bayern", "Nicolas Jackson":"bayern", "Hiroki Ito":"bayern", "Aleksandar Pavlović":"bayern",
+  "Noussair Mazraoui":"bayern", "Josip Stanišić":"bayern",
 };
 let _globalCrestSeq = 0;
-function globalCrestImg(clubName, size){
+function clubCrestImg(clubName, size, playerName){
   size = size || 22;
-  const slug = GLOBAL_TEAM_CRESTS[clubName];
+  const slug = (playerName && PLAYER_CREST_OVERRIDE[playerName]) || GLOBAL_TEAM_CRESTS[clubName];
   const fallback = crestSVG(clubName, size);
   if(!slug) return fallback;
   const fbId = "fb"+Math.abs(hashStr(clubName+"|"+slug))+"_"+(_globalCrestSeq++);
@@ -3763,7 +3783,7 @@ function renderXferBuySubTab(f){
         </tr></thead><tbody>
         ${shown.map(p=>`<tr>
           <td class="bold">${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></td>
-          <td class="dim"><span style="display:inline-flex;align-items:center;gap:7px;">${globalCrestImg(p.club,20)}<span>${esc(p.club)}</span></span></td>
+          <td class="dim"><span style="display:inline-flex;align-items:center;gap:7px;">${clubCrestImg(p.club,20,p.name)}<span>${esc(p.club)}</span></span></td>
           <td><span class="badge badge-pos">${p.pos}</span></td>
           <td class="tac">${p.age}</td>
           <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
@@ -3801,7 +3821,7 @@ function renderXferBuySubTab(f){
       </tr></thead><tbody>
       ${shown.map(p=>`<tr>
         <td class="bold">${esc(p.name)} <span class="faint tiny">${p.nat}</span></td>
-        <td class="dim">${esc(p._team)}</td>
+        <td class="dim"><span style="display:inline-flex;align-items:center;gap:7px;">${clubCrestImg(p._team,20,p.name)}<span>${esc(p._team)}</span></span></td>
         <td><span class="badge badge-pos">${p.pos}</span></td>
         <td class="tac">${p.age}</td>
         <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
@@ -3859,7 +3879,7 @@ function renderScoutTab(){
       <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
       <td class="tac"><span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span></td>
       <td>${t.flag} ${esc(p.nat)}</td>
-      <td class="dim">${esc(r.team)}</td>
+      <td class="dim"><span style="display:inline-flex;align-items:center;gap:7px;">${clubCrestImg(r.team,20,p.name)}<span>${esc(r.team)}</span></span></td>
       <td class="tac mono">${fmtMoney(ask)}</td>
       <td class="tac">${scoutStars(p)}</td>
       <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(r.team)}')">Propor</button></td>
@@ -3970,8 +3990,11 @@ function renderEmailTab(){
   return `<div class="mail-list">${box.map(renderMailRow).join("")}</div>`;
 }
 function renderMailRow(m){
+  const rowIcon = (m.type==="offer" && m.payload && m.payload.club)
+    ? clubCrestImg(m.payload.club, 20, m.payload.playerName)
+    : (MAIL_ICON[m.type]||iconEnvelope(20));
   return `<div class="mail-row${m.read?"":" unread"}" onclick="Game.openMail('${m.id}')">
-    <div class="mail-row-icon">${MAIL_ICON[m.type]||iconEnvelope(20)}</div>
+    <div class="mail-row-icon">${rowIcon}</div>
     <div class="mail-row-body">
       <div class="mail-row-top"><span class="bold">${esc(m.subject)}</span><span class="tiny faint">${esc(m.dayLabel)}</span></div>
       <div class="tiny dim mail-row-preview">${esc(m.from)} — ${esc(m.preview||"")}</div>
@@ -4032,8 +4055,11 @@ function renderOfferMailBody(m){
   const range = offerAskRange(pl);
   const suggested = E.clamp(Math.round(pl.offer*1.2/5000)*5000, range.minAsk, range.maxAsk);
   return `<div class="panel mt16">
-    <div class="row" style="justify-content:space-between;">
-      <div><div class="faint tiny uc">Clube interessado</div><div class="bold">${esc(pl.club)}</div></div>
+    <div class="row" style="justify-content:space-between;align-items:flex-start;">
+      <div class="row" style="gap:10px;align-items:center;">
+        ${clubCrestImg(pl.club, 36, pl.playerName)}
+        <div><div class="faint tiny uc">Clube interessado</div><div class="bold">${esc(pl.club)}</div></div>
+      </div>
       <div class="tar"><div class="faint tiny uc">Jogador</div><div class="bold">${esc(pl.playerName)}</div></div>
     </div>
     <div class="contract-kv mt12"><span>Valor de mercado</span><span>${fmtMoney(pl.value)}</span></div>
@@ -4450,7 +4476,7 @@ function renderIncomingOfferModal(m){
       <div class="contract-panel">
         <div class="contract-panel-header">Jogador</div>
         <div class="contract-crest-row">
-          <div style="font-size:28px;">${isArab?'🏆':'🌍'}</div>
+          ${clubCrestImg(m.club, 32, p?p.name:null)}
           <div><div class="faint tiny uc">Time interessado</div><div class="bold">${esc(m.club)}</div></div>
         </div>
         <div class="contract-kv"><span>Tipo de transferência</span><span>Vender</span></div>
