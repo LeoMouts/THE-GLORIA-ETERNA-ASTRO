@@ -231,6 +231,14 @@ input,select{font-family:inherit;}
 .train-bar-fill.train-bar-maxed{background:var(--green);}
 .train-pct{flex:0 0 34px;text-align:right;}
 .train-delta{flex:0 0 auto;font-size:11px;white-space:nowrap;}
+.train-anim{display:flex;flex-direction:column;align-items:center;gap:18px;padding:36px 0 24px;}
+.train-anim-icon{width:96px;height:96px;object-fit:contain;filter:drop-shadow(0 6px 14px rgba(0,0,0,.4));animation:trainBounce 1s ease-in-out infinite;}
+@keyframes trainBounce{0%,100%{transform:translateY(0) rotate(-3deg);}50%{transform:translateY(-10px) rotate(3deg);}}
+.train-anim-bar{width:min(260px,80%);height:8px;background:#0A1512;border:1px solid var(--line);border-radius:4px;overflow:hidden;}
+.train-anim-bar-fill{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--terracotta),var(--marigold));animation:trainFill 3s linear forwards;}
+@keyframes trainFill{from{width:0;}to{width:100%;}}
+.train-anim-label{font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase;font-size:12px;color:var(--text-dim);}
+@media (prefers-reduced-motion: reduce){ .train-anim-icon{animation:none;} .train-anim-bar-fill{animation-duration:.01s;} }
 
 /* ---------------- Group draw ceremony ---------------- */
 .draw-screen{min-height:100vh;padding:48px 20px 60px;position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;}
@@ -254,7 +262,11 @@ input,select{font-family:inherit;}
 }
 .draw-slot:last-child{margin-bottom:0;}
 .draw-slot-empty{justify-content:center;color:var(--text-faint);border-style:dashed;opacity:.55;}
-.draw-slot-roll{font-size:14px;}
+.draw-slot-roll{
+  display:inline-block;width:26px;height:11px;border-radius:6px;
+  background:linear-gradient(180deg,#9c8459,#5c4d34);
+  border:1px solid #3c3222;box-shadow:inset 0 1px 0 rgba(255,255,255,.18);
+}
 .draw-slot-crest{width:18px;height:18px;flex:0 0 auto;display:inline-flex;}
 .draw-slot-crest svg,.draw-slot-crest img{width:100%;height:100%;display:block;}
 .draw-slot-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;}
