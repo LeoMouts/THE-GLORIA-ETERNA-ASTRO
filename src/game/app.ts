@@ -1192,15 +1192,29 @@ function maybeGenerateScoutMail(){
 const OFFER_SUBJECTS_ARAB = ["Proposta inacreditável chegou","Oferta chocante de fora da Libertadores","Um clube árabe fez uma fortuna por ele"];
 const OFFER_SUBJECTS_EURO = ["Proposta pelo seu atleta","Sondagem de um clube de fora","Interesse por um dos seus titulares"];
 function offerPosture(pl){ return OFFER_POSTURES.find(p=>p.id===pl.posture) || OFFER_POSTURES[1]; }
+// the negotiation "risk gauge" — every counter this club fields raises, in clean visible
+// steps, the odds it just walks away from the table entirely: ~20% after the 1st push,
+// ~35% after the 2nd, climbing toward the 70-80% danger zone by the 4th-5th. A greedy ask
+// (well above market value) tacks on a bit more on top of that; a modest one, a bit less —
+// so restraint is still rewarded, but the round count alone already tells most of the story.
+function computeNegotiationRisk(pl, asked){
+  const posture = offerPosture(pl);
+  const valueRatio = asked/pl.value;
+  const aggressiveness = Math.max(0, valueRatio-1.3)*12;
+  return E.clamp(Math.round((5 + pl.round*15 + aggressiveness)*posture.angerMult), 3, 90);
+}
+function initialNegotiationRisk(posture){ return Math.round(5*posture.angerMult); }
 function queueOfferMail(playerId, playerName, club, category, value, offer, rng, posture){
   const isArab = category==="arabe";
   const subjects = isArab ? OFFER_SUBJECTS_ARAB : OFFER_SUBJECTS_EURO;
+  const posturePick = posture||OFFER_POSTURES[1].id;
+  const postureObj = OFFER_POSTURES.find(p=>p.id===posturePick) || OFFER_POSTURES[1];
   addMail({
     type:"offer",
     subject: subjects[Math.floor(rng()*subjects.length)],
     from: club,
     preview: `Proposta por ${playerName}: ${fmtMoney(offer)}.`,
-    payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0, posture: posture||OFFER_POSTURES[1].id },
+    payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0, posture: posturePick, riskPercent: initialNegotiationRisk(postureObj) },
   });
 }
 const OFFER_RAISE_LINES = [
@@ -1247,38 +1261,41 @@ function offerAskRange(pl){
   const maxAsk = Math.max(minAsk+5000, Math.round(pl.value*3/5000)*5000);
   return { minAsk, maxAsk };
 }
-// the manager types in the exact value they want to ask for (clamped to offerAskRange).
-// About half the time the club doesn't answer on the spot — it asks for a few days to think
-// it over (see tickPendingOfferReplies) — otherwise it reacts immediately: raises to meet the
-// ask, holds firm, or — if the ask was pushed too far, too many times — gets fed up and walks.
+// the manager types in the exact value they want to ask for (clamped to offerAskRange). The
+// risk gauge (computeNegotiationRisk) is the ONLY thing that can blow the deal up — once it
+// survives that roll, the club always genuinely moves the conversation forward: either it
+// needs a few days to think it over (see tickPendingOfferReplies), or it responds right now
+// with a real concession (the full ask, or a real chunk of the way there — never just a flat
+// "take it exactly or nothing") or, more rarely, holds the line for this round.
 function negotiateOffer(mailId, askedAmountRaw){
   const mail = findMail(mailId);
   if(!mail || mail.type!=="offer" || mail.payload.status!=="pending") return;
   const pl = mail.payload;
-  const posture = offerPosture(pl);
   const rng = E.makeRNG(nextSeed());
   const {minAsk, maxAsk} = offerAskRange(pl);
   const asked = Math.round(E.clamp(Number(askedAmountRaw)||minAsk, minAsk, maxAsk)/5000)*5000;
   pl.round++;
-  const pushRatio = asked/pl.offer;
-  const valueRatio = asked/pl.value;
-  // this club's own posture scales how touchy it is about a big ask (angerMult) and how
-  // often it just says yes (acceptMult) — a "durão" club walks away far more readily than
-  // a "flexível" one asked for the exact same jump.
-  const angerChance = E.clamp(((pushRatio-1.15)*0.9 + Math.max(0, valueRatio-1.6)*0.55 + pl.round*0.05)*posture.angerMult, 0, 0.85);
+  pl.riskPercent = computeNegotiationRisk(pl, asked);
   if(!mail.thread) mail.thread = [];
-  if(rng() < angerChance){
+  if(rng()*100 < pl.riskPercent){
     pl.status = "withdrawn";
     mail.thread.push(OFFER_WITHDRAW_LINES[Math.floor(rng()*OFFER_WITHDRAW_LINES.length)]);
-  } else if(rng() < 0.5){
+    scheduleSave();
+    return;
+  }
+  const posture = offerPosture(pl);
+  if(rng() < 0.3){
     pl.status = "awaiting_reply";
     pl.pendingAsk = asked;
     pl.pendingReplyDays = 1 + Math.floor(rng()*3);
     mail.thread.push(OFFER_THINK_LINES[Math.floor(rng()*OFFER_THINK_LINES.length)]);
   } else {
-    const acceptChance = E.clamp((0.85 - (valueRatio-1.0)*0.55)*posture.acceptMult, 0.06, 0.95);
-    if(rng() < acceptChance){
-      pl.offer = asked;
+    const meetChance = E.clamp(0.55*posture.acceptMult, 0.15, 0.85);
+    if(rng() < meetChance){
+      // a real concession — usually most of the way to the ask, sometimes all of it — instead
+      // of the old all-or-nothing jump straight to the exact number typed in.
+      const concessionFrac = 0.55 + rng()*0.45;
+      pl.offer = concessionFrac > 0.92 ? asked : Math.round((pl.offer + (asked-pl.offer)*concessionFrac)/5000)*5000;
       mail.thread.push(OFFER_RAISE_LINES[Math.floor(rng()*OFFER_RAISE_LINES.length)]);
     } else {
       mail.thread.push(OFFER_HOLD_LINES[Math.floor(rng()*OFFER_HOLD_LINES.length)]);
@@ -1288,7 +1305,9 @@ function negotiateOffer(mailId, askedAmountRaw){
 }
 // resolves every negotiation the club asked "a few days to think about" once its countdown
 // reaches zero — a brand-new "RE: <assunto original>" mail arrives with the actual verdict,
-// same as a real e-mail reply thread, instead of the answer just appearing silently.
+// same as a real e-mail reply thread, instead of the answer just appearing silently. Reuses
+// the exact risk percentage that was already locked in (and shown on the gauge) the moment
+// the ask was made, rather than rerolling it.
 function tickPendingOfferReplies(){
   const rng = E.makeRNG(nextSeed());
   inboxList().filter(m=>m.type==="offer" && m.payload.status==="awaiting_reply").forEach(mail=>{
@@ -1297,19 +1316,19 @@ function tickPendingOfferReplies(){
     pl.pendingReplyDays = (pl.pendingReplyDays==null?1:pl.pendingReplyDays)-1;
     if(pl.pendingReplyDays>0) return;
     const asked = pl.pendingAsk||pl.offer;
-    const valueRatio = asked/pl.value;
-    const angerChance = E.clamp((Math.max(0, valueRatio-1.6)*0.5 + pl.round*0.04)*posture.angerMult, 0, 0.7);
+    const risk = pl.riskPercent!=null ? pl.riskPercent : computeNegotiationRisk(pl, asked);
     let newOffer = pl.offer, status = "pending", verdictLine;
-    if(rng() < angerChance){
+    if(rng()*100 < risk){
       status = "withdrawn";
       verdictLine = OFFER_WITHDRAW_LINES[Math.floor(rng()*OFFER_WITHDRAW_LINES.length)];
     } else {
-      const acceptChance = E.clamp((0.6-(valueRatio-1.0)*0.4)*posture.acceptMult, 0.1, 0.88);
-      if(rng() < acceptChance){
-        newOffer = asked;
+      const meetChance = E.clamp(0.6*posture.acceptMult, 0.2, 0.9);
+      if(rng() < meetChance){
+        const concessionFrac = 0.6 + rng()*0.4;
+        newOffer = Math.round((pl.offer + (asked-pl.offer)*concessionFrac)/5000)*5000;
         verdictLine = OFFER_RAISE_LINES[Math.floor(rng()*OFFER_RAISE_LINES.length)];
       } else {
-        newOffer = Math.round((pl.offer+asked)/2/5000)*5000;
+        newOffer = Math.round((pl.offer+asked)/2/5000)*5000; // still a real step, just a smaller one
         verdictLine = OFFER_COUNTER_LINES[Math.floor(rng()*OFFER_COUNTER_LINES.length)];
       }
     }
@@ -1320,7 +1339,7 @@ function tickPendingOfferReplies(){
       from: pl.club,
       preview: status==="withdrawn" ? `A negociação por ${pl.playerName} não avançou.` : `Nova posição sobre ${pl.playerName}: ${fmtMoney(newOffer)}.`,
       thread:[verdictLine],
-      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0, posture:pl.posture },
+      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0, posture:pl.posture, riskPercent: initialNegotiationRisk(posture) },
     });
   });
 }
@@ -1360,7 +1379,7 @@ function maybeGenerateOfferComeback(){
       from: pl.club,
       preview:`Nova proposta por ${pl.playerName}: ${fmtMoney(newOffer)}.`,
       thread:[OFFER_COMEBACK_LINES[Math.floor(rng()*OFFER_COMEBACK_LINES.length)]],
-      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1, posture:pl.posture },
+      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1, posture:pl.posture, riskPercent: initialNegotiationRisk(offerPosture(pl)) },
     });
     break; // at most one comeback mail per day, keeps the inbox from flooding
   }
@@ -3913,6 +3932,28 @@ function renderMailDetail(m){
   if(m.type==="offer") return header + renderOfferMailBody(m);
   return `${header}<div class="panel mt16">${m.body}</div>`;
 }
+// the "risco de melar" gauge — a half-circle speedometer (styled after an oxygen-tank
+// pressure gauge) with a needle that sweeps from green up through amber into red as
+// pl.riskPercent climbs, so the manager can SEE exactly how close the next push is to
+// blowing up the whole deal before they commit to it.
+function renderRiskGauge(percent){
+  const p = E.clamp(Math.round(percent||0), 0, 100);
+  const r = 44, cx = 60, cy = 60;
+  const circumference = Math.PI*r;
+  const offset = circumference*(1-p/100);
+  const angle = -90 + (p/100)*180;
+  const color = p<40 ? "var(--green)" : p<70 ? "var(--marigold)" : "var(--red)";
+  return `<div class="risk-gauge">
+    <svg viewBox="0 0 120 68" width="150" height="86">
+      <path d="M ${cx-r},${cy} A ${r},${r} 0 0 1 ${cx+r},${cy}" fill="none" stroke="#2a2620" stroke-width="10" stroke-linecap="round"/>
+      <path d="M ${cx-r},${cy} A ${r},${r} 0 0 1 ${cx+r},${cy}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round"
+        stroke-dasharray="${circumference.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"/>
+      <line x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy-r+9}" stroke="var(--chalk)" stroke-width="3" stroke-linecap="round" transform="rotate(${angle} ${cx} ${cy})"/>
+      <circle cx="${cx}" cy="${cy}" r="5" fill="var(--chalk)"/>
+    </svg>
+    <div class="risk-gauge-label">Risco de a negociação <b>melar</b>: <span style="color:${color};font-weight:800;">${p}%</span></div>
+  </div>`;
+}
 function offerStatusBanner(pl){
   if(pl.status==="accepted") return `<div class="mail-status mail-status-good">✅ Venda concluída — ${fmtMoney(pl.offer)} creditados ao orçamento.</div>`;
   if(pl.status==="rejected") return `<div class="mail-status">Você recusou esta proposta.</div>`;
@@ -3941,10 +3982,10 @@ function renderOfferMailBody(m){
     <div class="contract-kv"><span>Proposta atual</span><span class="gold bold">${fmtMoney(pl.offer)}</span></div>
     <div class="contract-kv"><span>Acima do valor</span><span class="${pct>=0?"green":"red"} bold">${pct>=0?"+":""}${pct}%</span></div>
     ${pending?`<div class="mail-posture-hint mt12">
-      <b>${esc(posture.label)}.</b> Nossa estimativa: dá pra pedir com boas chances até cerca de
-      <b class="gold">${fmtMoney(estMax)}</b>.
-      Pedir acima disso às vezes funciona, mas nem sempre — o risco é a negociação melar.
-    </div>`:""}
+      <b>${esc(posture.label)}.</b> Estimativa: dá pra pedir com boas chances até cerca de
+      <b class="gold">${fmtMoney(estMax)}</b>. Cada novo pedido aumenta o risco de a negociação melar de vez — acompanhe no medidor abaixo.
+    </div>
+    ${renderRiskGauge(pl.riskPercent)}`:""}
     ${thread?`<div class="mt12">${thread}</div>`:""}
     ${offerStatusBanner(pl)}
     ${pending?`
