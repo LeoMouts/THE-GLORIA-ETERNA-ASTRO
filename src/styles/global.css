@@ -219,6 +219,16 @@ input,select{font-family:inherit;}
 .cal-day-match{background:linear-gradient(180deg,var(--marigold-bright),var(--marigold));border-color:var(--marigold);}
 .cal-day-match .cal-day-label{color:#241a04;}
 
+/* ---------------- Training ("DIA DE TREINO") ---------------- */
+.train-list{max-height:320px;overflow-y:auto;text-align:left;border:1px solid var(--line);border-radius:6px;padding:4px 10px;}
+.train-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px;}
+.train-row:last-child{border-bottom:none;}
+.train-name{flex:0 0 40%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.train-bar-wrap{flex:1;height:8px;background:#0A1512;border:1px solid var(--line);border-radius:4px;overflow:hidden;}
+.train-bar-fill{display:block;height:100%;background:linear-gradient(90deg,var(--terracotta),var(--marigold));}
+.train-bar-fill.train-bar-maxed{background:var(--green);}
+.train-pct{flex:0 0 34px;text-align:right;}
+
 /* ---------------- E-mail inbox ---------------- */
 .mail-list{display:flex;flex-direction:column;gap:2px;}
 .mail-row{display:flex;align-items:center;gap:12px;padding:12px 10px;border-bottom:1px solid var(--line);cursor:pointer;position:relative;}
