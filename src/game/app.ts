@@ -738,6 +738,8 @@ function newCareerState(){
     matchesPlayedTotal:0, // incremented every time a match actually finishes (see finishPendingMatch)
     observationQueue:[], // players currently being watched in the transfer market: [{key,playerId,team,playerName,daysLeft}]
     observedKeys:[], // "team#playerId" keys whose true potential has been revealed
+    daysSinceTraining:0, // ticks up on every AVANÇAR DIA; hits 2 -> a training day interrupts the calendar
+    trainingPending:false, // true while the hub card is showing "DIA DE TREINO" awaiting a choice
   };
 }
 
@@ -766,6 +768,8 @@ async function initApp(){
     if(ST.scoutLastReportMatchCount==null) ST.scoutLastReportMatchCount = 0;
     if(!Array.isArray(ST.observationQueue)) ST.observationQueue = [];
     if(!Array.isArray(ST.observedKeys)) ST.observedKeys = [];
+    if(ST.daysSinceTraining==null) ST.daysSinceTraining = 0;
+    if(ST.trainingPending==null) ST.trainingPending = false;
     recomputeIdCounter();
   } else if(loaded){
     // an older/incompatible save from a previous version of the game — cannot be
@@ -852,6 +856,8 @@ function startCareer(teamId, managerName){
   ST.matchesPlayedTotal = 0;
   ST.observationQueue = [];
   ST.observedKeys = [];
+  ST.daysSinceTraining = 0;
+  ST.trainingPending = false;
   setupSeasonCompetition();
   autoFillLineup();
   scheduleSave();
@@ -1301,6 +1307,47 @@ function generateDailyMail(){
   maybeGenerateTrainingInjury();
   tickScoutReport();
   tickObservations();
+}
+
+// ============================================================
+// TRAINING ("DIA DE TREINO") — every 2 days advanced (outside match day), the calendar
+// interrupts itself with a training day: each squad player carries their own 0-100 progress
+// bar (p.trainProgress) that "Simular Treino" fills in — once it fills past 100 the player
+// gains an overall point (capped at their potential) and the bar carries the remainder into
+// the next bar. "Pular Dia de Treino" skips it outright: progress backslides and there's a
+// real chance a player's potential itself gets knocked down a point for the neglect.
+// ============================================================
+function runSquadTraining(){
+  const rng = E.makeRNG(nextSeed());
+  const squad = myTeam().players;
+  const leveled = [];
+  squad.forEach(p=>{
+    if(p.ovr>=p.pot) return; // already maxed out — nothing left for training to add
+    const youthBonus = p.age<=21 ? 4 : p.age<=25 ? 1 : 0;
+    p.trainProgress = (p.trainProgress||0) + 8 + rng()*14 + youthBonus;
+    while(p.trainProgress>=100 && p.ovr<p.pot){
+      p.trainProgress -= 100;
+      p.ovr = Math.min(p.pot, p.ovr+1);
+      leveled.push(p.name);
+    }
+    if(p.ovr>=p.pot) p.trainProgress = 0;
+  });
+  ST.trainingPending = false;
+  if(leveled.length){
+    ST.newsLog.unshift({title:"Treino em dia!", text:`${leveled.join(", ")} evoluiu${leveled.length>1?"ram":""} de overall após o treino.`});
+  }
+  scheduleSave();
+}
+function skipSquadTraining(){
+  const rng = E.makeRNG(nextSeed());
+  const squad = myTeam().players;
+  squad.forEach(p=>{
+    p.trainProgress = Math.max(0, (p.trainProgress||0) - (10+rng()*10));
+    if(p.pot>p.ovr && rng()<0.12){ p.pot = Math.max(p.ovr, p.pot-1); }
+  });
+  ST.trainingPending = false;
+  ST.newsLog.unshift({title:"Treino pulado", text:"O elenco perdeu ritmo de treino — o desenvolvimento de alguns jogadores foi prejudicado."});
+  scheduleSave();
 }
 
 // career-long goal/assist ledger, spanning every club the manager has been in charge of —
@@ -2154,14 +2201,12 @@ function quickSell(playerId){
 // cost (in budget) to reach a given level, and days a requested report takes at that level —
 // both indexed by level (1-5); every career starts at level 1 and pays gradually more to
 // climb toward 5, which also means faster, wider reports.
-const SCOUT_LEVEL_COST = [null, null, 500000, 1200000, 2400000, 4200000];
+const SCOUT_LEVEL_COST = [null, 2000000, 5000000, 8000000, 10000000, 15000000];
 const SCOUT_REPORT_DAYS = [null, 5, 4, 3, 2, 1];
 const SCOUT_LEVEL_LABELS = ["", "Iniciante", "Regional", "Nacional", "Continental", "Global"];
-// the "soft ceiling" a report at this level is built around — a candidate above it isn't
-// impossible, just heavily discounted the further over they are, so a level-1 network can
-// still get lucky once in a while but overwhelmingly surfaces sub-80-potential kids, while a
-// level-5 global network finds the very best prospects almost every time.
-const SCOUT_LEVEL_POT_CAP = [null, 78, 84, 88, 92, 99];
+// hard potential ceiling per level — a level-1 network genuinely never turns up anyone above
+// 80 potential; the ceiling climbs with the level, and level 5 has none at all.
+const SCOUT_LEVEL_POT_CAP = [null, 80, 83, 84, 85, 999];
 function generateScoutReport(){
   const level = ST.scoutLevel||1;
   const potCap = SCOUT_LEVEL_POT_CAP[level];
@@ -2170,20 +2215,28 @@ function generateScoutReport(){
   // more (and slightly older, still-promising) prospects than a level-1 network ever would.
   const ageMax = Math.min(23+(level-1), 27);
   const candidates = allPlayersList(ST.teamId)
-    .filter(({p})=>p.age<=ageMax && p.pot-p.ovr>=4);
-  // weighted random sample (no replacement), favoring higher-upside prospects but never
-  // deterministic — so a fresh report genuinely reshuffles who shows up. Potential above this
-  // level's ceiling gets multiplied down hard (0.35 per point over), which is what makes a
-  // level-1 report almost never turn up an 80+ potential kid while a level-5 one always can.
-  const pool = candidates.map(c=>{
-    const over = Math.max(0, c.p.pot-potCap);
-    const penalty = Math.pow(0.35, over);
-    const score = Math.max(0.01, ((c.p.pot-c.p.ovr)*2 + c.p.pot) * penalty);
-    return {c, score};
-  });
-  const picked = [];
-  const n = Math.min(6+level*2, pool.length);
-  for(let i=0;i<n;i++){
+    .filter(({p})=>p.age<=ageMax && p.pot-p.ovr>=4 && p.pot<=potCap);
+  const n = Math.min(6+level*2, candidates.length);
+  if(n===0){
+    ST.scoutReport = [];
+    ST.scoutSeason = ST.seasonNum;
+    ST.scoutLastReportMatchCount = ST.matchesPlayedTotal||0;
+    ST.scoutReportETA = null;
+    scheduleSave();
+    return;
+  }
+  // every report guarantees its 2 best finds: the highest-potential prospects this level's
+  // network can actually see (right up against the ceiling above). The rest of the slots
+  // still come from the usual weighted random sample, favoring higher upside but never
+  // deterministic, so the report doesn't just list the same names every time.
+  const sortedByPot = candidates.slice().sort((a,b)=>b.p.pot-a.p.pot);
+  const guaranteed = sortedByPot.slice(0, Math.min(2, n));
+  const guaranteedIds = new Set(guaranteed.map(c=>c.p.id));
+  const pool = candidates.filter(c=>!guaranteedIds.has(c.p.id))
+    .map(c=>({c, score: Math.max(1, (c.p.pot-c.p.ovr)*2 + c.p.pot)}));
+  const picked = guaranteed.slice();
+  const remainingSlots = n - picked.length;
+  for(let i=0;i<remainingSlots && pool.length;i++){
     const total = pool.reduce((a,it)=>a+it.score, 0);
     let r = rng()*total;
     let idx = pool.length-1;
@@ -2194,6 +2247,8 @@ function generateScoutReport(){
     picked.push(pool[idx].c);
     pool.splice(idx,1);
   }
+  // shuffle so the 2 guaranteed top prospects aren't always pinned to the first rows
+  for(let i=picked.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [picked[i],picked[j]]=[picked[j],picked[i]]; }
   ST.scoutReport = picked.map(c=>({playerId:c.p.id, team:c.team}));
   ST.scoutSeason = ST.seasonNum;
   ST.scoutLastReportMatchCount = ST.matchesPlayedTotal||0;
@@ -2847,6 +2902,27 @@ function renderCalendarStrip(oppName){
     <div class="cal-strip">${cells}</div>
   </div>`;
 }
+// "DIA DE TREINO" — interrupts the calendar every 2 days to show the squad's individual
+// training bars and let the manager choose to actually run the session or skip it.
+function renderTrainingBlock(){
+  const squad = myTeam().players.slice().sort((a,b)=>b.ovr-a.ovr);
+  const rows = squad.map(p=>{
+    const maxed = p.ovr>=p.pot;
+    const prog = maxed ? 100 : Math.round(p.trainProgress||0);
+    return `<div class="train-row">
+      <span class="train-name">${esc(p.name)} <span class="faint tiny">${p.pos}</span></span>
+      <span class="train-bar-wrap"><span class="train-bar-fill${maxed?" train-bar-maxed":""}" style="width:${prog}%;"></span></span>
+      <span class="tiny mono train-pct">${maxed?"MÁX":prog+"%"}</span>
+    </div>`;
+  }).join("");
+  return `<div class="gold bold uc tac mt16" style="letter-spacing:.06em;">🏋️ Dia de Treino!</div>
+    <p class="dim small tac mt8">Simular o treino desenvolve o elenco aos poucos — cada jogador enche sua barra e sobe de overall (até o potencial). Pular o treino atrapalha o desenvolvimento e pode até custar potencial.</p>
+    <div class="train-list mt16">${rows}</div>
+    <div class="btn-row center mt16">
+      <button class="btn btn-gold" onclick="Game.simulateTraining()">🏋️ Simular Treino</button>
+      <button class="btn btn-danger" onclick="Game.skipTraining()">Pular Dia de Treino</button>
+    </div>`;
+}
 function renderNextMatchCard(){
   const nm = getNextUserMatch();
   if(!nm) return "";
@@ -2855,7 +2931,9 @@ function renderNextMatchCard(){
   const oppName = nm.home===ST.teamId ? nm.away : nm.home;
   // match day itself drops the calendar entirely and goes back to exactly how this card
   // worked before AVANÇAR DIA existed: simulate straight away, at whatever pace/speed.
-  const actionBlock = days<=0
+  const actionBlock = ST.trainingPending
+    ? renderTrainingBlock()
+    : days<=0
     ? `<div class="gold bold uc tac mt16" style="letter-spacing:.06em;">⚽ Dia do jogo!</div>
        <div class="btn-row center mt16">
          <button class="btn btn-gold" onclick="Game.advanceSlow()">▶ Simulação Lenta</button>
@@ -4272,10 +4350,20 @@ const Game = {
     generateDailyMail();
     // calendarDaysLeft hitting 0 just flips the card over to "DIA DO JOGO" — the actual
     // advanceTournament() call happens when the player clicks one of those buttons, exactly
-    // like it always did before AVANÇAR DIA existed.
+    // like it always did before AVANÇAR DIA existed. A training day never interrupts match
+    // day itself — only the rest days in between.
+    if(ST.calendarDaysLeft>0){
+      ST.daysSinceTraining = (ST.daysSinceTraining||0)+1;
+      if(ST.daysSinceTraining>=2){
+        ST.trainingPending = true;
+        ST.daysSinceTraining = 0;
+      }
+    }
     scheduleSave();
     render();
   },
+  simulateTraining(){ runSquadTraining(); render(); },
+  skipTraining(){ skipSquadTraining(); render(); },
   openMail(id){ const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
   closeMail(){ ST.openMailId=null; render(); },
   negotiateOffer(id, askedAmount){ negotiateOffer(id, askedAmount); render(); },
