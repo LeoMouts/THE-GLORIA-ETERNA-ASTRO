@@ -740,6 +740,7 @@ function newCareerState(){
     observedKeys:[], // "team#playerId" keys whose true potential has been revealed
     daysSinceTraining:0, // ticks up on every AVANÇAR DIA; hits 2 -> a training day interrupts the calendar
     trainingPending:false, // true while the hub card is showing "DIA DE TREINO" awaiting a choice
+    trainingResult:null, // {playerId:{gain,leveledUp}} — shown as a green "+X%" after Simular Treino
   };
 }
 
@@ -770,6 +771,7 @@ async function initApp(){
     if(!Array.isArray(ST.observedKeys)) ST.observedKeys = [];
     if(ST.daysSinceTraining==null) ST.daysSinceTraining = 0;
     if(ST.trainingPending==null) ST.trainingPending = false;
+    if(ST.trainingResult===undefined) ST.trainingResult = null;
     recomputeIdCounter();
   } else if(loaded){
     // an older/incompatible save from a previous version of the game — cannot be
@@ -858,6 +860,7 @@ function startCareer(teamId, managerName){
   ST.observedKeys = [];
   ST.daysSinceTraining = 0;
   ST.trainingPending = false;
+  ST.trainingResult = null;
   setupSeasonCompetition();
   autoFillLineup();
   scheduleSave();
@@ -1317,25 +1320,39 @@ function generateDailyMail(){
 // the next bar. "Pular Dia de Treino" skips it outright: progress backslides and there's a
 // real chance a player's potential itself gets knocked down a point for the neglect.
 // ============================================================
+// runs the session and records each player's gain in ST.trainingResult ({playerId:{gain,
+// leveledUp}}) so the training screen can show a green "+X%" next to whoever improved,
+// instead of just silently updating the bars — trainingPending stays true so the card keeps
+// showing this result until the manager clicks through with finishTrainingDay().
 function runSquadTraining(){
   const rng = E.makeRNG(nextSeed());
   const squad = myTeam().players;
   const leveled = [];
+  const result = {};
   squad.forEach(p=>{
-    if(p.ovr>=p.pot) return; // already maxed out — nothing left for training to add
+    if(p.ovr>=p.pot){ result[p.id] = {gain:0, leveledUp:false}; return; } // already maxed out
     const youthBonus = p.age<=21 ? 4 : p.age<=25 ? 1 : 0;
-    p.trainProgress = (p.trainProgress||0) + 8 + rng()*14 + youthBonus;
+    const gain = 8 + rng()*14 + youthBonus;
+    p.trainProgress = (p.trainProgress||0) + gain;
+    let leveledUp = false;
     while(p.trainProgress>=100 && p.ovr<p.pot){
       p.trainProgress -= 100;
       p.ovr = Math.min(p.pot, p.ovr+1);
       leveled.push(p.name);
+      leveledUp = true;
     }
     if(p.ovr>=p.pot) p.trainProgress = 0;
+    result[p.id] = {gain: Math.round(gain), leveledUp};
   });
-  ST.trainingPending = false;
+  ST.trainingResult = result;
   if(leveled.length){
     ST.newsLog.unshift({title:"Treino em dia!", text:`${leveled.join(", ")} evoluiu${leveled.length>1?"ram":""} de overall após o treino.`});
   }
+  scheduleSave();
+}
+function finishTrainingDay(){
+  ST.trainingPending = false;
+  ST.trainingResult = null;
   scheduleSave();
 }
 function skipSquadTraining(){
@@ -1346,6 +1363,7 @@ function skipSquadTraining(){
     if(p.pot>p.ovr && rng()<0.12){ p.pot = Math.max(p.ovr, p.pot-1); }
   });
   ST.trainingPending = false;
+  ST.trainingResult = null;
   ST.newsLog.unshift({title:"Treino pulado", text:"O elenco perdeu ritmo de treino — o desenvolvimento de alguns jogadores foi prejudicado."});
   scheduleSave();
 }
@@ -2888,13 +2906,21 @@ function getNextUserMatch(){
 function renderCalendarStrip(oppName){
   const days = ST.calendarDaysLeft;
   const todayIdx = ST.calendarWeekdayIdx;
+  // how many more AVANÇAR DIA clicks until daysSinceTraining actually hits 2 and a training
+  // day interrupts the calendar — maps 1:1 onto the strip's cell index, same as "days" does
+  // for the match; never shown past the match day itself, since that resolves first.
+  const daysUntilTraining = 2 - (ST.daysSinceTraining||0);
   let cells = "";
   for(let i=0;i<5;i++){
     const wIdx = (todayIdx+i)%7;
     const isMatchDay = i===days;
-    cells += `<div class="cal-day${isMatchDay?' cal-day-match':''}${i===0?' cal-day-today':''}">
+    const isTrainingDay = !isMatchDay && i===daysUntilTraining && daysUntilTraining>0 && daysUntilTraining<days;
+    let icon = "";
+    if(isMatchDay) icon = crestSVG(oppName,20);
+    else if(isTrainingDay) icon = "🏋️";
+    cells += `<div class="cal-day${isMatchDay?' cal-day-match':''}${isTrainingDay?' cal-day-training':''}${i===0?' cal-day-today':''}">
       <div class="cal-day-label">${WEEKDAYS[wIdx]}</div>
-      <div class="cal-day-icon">${isMatchDay?crestSVG(oppName,20):''}</div>
+      <div class="cal-day-icon">${icon}</div>
     </div>`;
   }
   return `<div class="cal-panel mt16">
@@ -2906,22 +2932,31 @@ function renderCalendarStrip(oppName){
 // training bars and let the manager choose to actually run the session or skip it.
 function renderTrainingBlock(){
   const squad = myTeam().players.slice().sort((a,b)=>b.ovr-a.ovr);
+  const result = ST.trainingResult;
   const rows = squad.map(p=>{
     const maxed = p.ovr>=p.pot;
     const prog = maxed ? 100 : Math.round(p.trainProgress||0);
+    const r = result && result[p.id];
+    const delta = r && r.gain>0 ? `<span class="green bold train-delta">+${r.gain}%${r.leveledUp?" ⬆":""}</span>` : "";
     return `<div class="train-row">
       <span class="train-name">${esc(p.name)} <span class="faint tiny">${p.pos}</span></span>
       <span class="train-bar-wrap"><span class="train-bar-fill${maxed?" train-bar-maxed":""}" style="width:${prog}%;"></span></span>
       <span class="tiny mono train-pct">${maxed?"MÁX":prog+"%"}</span>
+      ${delta}
     </div>`;
   }).join("");
+  const actions = result
+    ? `<div class="btn-row center mt16"><button class="btn btn-gold" onclick="Game.finishTrainingDay()">Continuar →</button></div>`
+    : `<div class="btn-row center mt16">
+        <button class="btn btn-gold" onclick="Game.simulateTraining()">🏋️ Simular Treino</button>
+        <button class="btn btn-danger" onclick="Game.skipTraining()">Pular Dia de Treino</button>
+      </div>`;
   return `<div class="gold bold uc tac mt16" style="letter-spacing:.06em;">🏋️ Dia de Treino!</div>
-    <p class="dim small tac mt8">Simular o treino desenvolve o elenco aos poucos — cada jogador enche sua barra e sobe de overall (até o potencial). Pular o treino atrapalha o desenvolvimento e pode até custar potencial.</p>
+    <p class="dim small tac mt8">${result
+      ? "Treino concluído! Ganhos de hoje em verde — quem completou a barra subiu de overall."
+      : "Simular o treino desenvolve o elenco aos poucos — cada jogador enche sua barra e sobe de overall (até o potencial). Pular o treino atrapalha o desenvolvimento e pode até custar potencial."}</p>
     <div class="train-list mt16">${rows}</div>
-    <div class="btn-row center mt16">
-      <button class="btn btn-gold" onclick="Game.simulateTraining()">🏋️ Simular Treino</button>
-      <button class="btn btn-danger" onclick="Game.skipTraining()">Pular Dia de Treino</button>
-    </div>`;
+    ${actions}`;
 }
 function renderNextMatchCard(){
   const nm = getNextUserMatch();
@@ -4363,6 +4398,7 @@ const Game = {
     render();
   },
   simulateTraining(){ runSquadTraining(); render(); },
+  finishTrainingDay(){ finishTrainingDay(); render(); },
   skipTraining(){ skipSquadTraining(); render(); },
   openMail(id){ const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
   closeMail(){ ST.openMailId=null; render(); },
