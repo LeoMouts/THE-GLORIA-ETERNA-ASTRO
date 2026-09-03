@@ -182,6 +182,7 @@ function jerseyIconSVG(teamName, size){
 
 // ---------- Libertadores trophy render (real artwork, cut out to a transparent PNG) ----------
 const TROPHY_IMG = "/images/awards/trophy.png";
+const TRAINING_ICON = "/images/training-icon.png"; // dumbbell + shaker + cone illustration
 const TROPHY_ASPECT = 250/609; // width/height of the source cutout
 function trophyImg(height, opacity){
   height = height || 120;
@@ -741,6 +742,7 @@ function newCareerState(){
     daysSinceTraining:0, // ticks up on every AVANÇAR DIA; hits 2 -> a training day interrupts the calendar
     trainingPending:false, // true while the hub card is showing "DIA DE TREINO" awaiting a choice
     trainingResult:null, // {playerId:{gain,leveledUp}} — shown as a green "+X%" after Simular Treino
+    trainingAnimating:false, // true for the 3s "training in progress" beat right after clicking Simular Treino
     drawRevealed:0, // how many of the 32 group-draw slots the "group_draw" screen has revealed so far
   };
 }
@@ -793,6 +795,9 @@ async function initApp(){
   if(ST.stage==="group_draw" && (ST.drawRevealed||0)<32){
     startGroupDrawAnimation();
   }
+  // a reload mid-training-animation has no timer to resume — clear the flag rather than
+  // leaving the screen stuck on the 3s "Treinando..." beat forever.
+  if(ST.trainingAnimating) ST.trainingAnimating = false;
 }
 
 function recomputeIdCounter(){
@@ -2974,7 +2979,7 @@ function renderCalendarStrip(oppName){
     const isTrainingDay = !isMatchDay && i===daysUntilTraining && daysUntilTraining>0 && daysUntilTraining<days;
     let icon = "";
     if(isMatchDay) icon = crestSVG(oppName,20);
-    else if(isTrainingDay) icon = "🏋️";
+    else if(isTrainingDay) icon = `<img src="${TRAINING_ICON}" alt="Treino" style="width:100%;height:100%;object-fit:contain;"/>`;
     cells += `<div class="cal-day${isMatchDay?' cal-day-match':''}${isTrainingDay?' cal-day-training':''}${i===0?' cal-day-today':''}">
       <div class="cal-day-label">${WEEKDAYS[wIdx]}</div>
       <div class="cal-day-icon">${icon}</div>
@@ -2986,15 +2991,24 @@ function renderCalendarStrip(oppName){
   </div>`;
 }
 // "DIA DE TREINO" — interrupts the calendar every 2 days to show the squad's individual
-// training bars and let the manager choose to actually run the session or skip it.
+// training bars and let the manager choose to actually run the session or skip it. Simular
+// Treino spends a real 3-second beat (icon + filling bar, no emoji) before the result lands —
+// Pular stays instant, so the two choices actually feel different, not just cosmetically.
 function renderTrainingBlock(){
+  if(ST.trainingAnimating){
+    return `<div class="train-anim">
+      <img src="${TRAINING_ICON}" alt="Treinando" class="train-anim-icon"/>
+      <div class="train-anim-bar"><div class="train-anim-bar-fill"></div></div>
+      <div class="train-anim-label">Treinando o elenco...</div>
+    </div>`;
+  }
   const squad = myTeam().players.slice().sort((a,b)=>b.ovr-a.ovr);
   const result = ST.trainingResult;
   const rows = squad.map(p=>{
     const maxed = p.ovr>=p.pot;
     const prog = maxed ? 100 : Math.round(p.trainProgress||0);
     const r = result && result[p.id];
-    const delta = r && r.gain>0 ? `<span class="green bold train-delta">+${r.gain}%${r.leveledUp?" ⬆":""}</span>` : "";
+    const delta = r && r.gain>0 ? `<span class="green bold train-delta">+${r.gain}%${r.leveledUp?" ↑":""}</span>` : "";
     return `<div class="train-row">
       <span class="train-name">${esc(p.name)} <span class="faint tiny">${p.pos}</span></span>
       <span class="train-bar-wrap"><span class="train-bar-fill${maxed?" train-bar-maxed":""}" style="width:${prog}%;"></span></span>
@@ -3005,10 +3019,13 @@ function renderTrainingBlock(){
   const actions = result
     ? `<div class="btn-row center mt16"><button class="btn btn-gold" onclick="Game.finishTrainingDay()">Continuar →</button></div>`
     : `<div class="btn-row center mt16">
-        <button class="btn btn-gold" onclick="Game.simulateTraining()">🏋️ Simular Treino</button>
+        <button class="btn btn-gold" onclick="Game.simulateTraining()">Simular Treino</button>
         <button class="btn btn-danger" onclick="Game.skipTraining()">Pular Dia de Treino</button>
       </div>`;
-  return `<div class="gold bold uc tac mt16" style="letter-spacing:.06em;">🏋️ Dia de Treino!</div>
+  return `<div class="row center mt16" style="gap:10px;">
+      <img src="${TRAINING_ICON}" alt="" style="width:28px;height:28px;object-fit:contain;"/>
+      <span class="gold bold uc" style="letter-spacing:.06em;">Dia de Treino!</span>
+    </div>
     <p class="dim small tac mt8">${result
       ? "Treino concluído! Ganhos de hoje em verde — quem completou a barra subiu de overall."
       : "Simular o treino desenvolve o elenco aos poucos — cada jogador enche sua barra e sobe de overall (até o potencial). Pular o treino atrapalha o desenvolvimento e pode até custar potencial."}</p>
@@ -4309,7 +4326,7 @@ function renderGroupDraw(){
     const slots = (groups[L]||[]).map((teamName, potIdx)=>{
       const step = potIdx*8 + gIdx;
       if(step>=revealed){
-        return `<div class="draw-slot draw-slot-empty"><span class="draw-slot-roll">📜</span></div>`;
+        return `<div class="draw-slot draw-slot-empty"><span class="draw-slot-roll"></span></div>`;
       }
       const isUser = teamName===ST.teamId;
       const isNew = step===revealed-1;
@@ -4334,7 +4351,7 @@ function renderGroupDraw(){
     <div class="btn-row center mt24">
       ${done
         ? `<button class="btn btn-gold btn-lg" onclick="Game.finishGroupDraw()">Continuar →</button>`
-        : `<button class="btn btn-ghost" onclick="Game.skipGroupDraw()">⏭ Pular animação (SKIP)</button>`}
+        : `<button class="btn btn-ghost" onclick="Game.skipGroupDraw()">Pular animação (SKIP)</button>`}
     </div>
   </div>`;
 }
@@ -4495,7 +4512,15 @@ const Game = {
     scheduleSave();
     render();
   },
-  simulateTraining(){ runSquadTraining(); render(); },
+  simulateTraining(){
+    ST.trainingAnimating = true;
+    render();
+    setTimeout(()=>{
+      ST.trainingAnimating = false;
+      runSquadTraining();
+      render();
+    }, 3000);
+  },
   finishTrainingDay(){ finishTrainingDay(); render(); },
   skipTraining(){ skipSquadTraining(); render(); },
   openMail(id){ const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
