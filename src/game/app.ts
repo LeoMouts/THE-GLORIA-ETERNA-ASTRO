@@ -741,6 +741,7 @@ function newCareerState(){
     daysSinceTraining:0, // ticks up on every AVANÇAR DIA; hits 2 -> a training day interrupts the calendar
     trainingPending:false, // true while the hub card is showing "DIA DE TREINO" awaiting a choice
     trainingResult:null, // {playerId:{gain,leveledUp}} — shown as a green "+X%" after Simular Treino
+    drawRevealed:0, // how many of the 32 group-draw slots the "group_draw" screen has revealed so far
   };
 }
 
@@ -786,6 +787,11 @@ async function initApp(){
   // wipes — restart it so a save captured mid-shootout doesn't resume frozen.
   if(ST.stage==="penaltyShootout" && ST.penaltyShootout && ST.penaltyShootout.phase==="kicking"){
     setTimeout(()=>{ Game.tickShootout(); }, 700);
+  }
+  // same idea for the group-draw animation's setInterval — a reload mid-draw otherwise
+  // resumes frozen with no way forward except SKIP.
+  if(ST.stage==="group_draw" && (ST.drawRevealed||0)<32){
+    startGroupDrawAnimation();
   }
 }
 
@@ -869,21 +875,48 @@ function startCareer(teamId, managerName){
 // ============================================================
 // COMPETITION SETUP (group stage + knockout scaffolding)
 // ============================================================
+const DRAW_GROUP_LETTERS = ["A","B","C","D","E","F","G","H"];
+// the official CONMEBOL Libertadores 2026 seeding pots ("Potes Definidos") — pot 0 is the 8
+// seeded giants ("cabeças de chave"), pot 3 the weakest 8. This exact hierarchy, not a
+// recomputed-by-squad-strength one, is what every group_draw redraw from 2027 onward pulls
+// from — only which letter each team lands in gets reshuffled each season.
+const DRAW_POTS = [
+  ["Flamengo","Palmeiras","Fluminense","Boca Juniors","Peñarol","Nacional","LDU Quito","Independiente del Valle"],
+  ["Corinthians","Cruzeiro","Estudiantes","Lanús","Cerro Porteño","Libertad","Bolívar","Universitario"],
+  ["Rosario Central","Junior Barranquilla","Independiente Santa Fe","Universidad Católica","Coquimbo Unido","Sporting Cristal","Deportivo La Guaira","Cusco FC"],
+  ["Independiente Medellín","Deportes Tolima","Independiente Rivadavia","Barcelona SC","Platense","Always Ready","Mirassol","Universidad Central"],
+];
+function buildDrawPots(){
+  // guards against a roster mismatch (a future data change, a renamed club, an added/removed
+  // team) silently dropping someone from the draw — falls back to a strength-ranked split
+  // instead of ever crashing or leaving a team out of every pot.
+  const allTeams = Object.keys(ST.world.teams);
+  const knownFlat = DRAW_POTS.flat();
+  const knownSet = new Set(knownFlat);
+  const matchesRoster = knownFlat.length===allTeams.length && allTeams.every(t=>knownSet.has(t));
+  if(matchesRoster) return DRAW_POTS.map(p=>p.slice());
+  const ranked = allTeams.slice().sort((a,b)=>teamAvgOvr(ST.world.teams[b])-teamAvgOvr(ST.world.teams[a]));
+  const potSize = Math.ceil(ranked.length/4);
+  return [0,1,2,3].map(i=>ranked.slice(i*potSize, (i+1)*potSize));
+}
 function buildGroupsForSeason(){
   // Season 1 always uses the real, official 2026 Libertadores draw.
-  // From season 2 onward, the 32 clubs are redrawn into fresh random groups each year.
+  // From season 2 onward, the 32 clubs are reseeded into fresh pots every year and redrawn —
+  // one team per pot per group, exactly the order the "group_draw" animation reveals them in.
   if(ST.seasonNum===1){
     const clone = {};
     Object.keys(DATA.groups).forEach(g=>{ clone[g] = DATA.groups[g].slice(); });
     return clone;
   }
-  const teamNames = Object.keys(ST.world.teams);
+  const pots = buildDrawPots();
   const rng = E.makeRNG(nextSeed());
-  const shuffled = teamNames.slice();
-  for(let i=shuffled.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]; }
-  const letters = ["A","B","C","D","E","F","G","H"];
   const groups = {};
-  letters.forEach((L,idx)=>{ groups[L] = shuffled.slice(idx*4, idx*4+4); });
+  DRAW_GROUP_LETTERS.forEach(L=>{ groups[L] = []; });
+  pots.forEach(pot=>{
+    const shuffledPot = pot.slice();
+    for(let i=shuffledPot.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [shuffledPot[i],shuffledPot[j]]=[shuffledPot[j],shuffledPot[i]]; }
+    DRAW_GROUP_LETTERS.forEach((L,idx)=>{ if(shuffledPot[idx]) groups[L].push(shuffledPot[idx]); });
+  });
   return groups;
 }
 
@@ -2084,6 +2117,29 @@ function buildJobOffers(kind){
   return band.slice(0,3).map(t=>t.name);
 }
 
+// entry point every season transition funnels through on its way to the hub — real
+// Libertadores careers (never Pré-Libertadores) from 2027 onward get the animated group-draw
+// screen first, since setupSeasonCompetition() just reseeded fresh groups for this season.
+let drawTimer = null;
+function maybeEnterGroupDraw(){
+  if(!ST.prelib && ST.seasonYear>=2027){
+    ST.stage = "group_draw";
+    ST.drawRevealed = 0;
+    startGroupDrawAnimation();
+  } else {
+    ST.stage = "hub"; ST.hubTab = "competicao";
+  }
+}
+function startGroupDrawAnimation(){
+  if(drawTimer){ clearInterval(drawTimer); drawTimer = null; }
+  drawTimer = setInterval(()=>{
+    if(ST.stage!=="group_draw"){ clearInterval(drawTimer); drawTimer = null; return; }
+    ST.drawRevealed = (ST.drawRevealed||0)+1;
+    if(ST.drawRevealed>=32){ clearInterval(drawTimer); drawTimer = null; }
+    render();
+  }, 550);
+}
+
 function selectNewJob(teamName){
   ST.teamId = teamName;
   if(ST.fired) ST.reputation = 42;
@@ -2099,7 +2155,7 @@ function selectNewJob(teamName){
   setupSeasonCompetition();
   ST.formation = "4-3-3";
   autoFillLineup();
-  ST.stage = "hub"; ST.hubTab="competicao";
+  maybeEnterGroupDraw();
   scheduleSave();
 }
 
@@ -2107,12 +2163,12 @@ function stayAtCurrentJob(){
   ST.fired=false; ST.underdogOffer=false; ST.jobOffers=null;
   setupSeasonCompetition();
   autoFillLineup();
-  ST.stage="hub"; ST.hubTab="competicao";
+  maybeEnterGroupDraw();
   scheduleSave();
 }
 
 function continueFromSeasonEnd(){
-  ST.stage = "hub"; ST.hubTab = "competicao";
+  maybeEnterGroupDraw();
   scheduleSave();
 }
 
@@ -2471,6 +2527,7 @@ function render(){
     else if(ST.stage==="hub") html = renderHub();
     else if(ST.stage==="match") html = renderMatch();
     else if(ST.stage==="season_end") html = renderSeasonEndScreen();
+    else if(ST.stage==="group_draw") html = renderGroupDraw();
     else if(ST.stage==="job_offers") html = renderJobOffers();
     else if(ST.stage==="career_over") html = renderCareerOver();
     else if(ST.stage==="penaltyShootout") html = renderPenaltyShootoutScreen();
@@ -4240,6 +4297,47 @@ function renderReiDaAmericaPanel(r){
     </div>
   </div>`;
 }
+// the animated group-draw ceremony (real Libertadores only, 2027 onward) — reveals the 32
+// slots pot-by-pot, group-by-group (TIME 1 grupo A, TIME 1 grupo B, ... TIME 2 grupo A, ...),
+// each one unrolling like a paper slip pulled from the draw pot. ST.drawRevealed (ticked by
+// startGroupDrawAnimation's timer, or jumped straight to 32 by SKIP) drives how many show.
+function renderGroupDraw(){
+  const groups = ST.competition.groupsThisSeason;
+  const revealed = ST.drawRevealed||0;
+  const done = revealed>=32;
+  const boxes = DRAW_GROUP_LETTERS.map((L, gIdx)=>{
+    const slots = (groups[L]||[]).map((teamName, potIdx)=>{
+      const step = potIdx*8 + gIdx;
+      if(step>=revealed){
+        return `<div class="draw-slot draw-slot-empty"><span class="draw-slot-roll">📜</span></div>`;
+      }
+      const isUser = teamName===ST.teamId;
+      const isNew = step===revealed-1;
+      return `<div class="draw-slot${isNew?" draw-slot-reveal":""}${isUser?" draw-slot-user":""}">
+        <span class="draw-slot-crest">${crestSVG(teamName,20)}</span>
+        <span class="draw-slot-name">${esc(teamName)}</span>
+      </div>`;
+    }).join("");
+    return `<div class="draw-group">
+      <div class="draw-group-title">Grupo ${L}</div>
+      ${slots}
+    </div>`;
+  }).join("");
+  return `${cornerWatermarks()}<div class="draw-screen">
+    <div class="draw-header">
+      <div class="draw-trophy">${trophyImg(90,1)}</div>
+      <div class="draw-title-badge">CONMEBOL</div>
+      <h1 class="draw-title">Libertadores</h1>
+      <div class="draw-year">SORTEIO DOS GRUPOS · ${ST.seasonYear}</div>
+    </div>
+    <div class="draw-grid">${boxes}</div>
+    <div class="btn-row center mt24">
+      ${done
+        ? `<button class="btn btn-gold btn-lg" onclick="Game.finishGroupDraw()">Continuar →</button>`
+        : `<button class="btn btn-ghost" onclick="Game.skipGroupDraw()">⏭ Pular animação (SKIP)</button>`}
+    </div>
+  </div>`;
+}
 function renderJobOffers(){
   const kind = ST.fired ? "weaker" : "stronger";
   return `<div class="hero" style="min-height:88vh;">
@@ -4618,6 +4716,16 @@ const Game = {
 
   showNews(){ ST.uiModal={type:"news"}; render(); },
   continueSeason(){ continueFromSeasonEnd(); maybeIncomingOffer(0.30); render(); },
+  skipGroupDraw(){
+    if(drawTimer){ clearInterval(drawTimer); drawTimer = null; }
+    ST.drawRevealed = 32;
+    render();
+  },
+  finishGroupDraw(){
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    scheduleSave();
+    render();
+  },
   acceptJob(name){ selectNewJob(name); maybeIncomingOffer(0.30); render(); },
   stayJob(){ stayAtCurrentJob(); maybeIncomingOffer(0.30); render(); },
   newCareerFromOver(){ resetCareer(); },
