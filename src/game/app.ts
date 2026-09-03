@@ -2544,11 +2544,12 @@ function render(){
     const tickerEl = document.getElementById("ticker");
     if(tickerEl) tickerEl.scrollTop = tickerEl.scrollHeight;
     if(ST && ST.stage==="match" && ST.pendingMatch && ST.pendingMatch.result && !matchAnimDone()
-       && !(ST.uiModal && ST.uiModal.type==="penaltyResult")){
-      // that last guard matters: the penalty's event already flipped from "penalty_pending" to
-      // a resolved goal/miss the instant it was taken, so without it this block would see a
-      // normal event next and start auto-ticking the match clock again UNDER the result card,
-      // instead of waiting for the card's own timer to dismiss it first.
+       && !(ST.uiModal && (ST.uiModal.type==="penaltyResult" || ST.uiModal.type==="penaltyKicking"))){
+      // that last guard matters: while the kicking animation plays, the event at matchAnimIdx
+      // is still (deliberately) left as "penalty_pending" for the full 3s — without excluding
+      // "penaltyKicking" here too, this block would see that same pending event on every
+      // re-render and stomp the animation straight back to the penaltyPicker modal. Once the
+      // kick resolves it flips to a real goal/miss anyway, same as the "penaltyResult" case.
       const pm = ST.pendingMatch;
       const nextEvent = pm.result.events[ST.matchAnimIdx];
       // "Lenta" runs its own minute-by-minute clock (1', 2', 3'...) instead of jumping straight
@@ -4076,6 +4077,21 @@ function renderPenaltyPickerModal(m){
     </div>
   </div>`;
 }
+// the 3-second suspense beat between picking the taker and the GOL!/PERDEU! card — a pure
+// CSS animation (no emoji), the ball shrinking and rising toward the goal frame as if flying
+// into the net, timed to the same 3s the outcome is actually held back for.
+function renderPenaltyKickingModal(m){
+  return `<div class="modal-backdrop">
+    <div class="modal pen-kick-modal">
+      <div class="hero-badge" style="margin:0 auto 10px;">PÊNALTI!</div>
+      <div class="pen-kick-name">${esc(m.playerName)} cobra...</div>
+      <div class="pen-kick-stage">
+        <div class="pen-kick-goal"></div>
+        <div class="pen-kick-ball"></div>
+      </div>
+    </div>
+  </div>`;
+}
 // the outcome reveal for a mid-match penalty — same "written phrase" celebration language as
 // the shootout, just for a single kick.
 function renderPenaltyResultModal(m){
@@ -4097,6 +4113,7 @@ function renderModal(){
   if(m.type==="incomingOffer") return renderIncomingOfferModal(m);
   if(m.type==="squadCentral") return renderSquadCentralModal();
   if(m.type==="penaltyPicker") return renderPenaltyPickerModal(m);
+  if(m.type==="penaltyKicking") return renderPenaltyKickingModal(m);
   if(m.type==="penaltyResult") return renderPenaltyResultModal(m);
   if(m.type==="timeConfig") return renderTimeConfigModal();
   return "";
@@ -4661,23 +4678,34 @@ const Game = {
     ST.matchClockMinute = 90;
     render();
   },
+  // picking the taker doesn't resolve the kick right away — a 3s "penaltyKicking" animation
+  // plays first (ball flying at the goal, no emoji), and only once that finishes does the
+  // outcome actually get computed and the GOL!/PERDEU! card take over.
   takePenalty(playerId){
     const pm = ST.pendingMatch;
     const m = ST.uiModal;
     if(!pm || !m || m.type!=="penaltyPicker") return;
-    const outcome = resolvePendingPenaltyEvent(pm, m.eventIndex, Number(playerId));
-    if(!outcome) return;
     const eventIndex = m.eventIndex;
-    ST.uiModal = {type:"penaltyResult", scored:outcome.scored, flavor:outcome.flavor, playerName:outcome.playerName};
-    scheduleSave();
+    const ev = pm.result.events[eventIndex];
+    const atkTeamName = ev.side==="home" ? pm.ref.home : pm.ref.away;
+    const shooter = playerById(atkTeamName, Number(playerId));
+    ST.uiModal = {type:"penaltyKicking", playerName: shooter ? shooter.name : "Cobrador"};
     render();
     setTimeout(()=>{
-      if(ST.uiModal && ST.uiModal.type==="penaltyResult"){
-        ST.uiModal = null;
-        ST.matchAnimIdx = eventIndex + 1;
-        render();
-      }
-    }, 2600);
+      if(!ST.uiModal || ST.uiModal.type!=="penaltyKicking") return; // guards a stray double-fire
+      const outcome = resolvePendingPenaltyEvent(pm, eventIndex, Number(playerId));
+      if(!outcome){ ST.uiModal = null; ST.matchAnimIdx = eventIndex + 1; render(); return; }
+      ST.uiModal = {type:"penaltyResult", scored:outcome.scored, flavor:outcome.flavor, playerName:outcome.playerName};
+      scheduleSave();
+      render();
+      setTimeout(()=>{
+        if(ST.uiModal && ST.uiModal.type==="penaltyResult"){
+          ST.uiModal = null;
+          ST.matchAnimIdx = eventIndex + 1;
+          render();
+        }
+      }, 2600);
+    }, 3000);
   },
   continueAfterMatch(){ finishPendingMatch(); render(); },
 
