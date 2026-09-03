@@ -1132,8 +1132,16 @@ function maybeGenerateTrainingInjury(){
   const rng = E.makeRNG(nextSeed());
   if(rng() >= 0.05) return; // ~5% per day
   const p = squad[Math.floor(rng()*squad.length)];
-  const days = 1 + Math.floor(rng()*3); // out for 1-3 games, same semantics as a match injury
-  p.injured = true; p.injuredMatches = Math.max(p.injuredMatches||0, days);
+  const days = 1 + Math.floor(rng()*3); // out for 1-3 games — this is the number shown in the email
+  p.injured = true;
+  // decrementAvailability() ticks once on the very next match-day advance, BEFORE that
+  // match's lineup is even built (it's counting "this round is happening", not "the player
+  // actually sat one out") — a match-day injury only ever gets ticked starting the round
+  // AFTER it happens, so it naturally survives long enough to cost a real game. A training
+  // injury has no such head start, so without the +1 buffer here it heals itself the instant
+  // the next match rolls around and the player never actually misses anything — exactly the
+  // bug being fixed: the email said they were hurt, but it cost them zero games in practice.
+  p.injuredMatches = Math.max(p.injuredMatches||0, days+1);
   addMail({
     type:"injury",
     subject: MEDICAL_SUBJECTS[Math.floor(rng()*MEDICAL_SUBJECTS.length)],
@@ -2093,8 +2101,9 @@ function endOfSeason(){
 
   const baseByTier = [0,1800000,3800000,7500000,15000000,26000000][tier];
   const bonus = Math.pow(placementRank,1.7)*230000*(1+ST.reputation/300);
-  const carry = ST.budget*0.32;
-  ST.budget = Math.round(E.clamp(carry+baseByTier+bonus, 500000, 140000000)/10000)*10000;
+  // the manager never loses a cent of what's already in the bank moving into a new season —
+  // this only ever ADDS the season's earnings on top, whatever ST.budget already is.
+  ST.budget = Math.round((ST.budget+baseByTier+bonus)/10000)*10000;
 
   ST.history.push({year:ST.seasonYear, team:ST.teamId, result:placement, reputation:ST.reputation});
   ST.newsLog.unshift({title:`Temporada ${ST.seasonYear} encerrada`, text:`${ST.teamId} terminou a Libertadores em: ${placement}. Reputação: ${repChange>=0?"+":""}${repChange}.`});
