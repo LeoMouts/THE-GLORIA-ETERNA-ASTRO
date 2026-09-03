@@ -43,6 +43,21 @@ const TEAM_COLORS = {
   "Santos": ["#1A1A1A","#FFFFFF"], "River Plate": ["#FFFFFF","#D2122E"], "Botafogo": ["#1A1A1A","#FFFFFF"],
   "Atlético Mineiro": ["#1A1A1A","#FFFFFF"], "Racing": ["#7EC1E8","#1A1A1A"],
 };
+// a small set of hand-drawn line icons (stroke-based, currentColor) standing in for emoji
+// glyphs in a few specific spots — a real PNG asset isn't something this tool can generate on
+// its own (unlike the earlier training icon, which the user supplied), so these are inline
+// SVG instead, styled to match the rest of the game's gold/line-art visual language.
+function svgIcon(paths, size, viewBox){
+  size = size || 16;
+  return `<svg viewBox="${viewBox||"0 0 24 24"}" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;flex:0 0 auto;">${paths}</svg>`;
+}
+function iconGlobe(size){ return svgIcon(`<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>`, size); }
+function iconRadar(size){ return svgIcon(`<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/>`, size); }
+function iconEnvelope(size){ return svgIcon(`<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6.5 12 13l8.5-6.5"/>`, size); }
+function iconCoin(size){ return svgIcon(`<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.3 9.3c0-1.4 1.3-2.3 2.7-2.3s2.7.9 2.7 2c0 2.6-5.4 1.5-5.4 4 0 1.1 1.3 2 2.7 2s2.7-.9 2.7-2.3"/>`, size); }
+function iconMedical(size){ return svgIcon(`<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 7.5v9M7.5 12h9"/>`, size); }
+function iconMagnifier(size){ return svgIcon(`<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/>`, size); }
+function iconBriefcase(size){ return svgIcon(`<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>`, size); }
 function crestInitials(name){
   const stop = new Set(["de","del","la","el","fc","sc","central","real"]);
   const words = name.split(/\s+/).filter(w=>!stop.has(w.toLowerCase()));
@@ -2544,12 +2559,12 @@ function render(){
     const tickerEl = document.getElementById("ticker");
     if(tickerEl) tickerEl.scrollTop = tickerEl.scrollHeight;
     if(ST && ST.stage==="match" && ST.pendingMatch && ST.pendingMatch.result && !matchAnimDone()
-       && !(ST.uiModal && (ST.uiModal.type==="penaltyResult" || ST.uiModal.type==="penaltyKicking"))){
-      // that last guard matters: while the kicking animation plays, the event at matchAnimIdx
-      // is still (deliberately) left as "penalty_pending" for the full 3s — without excluding
-      // "penaltyKicking" here too, this block would see that same pending event on every
-      // re-render and stomp the animation straight back to the penaltyPicker modal. Once the
-      // kick resolves it flips to a real goal/miss anyway, same as the "penaltyResult" case.
+       && !(ST.uiModal && ST.uiModal.type==="penaltyKick")){
+      // that last guard matters: for the full "penaltyKick" card (suspense beat + result beat),
+      // the event at matchAnimIdx is deliberately left as "penalty_pending" — without excluding
+      // it here, this block would see that same pending event on every re-render and stomp the
+      // card straight back to the penaltyPicker modal. Once the kick resolves it flips to a
+      // real goal/miss event anyway, so this guard is only ever needed while the card is up.
       const pm = ST.pendingMatch;
       const nextEvent = pm.result.events[ST.matchAnimIdx];
       // "Lenta" runs its own minute-by-minute clock (1', 2', 3'...) instead of jumping straight
@@ -2910,7 +2925,7 @@ function renderHub(){
     ${tabBtn("elenco","Elenco")}
     ${tabBtn("transfers","Transferências")}
     ${tabBtn("scout","Olheiro")}
-    ${tabBtn("email","✉ E-mail"+(unreadMailCount()?` <span class="badge-mail">${unreadMailCount()}</span>`:""))}
+    ${tabBtn("email",iconEnvelope(13)+" E-mail"+(unreadMailCount()?` <span class="badge-mail">${unreadMailCount()}</span>`:""))}
   </div>
   <div class="tab-content">
     ${ST.hubTab==="competicao"?renderCompeticaoTab():""}
@@ -3115,10 +3130,19 @@ function renderCompeticaoTab(){
       <div class="panel-title">Grupo ${g} — Rodada ${Math.min(comp.currentRound+1,6)}/6</div>
       ${renderStandingsTable(standings)}
     </div>`;
-    cells = matchCell
-      + `<div class="competicao-cell">${standingsPanel}</div>`
-      + `<div class="competicao-cell">${renderUpcomingFixtures(g)}</div>`
-      + `<div class="competicao-cell">${renderTopScorers()}</div>`;
+    // explicit two-column layout (rather than a flat 4-cell auto-flow grid) so the "Últimos
+    // E-mails" shortcut can sit exactly where it was asked for: right column, between the
+    // group standings and the top scorers.
+    const leftCol = `<div class="competicao-col">
+      ${matchCell}
+      <div class="competicao-cell">${renderUpcomingFixtures(g)}</div>
+    </div>`;
+    const rightCol = `<div class="competicao-col">
+      <div class="competicao-cell">${standingsPanel}</div>
+      <div class="competicao-cell">${renderLatestEmailCard()}</div>
+      <div class="competicao-cell">${renderTopScorers()}</div>
+    </div>`;
+    return `<div class="competicao-grid">${leftCol}${rightCol}</div>`;
   } else {
     const bracketPanel = `<div class="panel"><div class="panel-title">${phaseLabel(comp.phase)}</div>${renderKnockoutBracket()}</div>`;
     cells = matchCell
@@ -3166,6 +3190,33 @@ function renderTopScorers(){
     <td class="tar gold bold mono">${s.goals}</td>
   </tr>`).join("")}
   </tbody></table></div>
+  </div>`;
+}
+// a one-row preview of the newest inbox mail, sitting between the group standings and the
+// top scorers — click it (or its empty-inbox state) to jump straight into the full E-mail tab.
+function renderLatestEmailCard(){
+  const box = inboxList();
+  const unread = unreadMailCount();
+  const latest = box[0];
+  const header = `<div class="row" style="justify-content:space-between;margin-bottom:${latest?"10px":"0"};">
+      <div class="panel-title" style="margin:0;">${iconEnvelope(14)} Últimos E-mails</div>
+      ${unread?`<span class="badge-mail">${unread}</span>`:""}
+    </div>`;
+  if(!latest){
+    return `<div class="panel latest-mail-panel" onclick="Game.setTab('email')">
+      ${header}
+      <div class="faint tiny">Sua caixa de entrada está vazia — avance os dias para receber novidades.</div>
+    </div>`;
+  }
+  return `<div class="panel latest-mail-panel" onclick="Game.openLatestMail('${latest.id}')">
+    ${header}
+    <div class="latest-mail-row">
+      <div class="mail-row-icon">${MAIL_ICON[latest.type]||iconEnvelope(20)}</div>
+      <div class="mail-row-body">
+        <div class="mail-row-top"><span class="bold${latest.read?"":" latest-mail-unread"}">${esc(latest.subject)}</span><span class="tiny faint">${esc(latest.dayLabel)}</span></div>
+        <div class="tiny dim mail-row-preview">${esc(latest.from)} — ${esc(latest.preview||"")}</div>
+      </div>
+    </div>
   </div>`;
 }
 function renderStandingsTable(rows){
@@ -3541,7 +3592,7 @@ function renderXferBuySubTab(f){
         ${renderXferSidebar(f, posOptions, null)}
       </aside>
       <div class="xfer-main">
-        <div class="dim tiny mb8">🌍 Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
+        <div class="dim tiny mb8">${iconGlobe(13)} Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
         <div class="scroll-x"><table class="data"><thead><tr>
           <th>Jogador</th><th>Clube (fora da Libertadores)</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Valor</th><th></th>
         </tr></thead><tbody>
@@ -3613,7 +3664,7 @@ function renderScoutTab(){
   const nextCost = level<5 ? SCOUT_LEVEL_COST[level+1] : null;
   const levelBadge = `<div class="scout-level-badge">
     <div class="faint tiny uc" style="text-align:right;">Rede de Olheiros</div>
-    <div class="bold gold">🌐 Nível ${level} — ${SCOUT_LEVEL_LABELS[level]}</div>
+    <div class="bold gold">${iconRadar(14)} Nível ${level} — ${SCOUT_LEVEL_LABELS[level]}</div>
     ${nextCost!=null
       ? `<button class="btn btn-sm mt8" ${ST.budget<nextCost?"disabled":""} onclick="Game.upgradeScout()">Subir p/ nível ${level+1} (${fmtMoney(nextCost)})</button>`
       : `<div class="tiny faint mt8">Nível máximo</div>`}
@@ -3670,7 +3721,7 @@ function renderScoutTab(){
 }
 
 // ---------------- E-MAIL TAB ----------------
-const MAIL_ICON = { offer:"💰", injury:"🚑", scout:"🔎", job:"💼" };
+const MAIL_ICON = { offer: iconCoin(20), injury: iconMedical(20), scout: iconMagnifier(20), job: iconBriefcase(20) };
 function renderEmailTab(){
   const open = ST.openMailId ? findMail(ST.openMailId) : null;
   if(open) return renderMailDetail(open);
@@ -3682,7 +3733,7 @@ function renderEmailTab(){
 }
 function renderMailRow(m){
   return `<div class="mail-row${m.read?"":" unread"}" onclick="Game.openMail('${m.id}')">
-    <div class="mail-row-icon">${MAIL_ICON[m.type]||"✉️"}</div>
+    <div class="mail-row-icon">${MAIL_ICON[m.type]||iconEnvelope(20)}</div>
     <div class="mail-row-body">
       <div class="mail-row-top"><span class="bold">${esc(m.subject)}</span><span class="tiny faint">${esc(m.dayLabel)}</span></div>
       <div class="tiny dim mail-row-preview">${esc(m.from)} — ${esc(m.preview||"")}</div>
@@ -4077,28 +4128,22 @@ function renderPenaltyPickerModal(m){
     </div>
   </div>`;
 }
-// the 3-second suspense beat between picking the taker and the GOL!/PERDEU! card — a pure
-// CSS animation (no emoji), the ball shrinking and rising toward the goal frame as if flying
-// into the net, timed to the same 3s the outcome is actually held back for.
-function renderPenaltyKickingModal(m){
+// one continuous card for a mid-match penalty — an empty goal frame (no ball) stays on
+// screen throughout. It opens on "{PLAYER} COBRA..." for a brief, light suspense beat, then
+// the same line swaps in place for the actual outcome sentence (from engine.ts's own goal/
+// miss flavor pools — real variety, from a clean finish to a save or a shot over the bar),
+// colored green if it went in and red if it didn't.
+function renderPenaltyKickModal(m){
+  const isResult = m.phase==="result";
+  const text = isResult ? m.flavor : `${m.playerName.toUpperCase()} COBRA...`;
+  const textClass = isResult ? (m.scored ? "green" : "red") : "";
   return `<div class="modal-backdrop">
     <div class="modal pen-kick-modal">
       <div class="hero-badge" style="margin:0 auto 10px;">PÊNALTI!</div>
-      <div class="pen-kick-name">${esc(m.playerName)} cobra...</div>
       <div class="pen-kick-stage">
-        <div class="pen-kick-goal"></div>
-        <div class="pen-kick-ball"></div>
+        <div class="pen-kick-goal${isResult?"":" pen-kick-goal-pulse"}"></div>
       </div>
-    </div>
-  </div>`;
-}
-// the outcome reveal for a mid-match penalty — same "written phrase" celebration language as
-// the shootout, just for a single kick.
-function renderPenaltyResultModal(m){
-  return `<div class="modal-backdrop">
-    <div class="contract-doc contract-doc-signing">
-      <div class="contract-sign-title ${m.scored?'green':'red'}">${m.scored?'GOL!':'PERDEU!'}</div>
-      <p class="pen-result-flavor">${esc(m.flavor)}</p>
+      <div class="pen-kick-text bold${textClass?" "+textClass:""}">${esc(text)}</div>
     </div>
   </div>`;
 }
@@ -4113,8 +4158,7 @@ function renderModal(){
   if(m.type==="incomingOffer") return renderIncomingOfferModal(m);
   if(m.type==="squadCentral") return renderSquadCentralModal();
   if(m.type==="penaltyPicker") return renderPenaltyPickerModal(m);
-  if(m.type==="penaltyKicking") return renderPenaltyKickingModal(m);
-  if(m.type==="penaltyResult") return renderPenaltyResultModal(m);
+  if(m.type==="penaltyKick") return renderPenaltyKickModal(m);
   if(m.type==="timeConfig") return renderTimeConfigModal();
   return "";
 }
@@ -4541,6 +4585,9 @@ const Game = {
   finishTrainingDay(){ finishTrainingDay(); render(); },
   skipTraining(){ skipSquadTraining(); render(); },
   openMail(id){ const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
+  // same as openMail, but also jumps the hub over to the E-mail tab first — used by the
+  // "Últimos E-mails" shortcut on the Competição tab.
+  openLatestMail(id){ ST.hubTab="email"; const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
   closeMail(){ ST.openMailId=null; render(); },
   negotiateOffer(id, askedAmount){ negotiateOffer(id, askedAmount); render(); },
   updateAskWords(inputEl, mailId){ formatMoneyInputEl(inputEl, "askWords_"+mailId); },
@@ -4678,9 +4725,9 @@ const Game = {
     ST.matchClockMinute = 90;
     render();
   },
-  // picking the taker doesn't resolve the kick right away — a 3s "penaltyKicking" animation
-  // plays first (ball flying at the goal, no emoji), and only once that finishes does the
-  // outcome actually get computed and the GOL!/PERDEU! card take over.
+  // picking the taker doesn't resolve the kick right away — the card opens on "{PLAYER}
+  // COBRA..." over an empty goal for a brief, light suspense beat, then the same line swaps
+  // to the actual (randomly-flavored, green/red) outcome sentence once it's computed.
   takePenalty(playerId){
     const pm = ST.pendingMatch;
     const m = ST.uiModal;
@@ -4689,23 +4736,23 @@ const Game = {
     const ev = pm.result.events[eventIndex];
     const atkTeamName = ev.side==="home" ? pm.ref.home : pm.ref.away;
     const shooter = playerById(atkTeamName, Number(playerId));
-    ST.uiModal = {type:"penaltyKicking", playerName: shooter ? shooter.name : "Cobrador"};
+    ST.uiModal = {type:"penaltyKick", phase:"waiting", playerName: shooter ? shooter.name : "Cobrador"};
     render();
     setTimeout(()=>{
-      if(!ST.uiModal || ST.uiModal.type!=="penaltyKicking") return; // guards a stray double-fire
+      if(!ST.uiModal || ST.uiModal.type!=="penaltyKick" || ST.uiModal.phase!=="waiting") return; // guards a stray double-fire
       const outcome = resolvePendingPenaltyEvent(pm, eventIndex, Number(playerId));
       if(!outcome){ ST.uiModal = null; ST.matchAnimIdx = eventIndex + 1; render(); return; }
-      ST.uiModal = {type:"penaltyResult", scored:outcome.scored, flavor:outcome.flavor, playerName:outcome.playerName};
+      ST.uiModal = {type:"penaltyKick", phase:"result", scored:outcome.scored, flavor:outcome.flavor, playerName:outcome.playerName};
       scheduleSave();
       render();
       setTimeout(()=>{
-        if(ST.uiModal && ST.uiModal.type==="penaltyResult"){
+        if(ST.uiModal && ST.uiModal.type==="penaltyKick" && ST.uiModal.phase==="result"){
           ST.uiModal = null;
           ST.matchAnimIdx = eventIndex + 1;
           render();
         }
       }, 2600);
-    }, 3000);
+    }, 1800); // "poucos segundos, leve suspense" — shorter than a real kick, just enough tension
   },
   continueAfterMatch(){ finishPendingMatch(); render(); },
 
