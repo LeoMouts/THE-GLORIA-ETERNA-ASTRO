@@ -759,6 +759,9 @@ function newCareerState(){
     trainingResult:null, // {playerId:{gain,leveledUp}} — shown as a green "+X%" after Simular Treino
     trainingAnimating:false, // true for the 3s "training in progress" beat right after clicking Simular Treino
     drawRevealed:0, // how many of the 32 group-draw slots the "group_draw" screen has revealed so far
+    clubCareer:null, // {club, seasons:{[year]:{players:{[id]:{...}}}}} — "Meu Clube" stats, reset whenever the club changes (see ensureClubCareer)
+    clubStatsScope:"season", // "season" | "career" — which the "Meu Clube" tab is currently showing
+    clubStatsYear:null, // which season year is picked while scope==="season" (defaults to the current one)
   };
 }
 
@@ -1438,12 +1441,71 @@ function recordCareerStat(bucket, name){
 function recordCareerSigning(name, price){
   ensureCareerStats().signings.push({name, price, team:ST.teamId, year:ST.seasonYear});
 }
+// ============================================================
+// "MEU CLUBE" STATS — every player's apps/goals/assists/cards/rating/injuries, broken down
+// by season and rolled up into a "career at this club" total. Strictly scoped to whichever
+// club is CURRENT: the moment ST.teamId changes (a new job), ensureClubCareer() below throws
+// the old block away and starts fresh — this is deliberately NOT the same ledger as
+// ST.careerStats above, which instead follows the manager across every club they've had.
+// ============================================================
+function ensureClubCareer(){
+  if(!ST.clubCareer || ST.clubCareer.club!==ST.teamId){
+    ST.clubCareer = { club: ST.teamId, seasons: {} };
+  }
+  return ST.clubCareer;
+}
+function ensureClubSeason(){
+  const cc = ensureClubCareer();
+  const key = String(ST.seasonYear);
+  if(!cc.seasons[key]) cc.seasons[key] = { players: {} };
+  return cc.seasons[key];
+}
+function ensureClubSeasonPlayer(season, p){
+  const key = String(p.id);
+  if(!season.players[key]){
+    season.players[key] = { id:p.id, name:p.name, pos:p.pos, apps:0, goals:0, assists:0, yellow:0, red:0, ratingSum:0, ratingCount:0, injuries:[] };
+  }
+  const rec = season.players[key];
+  rec.name = p.name; rec.pos = p.pos; // keep the label fresh even if it drifts mid-career
+  return rec;
+}
+// aggregates every recorded season into one "career at this club" total per player.
+function clubCareerTotals(){
+  const cc = ensureClubCareer();
+  const agg = {};
+  Object.values(cc.seasons).forEach(season=>{
+    Object.values(season.players).forEach(rec=>{
+      const key = String(rec.id);
+      if(!agg[key]) agg[key] = {id:rec.id, name:rec.name, pos:rec.pos, apps:0, goals:0, assists:0, yellow:0, red:0, ratingSum:0, ratingCount:0, injuries:[]};
+      const a = agg[key];
+      a.apps+=rec.apps; a.goals+=rec.goals; a.assists+=rec.assists; a.yellow+=rec.yellow; a.red+=rec.red;
+      a.ratingSum+=rec.ratingSum; a.ratingCount+=rec.ratingCount;
+      a.injuries = a.injuries.concat(rec.injuries);
+      a.name = rec.name; a.pos = rec.pos;
+    });
+  });
+  return agg;
+}
 function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, awayLineup, result){
   const allP = homeLineup.filter(Boolean).concat(awayLineup.filter(Boolean));
   allP.forEach(p=>{
     const rating = result.ratings[p.id];
     if(rating!=null) p.form = Math.round((rating-6.5)*10)/10;
   });
+  const userIsHome = homeTeamName===ST.teamId;
+  const userIsAway = awayTeamName===ST.teamId;
+  const myLineup = userIsHome ? homeLineup : awayLineup;
+  const mySide = userIsHome ? "home" : "away";
+  const clubSeason = (userIsHome || userIsAway) ? ensureClubSeason() : null;
+  if(clubSeason){
+    myLineup.forEach(p=>{
+      if(!p) return;
+      const rec = ensureClubSeasonPlayer(clubSeason, p);
+      rec.apps++;
+      const rating = result.ratings[p.id];
+      if(rating!=null){ rec.ratingSum += rating; rec.ratingCount++; }
+    });
+  }
   result.events.forEach(ev=>{
     const side = ev.side==="home" ? homeLineup : awayLineup;
     const p = side.find(pp=>pp && pp.name===ev.player);
@@ -1456,6 +1518,21 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
       if(scoringTeam===ST.teamId){
         recordCareerStat("goals", p.name);
         if(ev.assist) recordCareerStat("assists", ev.assist);
+      }
+    }
+    if(clubSeason && ev.side===mySide){
+      const rec = ensureClubSeasonPlayer(clubSeason, p);
+      if(ev.type==="goal"){
+        rec.goals++;
+        if(ev.assist){
+          const assister = myLineup.find(pp=>pp && pp.name===ev.assist);
+          if(assister) ensureClubSeasonPlayer(clubSeason, assister).assists++;
+        }
+      }
+      if(ev.type==="yellow") rec.yellow++;
+      if(ev.type==="red") rec.red++;
+      if(ev.type==="injury"){
+        rec.injuries.push({days: Math.round((ev.matchesOut||1)*3.5), games: ev.matchesOut||1, seasonYear: ST.seasonYear});
       }
     }
   });
@@ -2926,6 +3003,7 @@ function renderHub(){
     ${tabBtn("transfers","Transferências")}
     ${tabBtn("scout","Olheiro")}
     ${tabBtn("email",iconEnvelope(13)+" E-mail"+(unreadMailCount()?` <span class="badge-mail">${unreadMailCount()}</span>`:""))}
+    ${tabBtn("clube","Meu Clube")}
   </div>
   <div class="tab-content">
     ${ST.hubTab==="competicao"?renderCompeticaoTab():""}
@@ -2933,6 +3011,7 @@ function renderHub(){
     ${ST.hubTab==="transfers"?renderTransfersTab():""}
     ${ST.hubTab==="scout"?renderScoutTab():""}
     ${ST.hubTab==="email"?renderEmailTab():""}
+    ${ST.hubTab==="clube"?renderMeuClubeTab():""}
   </div>`;
 }
 function tabBtn(id,label){
@@ -3718,6 +3797,79 @@ function renderScoutTab(){
     <button class="btn btn-sm" ${canRequest?"":"disabled"} onclick="Game.generateScout()">🔄 Pedir novo relatório (${SCOUT_REPORT_DAYS[level]}d)</button>
     ${!canRequest && !ST.scoutReportETA ? `<span class="tiny faint">Jogue pelo menos mais 1 partida antes de pedir outro.</span>` : ""}
   </div>` : ""}`;
+}
+
+// ---------------- MEU CLUBE TAB ----------------
+// average rating, formatted, or an em-dash when the player never actually took the pitch
+// in the selected scope.
+function fmtAvgRating(rec){ return rec.ratingCount>0 ? (rec.ratingSum/rec.ratingCount).toFixed(1) : "—"; }
+function fmtInjurySummary(rec){
+  if(!rec.injuries.length) return `<span class="faint">—</span>`;
+  const days = rec.injuries.reduce((a,i)=>a+i.days,0);
+  const games = rec.injuries.reduce((a,i)=>a+i.games,0);
+  return `${rec.injuries.length} · ~${days}d/${games}j`;
+}
+function renderStatLeaders(rows, key, label){
+  const top = rows.filter(r=>r[key]>0).sort((a,b)=>b[key]-a[key]).slice(0,5);
+  if(!top.length) return `<div class="panel"><div class="panel-title">${label}</div><div class="faint tiny">Nenhum registro neste recorte.</div></div>`;
+  return `<div class="panel">
+    <div class="panel-title">${label}</div>
+    ${top.map((r,i)=>`<div class="kv"><span>${i+1}. ${esc(r.name)}</span><span class="bold gold">${r[key]}</span></div>`).join("")}
+  </div>`;
+}
+function renderMeuClubeTab(){
+  const cc = ensureClubCareer();
+  const seasonYears = Object.keys(cc.seasons).map(Number).sort((a,b)=>b-a);
+  const scope = ST.clubStatsScope==="career" ? "career" : "season";
+  const selectedYear = seasonYears.includes(ST.clubStatsYear) ? ST.clubStatsYear : ST.seasonYear;
+  const statsMap = scope==="career" ? clubCareerTotals() : ((cc.seasons[String(selectedYear)]||{players:{}}).players);
+  const rows = Object.values(statsMap);
+
+  const scopeToggle = `<div class="btn-row mb16">
+    <button class="btn ${scope==="season"?"btn-gold":""}" onclick="Game.setClubStatsScope('season')">Temporada</button>
+    <button class="btn ${scope==="career"?"btn-gold":""}" onclick="Game.setClubStatsScope('career')">Carreira no ${esc(ST.teamId)}</button>
+  </div>`;
+  const yearPicker = (scope==="season" && seasonYears.length>1)
+    ? `<select class="input-inline mb16" onchange="Game.setClubStatsYear(this.value)">
+        ${seasonYears.map(y=>`<option value="${y}" ${y===selectedYear?"selected":""}>Temporada ${y}</option>`).join("")}
+      </select>`
+    : "";
+
+  if(!seasonYears.length){
+    return `${scopeToggle}<div class="empty-state">Ainda não há partidas registradas nesta temporada — as estatísticas aparecem aqui assim que você jogar.</div>`;
+  }
+
+  // "todos os jogadores": the current squad, each row pulling whatever record exists for the
+  // selected scope (0s for anyone who hasn't played yet, e.g. a signing made mid-season).
+  const squad = myTeam().players.slice().sort((a,b)=>b.ovr-a.ovr);
+  const playerRows = squad.map(p=>{
+    const rec = statsMap[String(p.id)] || {apps:0, goals:0, assists:0, yellow:0, red:0, ratingSum:0, ratingCount:0, injuries:[]};
+    return `<tr>
+      <td class="bold">${esc(p.name)}</td>
+      <td><span class="badge badge-pos">${p.pos}</span></td>
+      <td class="tac">${rec.apps}</td>
+      <td class="tac gold bold">${rec.goals}</td>
+      <td class="tac">${rec.assists}</td>
+      <td class="tac mono">${fmtAvgRating(rec)}</td>
+      <td class="tac"><span class="card-chip card-yellow">${rec.yellow}</span></td>
+      <td class="tac"><span class="card-chip card-red">${rec.red}</span></td>
+      <td class="tac tiny">${fmtInjurySummary(rec)}</td>
+    </tr>`;
+  }).join("");
+
+  return `${scopeToggle}${yearPicker}
+  <div class="competicao-grid mb16">
+    <div class="competicao-cell">${renderStatLeaders(rows,"goals","Artilheiros")}</div>
+    <div class="competicao-cell">${renderStatLeaders(rows,"assists","Líderes de Assistência")}</div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Elenco — ${scope==="career"?`Carreira no ${esc(ST.teamId)}`:`Temporada ${selectedYear}`}</div>
+    <div class="scroll-x"><table class="data"><thead><tr>
+      <th>Jogador</th><th>Pos</th><th class="tac">J</th><th class="tac">Gols</th><th class="tac">Assist.</th><th class="tac">Nota</th><th class="tac">CA</th><th class="tac">CV</th><th class="tac">Lesões</th>
+    </tr></thead><tbody>
+    ${playerRows}
+    </tbody></table></div>
+  </div>`;
 }
 
 // ---------------- E-MAIL TAB ----------------
@@ -4541,6 +4693,8 @@ const Game = {
   beginPreLibCareer(){ crownPreLibChampion(ST.managerName); render(); },
 
   setTab(id){ ST.hubTab=id; render(); },
+  setClubStatsScope(scope){ ST.clubStatsScope = scope; render(); },
+  setClubStatsYear(year){ ST.clubStatsYear = Number(year); render(); },
   // "Editar escalação" on the match-confirm screen: jump back to the hub's Elenco tab.
   // (previously this button's onclick called bare ST/render() directly in the HTML attribute —
   // those aren't real globals in the bundled output, so the click silently threw and could
