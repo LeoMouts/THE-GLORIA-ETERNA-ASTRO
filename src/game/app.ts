@@ -140,7 +140,8 @@ const GLOBAL_TEAM_CRESTS = {
   "Bologna RB":"bologna", "Bournemouth RB":"bournemouth", "Beşiktaş JK":"besiktas",
   // the real names those placeholders now resolve to in the data:
   "Inter Miami":"inter-miami", "Atlético de Madrid":"atletico", "Galatasaray":"galatasaray",
-  "Fenerbahçe":"fenerbahce", "Sunderland":"sunderland", "LAFC":"lafc", "Roma":"roma",
+  "Fenerbahçe":"fenerbahce", "Juventus":"juventus", "Fiorentina":"fiorentina",
+  "Sunderland":"sunderland", "LAFC":"lafc", "Roma":"roma",
   "Real Sociedad":"sociedad", "Sevilla":"sevilla", "Nottingham Forest":"nottm-forest",
   "Atlanta United":"atlanta-utd", "Osasuna":"osasuna", "Bologna":"bologna", "Bournemouth":"bournemouth",
   "Beşiktaş":"besiktas", "Besiktas":"besiktas",
