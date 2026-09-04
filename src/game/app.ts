@@ -193,6 +193,20 @@ const GLOBAL_TEAM_CRESTS = {
   "Sarmiento de Junín":"sarmiento",
   // re-checked the full 811-file crest repo once more for anything missed on the first pass:
   "Athletico Paranaense":"athletico-pr", "EC Vitória":"vitoria-ba", "Havre AC":"le-havre",
+  // "Free Agents" reassigned to their real, current (Sept 2026) club per the user-supplied
+  // spreadsheet — Boca Juniors, Cerro Porteño, Flamengo, Santos and Talleres aren't repeated
+  // here either, same Libertadores-fallback reason as the batches above.
+  "Al-Ahly":"al-ahly", "Al-Arabi SC":"al-arabi-qatar", "Al-Ettifaq":"al-ettifaq", "Al-Fateh":"al-fateh",
+  "Al-Hilal":"al-hilal", "Al-Nassr":"al-nassr", "Al-Riyadh":"al-riyadh", "Al-Shamal":"al-shamal",
+  "Aris":"aris", "Atlas":"atlas", "Barcelona":"barcelona", "Bodrum FK":"bodrum-fk",
+  "Borussia Mönchengladbach":"gladbach", "Dinamo Zagreb":"dinamo-zagreb", "Estrela Vermelha":"red-star-belgrade", "Freiburg":"freiburg",
+  "Hoffenheim":"hoffenheim", "Legia Varsóvia":"legia-warsaw", "León":"leon", "Los Angeles FC":"lafc",
+  "Mainz 05":"mainz", "Marseille":"marseille", "Monaco":"monaco", "Monterrey":"monterrey",
+  "Olimpia":"olimpia", "Olympiacos":"olympiacos", "PAOK":"paok", "Pachuca":"pachuca",
+  "Panathinaikos":"panathinaikos", "Pumas UNAM":"pumas", "RB Leipzig":"leipzig", "RB Salzburg":"salzburg",
+  "Real Betis":"betis", "Santos Laguna":"santos-laguna", "Shakhtar Donetsk":"shakhtar", "Slavia Praga":"slavia-prague",
+  "St. Pauli":"st-pauli", "VfB Stuttgart":"stuttgart", "Villarreal":"villarreal", "Werder Bremen":"werder",
+  "Wolfsburg":"wolfsburg", "Wolverhampton":"wolves",
 };
 let _globalCrestSeq = 0;
 function clubCrestImg(clubName, size, playerName){
