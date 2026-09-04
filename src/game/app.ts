@@ -2372,6 +2372,10 @@ function ageWorld(){
   // trains their way further and further ahead every year.
   runAITransferWindow(rng);
   runGlobalClubReshuffle(rng);
+  // a proper "summer window" wave of Libertadores prospects leaving for Europe, on top of
+  // whatever already trickled in day by day during the season via dailyTransferTick().
+  const jewelSales = 2 + Math.floor(rng()*3); // 2-4 per season
+  for(let i=0;i<jewelSales;i++) runEuropeanPoaching(rng);
 }
 
 // ============================================================
@@ -2472,8 +2476,12 @@ function runAITransferWindow(rng){
       }
       if(!signed){
         // poach from a weaker AI club, but only where they have real depth (3+) at that slot —
-        // never strip a smaller club down to nothing just to fill a bigger one's need.
-        for(const donorName of teamNames){
+        // never strip a smaller club down to nothing just to fill a bigger one's need. Brazilian
+        // clubs get an extra pass at the front of the queue — they trade their own squads far
+        // more actively than the rest of the confederation in real life, so they end up as the
+        // seller here noticeably more often than a plain random order would give them.
+        const brazilFirst = teamNames.filter(n=>world.teams[n].country==="Brasil").concat(teamNames);
+        for(const donorName of brazilFirst){
           if(donorName===name || tierOf(world, donorName)>=tier) continue;
           const donor = world.teams[donorName];
           const cands = donor.players.filter(p=>
@@ -2526,6 +2534,109 @@ function runGlobalClubReshuffle(rng){
     p.club = dest;
     p.value = fee;
   }
+}
+// which AI Libertadores club sells its next prospect abroad — Brazilian clubs are weighted
+// noticeably heavier than the rest of the confederation (real academies feeding Europe's
+// market), never the user's own team.
+function pickJewelSellerTeam(world, rng){
+  const names = Object.keys(world.teams).filter(n=>n!==ST.teamId);
+  if(!names.length) return null;
+  const weighted = names.map(n=>({n, w: world.teams[n].country==="Brasil" ? 2.5 : 1}));
+  const total = weighted.reduce((a,b)=>a+b.w,0);
+  let r = rng()*total;
+  for(const it of weighted){ r -= it.w; if(r<=0) return it.n; }
+  return weighted[weighted.length-1].n;
+}
+// the best actual "joia" on a squad — young, with either a real OVR already or serious room
+// left to grow toward potential. Returns null rather than force a sale when nobody qualifies.
+function bestJewelIn(team){
+  const cands = team.players.filter(p=>p.age<=23 && (p.ovr>=68 || (p.pot||p.ovr)>=78));
+  if(!cands.length) return null;
+  let best = null, bestScore = -1;
+  cands.forEach(p=>{
+    const score = p.ovr + Math.max(0,(p.pot||p.ovr)-p.ovr)*0.5;
+    if(score>bestScore){ bestScore=score; best=p; }
+  });
+  return best;
+}
+// a European (or other global) club comes in for a Libertadores prospect — the reverse flow
+// from runAITransferWindow: talent LEAVING the confederation instead of reinforcing it. Never
+// touches the user's own squad.
+function runEuropeanPoaching(rng){
+  const world = ST.world;
+  if(!world || !world.teams) return;
+  const sellerName = pickJewelSellerTeam(world, rng);
+  if(!sellerName) return;
+  const seller = world.teams[sellerName];
+  const jewel = bestJewelIn(seller);
+  if(!jewel) return;
+  const buyer = REAL_EURO_CLUBS[Math.floor(rng()*REAL_EURO_CLUBS.length)];
+  const fee = askingPrice(jewel, seller);
+  seller.players = seller.players.filter(p=>p.id!==jewel.id);
+  if(!Array.isArray(world.globalMarket)) world.globalMarket = [];
+  world.globalMarket.push(Object.assign({}, jewel, {club:buyer, league:"European League"}));
+  recordTransferFeed({name:jewel.name, price:fee, fromClub:sellerName, toClub:buyer, pos:jewel.pos, ovr:jewel.ovr});
+}
+// lighter single-transaction versions of the season-end sweeps above, rolled from
+// dailyTransferTick() on every AVANÇAR DIA so FABRIZIO ROMANO has fresh news trickling in
+// through the season instead of one big dump at year-end.
+function runSingleAISigning(rng){
+  const world = ST.world;
+  if(!world || !world.teams) return;
+  const teamNames = Object.keys(world.teams).filter(n=>n!==ST.teamId);
+  if(!teamNames.length) return;
+  const name = teamNames[Math.floor(rng()*teamNames.length)];
+  const team = world.teams[name];
+  const tier = tierOf(world, name);
+  const need = positionNeedThreshold(tier);
+  const pos = AI_SIGNING_POS[Math.floor(rng()*AI_SIGNING_POS.length)];
+  const inSlot = team.players.filter(p=>p.pos===pos || (p.altPos && p.altPos.includes(pos)));
+  const best = inSlot.reduce((b,p)=> (!b||p.ovr>b.ovr)?p:b, null);
+  if(best && best.ovr>=need) return;
+  const globalCands = eligibleGlobalCandidates(world, pos, tier);
+  if(!globalCands.length) return;
+  const picked = pickWeighted(rng, globalCands, p=>{
+    let s = 10;
+    if((SA_NEIGHBORS[team.country]||[]).includes(p.nat)) s += 25;
+    s += Math.max(0, 20 - Math.abs(p.ovr-need));
+    return s;
+  });
+  if(!picked) return;
+  const fromClub = picked.club;
+  const fee = globalMarketAskingPrice(picked);
+  world.globalMarket = world.globalMarket.filter(p=>p.id!==picked.id);
+  const joined = Object.assign({}, picked, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0, value:fee});
+  delete joined.club; delete joined.league;
+  team.players.push(joined);
+  recordTransferFeed({name:picked.name, price:fee, fromClub: fromClub || "Free Agents", toClub:name, pos:picked.pos, ovr:picked.ovr});
+}
+function runSingleGlobalReshuffle(rng){
+  const pool = ST.world.globalMarket;
+  if(!pool || !pool.length) return;
+  const clubNames = Object.keys(GLOBAL_TEAM_CRESTS).filter(n=>!AI_EXCLUDED_CLUBS.has(n) && !LEGACY_PLACEHOLDER_CLUBS.has(n));
+  if(!clubNames.length) return;
+  const p = pool[Math.floor(rng()*pool.length)];
+  if(!p || !p.club || AI_EXCLUDED_CLUBS.has(p.club)) return;
+  let dest = clubNames[Math.floor(rng()*clubNames.length)];
+  let guard = 0;
+  while(dest===p.club && guard<5){ dest = clubNames[Math.floor(rng()*clubNames.length)]; guard++; }
+  if(dest===p.club) return;
+  const fee = Math.max(20000, Math.round((p.value || E.calcValue(p.ovr,p.age,p.pot)) * (0.9+rng()*0.4) / 5000) * 5000);
+  recordTransferFeed({name:p.name, price:fee, fromClub:p.club, toClub:dest, pos:p.pos, ovr:p.ovr});
+  p.club = dest;
+  p.value = fee;
+}
+// rolled once per AVANÇAR DIA (see Game.advance/advanceSlow/advanceFast) — most days are quiet,
+// but on the ones that aren't, exactly one of these three fires so transfer news actually
+// trickles in day by day instead of arriving all at once at the season boundary.
+function dailyTransferTick(){
+  if(!ST.world || !ST.world.teams) return;
+  const rng = E.makeRNG(nextSeed());
+  if(rng() > 0.24) return;
+  const roll = rng();
+  if(roll < 0.45) runSingleAISigning(rng);
+  else if(roll < 0.85) runEuropeanPoaching(rng);
+  else runSingleGlobalReshuffle(rng);
 }
 
 function buildJobOffers(kind){
@@ -2909,11 +3020,22 @@ function maybeIncomingOffer(baseChance){
   const offer = Math.round(target.value*mult/5000)*5000;
   queueOfferMail(target.id, target.name, club, category, target.value, offer, rng, pickPosture(rng).id);
 }
+// real prospects draw outsized interest from abroad — a Brazilian "joia" with real room to
+// grow gets chased far harder than a solid-but-finished veteran of the same OVR.
+function jewelWeight(p){
+  let w = Math.pow(1.06, p.ovr);
+  if(p.nat==="Brasil") w *= 2.2;
+  if(p.age<=23){
+    const room = Math.max(0, (p.pot||p.ovr) - p.ovr);
+    w *= 1 + room*0.12;
+  }
+  return w;
+}
 function weightedPickByOvr(players, rng){
-  const total = players.reduce((a,p)=>a+Math.pow(1.06,p.ovr),0);
+  const total = players.reduce((a,p)=>a+jewelWeight(p),0);
   let r = rng()*total;
   for(const p of players){
-    r -= Math.pow(1.06,p.ovr);
+    r -= jewelWeight(p);
     if(r<=0) return p;
   }
   return players[players.length-1];
@@ -5129,11 +5251,11 @@ const Game = {
   // those aren't real globals in the bundled output, so the click silently threw and could
   // leave the screen stuck mid-transition; routing through a proper Game method fixes that.)
   goEditLineup(){ ST.hubTab='elenco'; ST.stage='hub'; render(); },
-  advance(){ advanceTournament(); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
+  advance(){ advanceTournament(); dailyTransferTick(); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
   // match-day buttons — back to their pre-AVANÇAR-DIA behavior: simulate right away, at
   // whichever pace, once the calendar has actually counted down to the day of the match.
-  advanceSlow(){ advanceWithSpeed("slow"); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
-  advanceFast(){ advanceWithSpeed("fast"); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
+  advanceSlow(){ advanceWithSpeed("slow"); dailyTransferTick(); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
+  advanceFast(){ advanceWithSpeed("fast"); dailyTransferTick(); if(ST.stage==="hub") maybeIncomingOffer(0.16); render(); },
   // "AVANÇAR DIA": ticks the calendar forward one day, rolls whatever mail that day
   // brings, and — once the countdown hits zero — swaps this card over to the match-day
   // buttons above instead of jumping into the match itself.
