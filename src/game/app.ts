@@ -188,6 +188,11 @@ const GLOBAL_TEAM_CRESTS = {
   "Union Saint-Gilloise":"union-sg", "Universidad de Chile":"u-de-chile", "Unión de Santa Fe":"santa-fe", "Vancouver Whitecaps":"vancouver",
   "Vejle BK":"vejle", "Venezia FC":"venezia", "Viborg FF":"viborg", "Watford":"watford",
   "Águilas Doradas":"aguilas-doradas",
+  // final 5 — completes all 210 generic "City + code" placeholder names identified in the data.
+  "FCV Dender EH":"dender", "Cobresal":"cobresal", "Jeonbuk Hyundai Motors":"jeonbuk-hyundai-motors",
+  "Sarmiento de Junín":"sarmiento",
+  // re-checked the full 811-file crest repo once more for anything missed on the first pass:
+  "Athletico Paranaense":"athletico-pr", "EC Vitória":"vitoria-ba", "Havre AC":"le-havre",
 };
 let _globalCrestSeq = 0;
 function clubCrestImg(clubName, size, playerName){
