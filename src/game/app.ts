@@ -148,6 +148,46 @@ const GLOBAL_TEAM_CRESTS = {
   // Bayern Munich's real first-team squad, previously dumped into the generic "Free Agents" pool —
   // their club field now literally says "Bayern de Munique", and Mateo Retegui's now says "Al-Qadsiah".
   "Bayern de Munique":"bayern", "Al-Qadsiah":"al-qadsiah",
+  // second batch of generic "City + code" placeholders identified and renamed to their real
+  // club — Botafogo, Grêmio, Independiente Medellín, Independiente Rivadavia and Atlético Mineiro
+  // aren't repeated here since those exact names already resolve via the Libertadores TEAM_LOGOS
+  // fallback inside crestSVG().
+  "Aldosivi":"aldosivi", "América de Cali":"america-cali", "Argentinos Juniors":"argentinos-jrs", "Atlético Bucaramanga":"bucaramanga",
+  "Austin FC":"austin-fc", "Barracas Central":"barracas", "Belgrano":"belgrano", "Blackburn Rovers":"blackburn",
+  "Brentford":"brentford", "Bristol City":"bristol-city", "Brøndby IF":"brondby", "CF Montréal":"cf-montreal",
+  "Cagliari":"cagliari", "Ceará":"ceara", "Cercle Brugge":"cercle-brugge", "Chapecoense":"chapecoense",
+  "Charleroi":"charleroi", "Charlotte FC":"charlotte-fc", "Chicago Fire":"chicago-fire", "Club Brugge":"brugge",
+  "Colorado Rapids":"colorado-rapids", "Columbus Crew":"columbus", "Coritiba":"coritiba", "Coventry City":"coventry",
+  "Daejeon Hana Citizen":"daejeon-hana-citizen", "Defensa y Justicia":"defensa-justicia", "Deportes Limache":"deportes-limache", "Deportivo Cali":"deportivo-cali",
+  "Empoli":"empoli", "Espanyol":"espanyol", "FC Basel":"basel", "FC Cincinnati":"fc-cincinnati",
+  "FC Midtjylland":"midtjylland", "Fortaleza":"fortaleza", "Gangwon FC":"gangwon-fc", "Genk":"genk",
+  "Genoa":"genoa", "Gent":"gent", "Gimcheon Sangmu":"gimcheon-sangmu", "Houston Dynamo":"houston-dynamo",
+  "Hull City":"hull", "Incheon United":"incheon-united", "Independiente":"independiente", "Instituto":"instituto",
+  "Ipswich Town":"ipswich", "Jeju SK":"jeju-united", "Juventude":"juventude", "KV Mechelen":"mechelen",
+  "Kasımpaşa":"kasimpasa", "LA Galaxy":"la-galaxy", "La Equidad":"la-equidad", "Las Palmas":"las-palmas",
+  "Lausanne-Sport":"lausanne-sport", "Lecce":"lecce", "Lugano":"lugano", "Luzern":"luzern",
+  "Mallorca":"mallorca", "Middlesbrough":"middlesbrough", "Millonarios":"millonarios", "Millwall":"millwall",
+  "Minnesota United":"minnesota-utd", "Monza":"monza", "Nashville SC":"nashville-sc", "New England Revolution":"new-england",
+  "New York Red Bulls":"ny-red-bulls", "Once Caldas":"once-caldas", "RSC Anderlecht":"anderlecht", "Racing Club":"racing",
+  "Royal Antwerp":"antwerp", "San Lorenzo":"san-lorenzo", "Sporting Kansas City":"sporting-kc", "Standard Liège":"standard",
+  "Talleres":"talleres", "Unión La Calera":"union-la-calera", "Vélez Sarsfield":"velez", "Young Boys":"young-boys",
+  "Ñublense":"nublense",
+  // third batch of generic-name identifications — Rosario RN (Rosario Central) and Vicente López M
+  // (Platense) aren't repeated here either, same Libertadores-fallback reason as above.
+  "Alianza FC":"alianza-fc", "Audax Italiano":"audax-italiano", "Central Córdoba":"central-cordoba", "Colo-Colo":"colo-colo",
+  "D.C. United":"dc-united", "Deportivo Pasto":"pasto", "Deportivo Pereira":"deportivo-pereira", "Everton de Viña del Mar":"everton-vina",
+  "FC Nordsjælland":"nordsjaelland", "FC Sion":"sion", "FC St. Gallen":"st-gallen",
+  "FC Winterthur":"winterthur", "FC Zürich":"zurich", "Grasshopper Club Zürich":"grasshopper", "Huachipato":"huachipato",
+  "Huracán":"huracan", "KVC Westerlo":"westerlo", "Norwich City":"norwich", "Orlando City SC":"orlando-city",
+  "Oxford United":"oxford", "Palestino":"palestino", "Philadelphia Union":"philadelphia", "Pohang Steelers":"pohang-steelers",
+  "Portland Timbers":"portland-timbers", "Preston North End":"preston", "Queens Park Rangers":"qpr", "Randers FC":"randers",
+  "Rayo Vallecano":"rayo-vallecano", "Real Salt Lake":"real-salt-lake", "San Diego FC":"san-diego-fc", "San Jose Earthquakes":"san-jose",
+  "Seattle Sounders":"seattle", "Servette FC":"servette", "Sheffield Wednesday":"sheff-wed", "Silkeborg IF":"silkeborg",
+  "Sint-Truiden":"sint-truiden", "Sport Recife":"sport-recife", "St. Louis City SC":"st-louis-city", "Stoke City":"stoke",
+  "Swansea City":"swansea", "Tigre":"tigre", "Toronto FC":"toronto-fc", "Ulsan HD":"ulsan-hd",
+  "Union Saint-Gilloise":"union-sg", "Universidad de Chile":"u-de-chile", "Unión de Santa Fe":"santa-fe", "Vancouver Whitecaps":"vancouver",
+  "Vejle BK":"vejle", "Venezia FC":"venezia", "Viborg FF":"viborg", "Watford":"watford",
+  "Águilas Doradas":"aguilas-doradas",
 };
 let _globalCrestSeq = 0;
 function clubCrestImg(clubName, size, playerName){
