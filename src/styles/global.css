@@ -908,3 +908,19 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
   .pen-shoot-round{gap:8px;}
   .pen-shoot-name{font-size:11.5px;}
 }
+
+/* ---------------- Fabrizio Romano transfer-news card (Competição tab) ---------------- */
+.romano-panel{transition:border-color .15s;}
+.romano-panel:hover{border-color:var(--marigold);}
+.romano-flip-inner{transition:transform .16s ease;transform-origin:center;}
+.romano-row{
+  display:flex;align-items:center;gap:10px;padding:9px 0;
+  border-bottom:1px solid var(--line);
+}
+.romano-row:last-child{border-bottom:none;}
+.romano-row-crests{display:flex;align-items:center;gap:5px;flex:0 0 auto;}
+.romano-arrow{color:var(--marigold);font-weight:800;font-size:13px;}
+.romano-arrow-inline{color:var(--marigold);font-weight:800;}
+.romano-row-body{flex:1;min-width:0;}
+.romano-row-body .bold{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.romano-row-fee{flex:0 0 auto;font-size:12.5px;white-space:nowrap;}
