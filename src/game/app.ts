@@ -1,5 +1,6 @@
 // ============================================================
 // LIBERTADORES MANAGER — APP (state, storage, screens)
+// build marker: force-fresh-deploy-2026-09-04
 // ============================================================
 import * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
