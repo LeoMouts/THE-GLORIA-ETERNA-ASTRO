@@ -130,31 +130,28 @@ const GLOBAL_TEAM_CRESTS = {
   "Ulsan HD FC":"ulsan-hd", "Valencia CF":"valencia", "Villarreal CF":"villarreal", "Vissel Kobe":"vissel-kobe",
   "Vitória SC":"vitoria-sc", "West Bromwich Albion":"west-brom", "West Ham United":"west-ham", "Wolverhampton Wanderers":"wolves",
   "Yokohama F. Marinos":"yokohama-f-marinos", "Zecorner Kayserispor":"kayserispor", "sc Heerenveen":"heerenveen",
-  // "generic" club names in market.json that are actually stand-ins for a real club (identified by hand) —
-  // same crest slug, just keyed by the in-game placeholder name instead of the real one.
+  // market.json now carries every club under its real name (the old placeholder names — "Miami BP",
+  // "Madrid Rosas RB" etc — were renamed in the data itself), but these placeholder keys stay here too
+  // so a save from before that rename still resolves its crests correctly.
   "Miami BP":"inter-miami", "Madrid Rosas RB":"atletico", "Napoli A":"napoli", "Galatasaray SK":"galatasaray",
   "Fenerbahçe SK":"fenerbahce", "Piemonte BN":"juventus", "Firenze V":"fiorentina", "Sunderland RWB":"sunderland",
   "Los Angeles BY":"lafc", "Roma GR":"roma", "Vasco Gipuzkoa AB":"sociedad", "Sevilla Triana VB":"sevilla",
   "Nottingham RW":"nottm-forest", "Atlanta RB":"atlanta-utd", "Fulham":"fulham", "Pamplona RA":"osasuna",
   "Bologna RB":"bologna", "Bournemouth RB":"bournemouth", "Beşiktaş JK":"besiktas",
-};
-// a handful of real players who sit in the game's generic "Free Agents" pool (or under a placeholder
-// club) under their own real name — matched by hand against each club's actual current squad — so they
-// get that club's crest instead of no crest / the wrong one, keyed by exact player name.
-const PLAYER_CREST_OVERRIDE = {
-  "Mateo Retegui": "al-qadsiah",
-  // Bayern Munich's real first-team squad, hiding in "Free Agents" (Bayern isn't a pickable club in
-  // this game's market — its actual roster ended up dumped into the free-agent pool instead):
-  "Harry Kane":"bayern", "Michael Olise":"bayern", "Jamal Musiala":"bayern", "Joshua Kimmich":"bayern",
-  "Luis Díaz":"bayern", "Alphonso Davies":"bayern", "Dayot Upamecano":"bayern", "Manuel Neuer":"bayern",
-  "Jonathan Tah":"bayern", "Leon Goretzka":"bayern", "Alexander Nübel":"bayern", "Kim Min-Jae":"bayern",
-  "Konrad Laimer":"bayern", "Nicolas Jackson":"bayern", "Hiroki Ito":"bayern", "Aleksandar Pavlović":"bayern",
-  "Noussair Mazraoui":"bayern", "Josip Stanišić":"bayern",
+  // the real names those placeholders now resolve to in the data:
+  "Inter Miami":"inter-miami", "Atlético de Madrid":"atletico", "Galatasaray":"galatasaray",
+  "Fenerbahçe":"fenerbahce", "Sunderland":"sunderland", "LAFC":"lafc", "Roma":"roma",
+  "Real Sociedad":"sociedad", "Sevilla":"sevilla", "Nottingham Forest":"nottm-forest",
+  "Atlanta United":"atlanta-utd", "Osasuna":"osasuna", "Bologna":"bologna", "Bournemouth":"bournemouth",
+  "Beşiktaş":"besiktas", "Besiktas":"besiktas",
+  // Bayern Munich's real first-team squad, previously dumped into the generic "Free Agents" pool —
+  // their club field now literally says "Bayern de Munique", and Mateo Retegui's now says "Al-Qadsiah".
+  "Bayern de Munique":"bayern", "Al-Qadsiah":"al-qadsiah",
 };
 let _globalCrestSeq = 0;
 function clubCrestImg(clubName, size, playerName){
   size = size || 22;
-  const slug = (playerName && PLAYER_CREST_OVERRIDE[playerName]) || GLOBAL_TEAM_CRESTS[clubName];
+  const slug = GLOBAL_TEAM_CRESTS[clubName];
   const fallback = crestSVG(clubName, size);
   if(!slug) return fallback;
   const fbId = "fb"+Math.abs(hashStr(clubName+"|"+slug))+"_"+(_globalCrestSeq++);
@@ -818,6 +815,9 @@ function newCareerState(){
     matchAnimIdx:0,
     matchPlaying:false,
     careerStats:{goals:{}, assists:{}, signings:[]},
+    transferFeed:[], // league-wide transfer news (AI signings + the user's own) — see runAITransferWindow()
+    romanoFlip:false, // FABRIZIO ROMANO widget: false = top 5 most expensive, true = 5 most recent
+    romanoFlipping:false, // true for the brief squeeze-frame beat while the card is turning
     matchSpeed:"normal", // "slow" | "normal" | "fast" — how quickly live events tick across the screen
     matchClockMinute:0, // only actually driven in "slow" mode's minute-by-minute clock
     calendarDaysLeft:null, // days left until the next match — see ensureCalendarCountdown()
@@ -871,6 +871,9 @@ async function initApp(){
     if(ST.daysSinceTraining==null) ST.daysSinceTraining = 0;
     if(ST.trainingPending==null) ST.trainingPending = false;
     if(ST.trainingResult===undefined) ST.trainingResult = null;
+    if(!Array.isArray(ST.transferFeed)) ST.transferFeed = [];
+    if(ST.romanoFlip==null) ST.romanoFlip = false;
+    if(ST.romanoFlipping==null) ST.romanoFlipping = false;
     recomputeIdCounter();
   } else if(loaded){
     // an older/incompatible save from a previous version of the game — cannot be
@@ -2253,9 +2256,22 @@ function endOfSeason(){
 }
 function clamp7(v){ return Math.max(-25, Math.min(35, v)); }
 
+// every AI-controlled player under 27 gets a small extra nudge on top of the normal aging curve —
+// a stand-in for their OWN club's training staff, so a squad the user never touches still develops
+// at a pace comparable to the user's team (which instead gets that boost through active "Simular
+// Treino" clicks). Without this, only the user's players would ever meaningfully close in on their
+// potential, and every AI team would slowly fall behind purely from being left on manual.
+function passiveDevelopmentBump(p, rng){
+  if(p.age>26 || p.ovr>=p.pot) return;
+  const room = p.pot - p.ovr;
+  if(room<=0) return;
+  const bump = Math.round(rng()*3); // 0-3, ~1.5 average — a season's worth of unattended coaching
+  if(bump>0) p.ovr = E.clamp(p.ovr+bump, p.ovr, p.pot);
+}
 function ageWorld(){
   const rng = E.makeRNG(nextSeed());
   Object.values(ST.world.teams).forEach(team=>{
+    const isUserTeam = team.name===ST.teamId;
     const newPlayers = [];
     team.players.forEach(p=>{
       const retireChance = p.age>=35 ? (p.age-34)*0.16 : 0;
@@ -2267,6 +2283,7 @@ function ageWorld(){
         return;
       }
       E.ageOnePlayer(p, rng);
+      if(!isUserTeam) passiveDevelopmentBump(p, rng);
       p.injured=false; p.suspended=false; p.injuredMatches=0; p.suspendedMatches=0; p.form=0;
       newPlayers.push(p);
     });
@@ -2284,9 +2301,170 @@ function ageWorld(){
       const retireChance = p.age>=35 ? (p.age-34)*0.16 : 0;
       if(p.age>=40 || rng()<retireChance) return; // retires out of the market, same as everyone else
       E.ageOnePlayer(p, rng);
+      passiveDevelopmentBump(p, rng);
       survivors.push(p);
     });
     ST.world.globalMarket = survivors;
+  }
+  // now that every squad has aged/retired/developed for the new season, let every club the user
+  // ISN'T managing go into the transfer market and actually reinforce itself — otherwise an AI
+  // team's only way to change is losing players to retirement, while the user actively buys and
+  // trains their way further and further ahead every year.
+  runAITransferWindow(rng);
+  runGlobalClubReshuffle(rng);
+}
+
+// ============================================================
+// AI TRANSFER ENGINE — every club the user isn't managing gets a realistic recruitment cycle
+// once a season, right after ageWorld()'s aging/retirement pass. Bigger/stronger (higher-tier)
+// clubs sign more often, chase better players, and can reach higher up the price ladder; small
+// clubs make cheaper, younger, closer-to-home signings — same idea as real transfer windows.
+// Every executed move (plus the user's own purchases, wired in separately) lands in
+// ST.transferFeed for the "FABRIZIO ROMANO" widget on the Competição tab.
+// ============================================================
+// which neighboring/CONMEBOL nationalities a club from each country realistically scouts first —
+// South American recruitment leans heavily regional before it goes further afield.
+const SA_NEIGHBORS = {
+  "Brasil": ["Brasil","Argentina","Uruguai","Paraguai","Bolivia"],
+  "Argentina": ["Argentina","Brasil","Uruguai","Paraguai","Chile","Bolivia"],
+  "Uruguai": ["Uruguai","Argentina","Brasil","Paraguai"],
+  "Paraguai": ["Paraguai","Argentina","Brasil","Bolivia","Uruguai"],
+  "Chile": ["Chile","Argentina","Peru","Bolivia"],
+  "Bolivia": ["Bolivia","Argentina","Brasil","Paraguai","Peru","Chile"],
+  "Colombia": ["Colombia","Venezuela","Equador","Peru"],
+  "Equador": ["Equador","Colombia","Peru","Chile"],
+  "Peru": ["Peru","Chile","Bolivia","Colombia","Equador"],
+  "Venezuela": ["Venezuela","Colombia","Brasil"],
+};
+// minimum OVR a club of this tier is comfortable fielding at a given slot before it's a "need"
+function positionNeedThreshold(tier){ return {1:56,2:62,3:68,4:74,5:80}[tier] || 60; }
+// the highest OVR a club of this tier will realistically stretch to sign — keeps a tier-1 side
+// from suddenly landing an 85-rated player just because one happened to be available
+function aiSignerBudgetCeiling(tier){ return {1:60,2:68,3:76,4:84,5:92}[tier] || 70; }
+// kept out of AI reach entirely — global superstars sitting in "Free Agents"/"Bayern de Munique"
+// aren't realistic CONMEBOL signings regardless of what a tier-5 club could otherwise stretch to.
+const AI_EXCLUDED_CLUBS = new Set(["Free Agents","Bayern de Munique"]);
+// the old placeholder club names kept in GLOBAL_TEAM_CRESTS purely for legacy-save crest lookups —
+// never valid as a "real" destination when simulating global-club transfer activity.
+const LEGACY_PLACEHOLDER_CLUBS = new Set([
+  "Miami BP","Madrid Rosas RB","Napoli A","Galatasaray SK","Fenerbahçe SK","Piemonte BN","Firenze V",
+  "Sunderland RWB","Los Angeles BY","Roma GR","Vasco Gipuzkoa AB","Sevilla Triana VB","Nottingham RW",
+  "Atlanta RB","Pamplona RA","Bologna RB","Bournemouth RB","Beşiktaş JK","Besiktas",
+]);
+const AI_SIGNING_POS = ["GK","CB","LB","RB","DMF","CM","AM","LW","RW","ST"];
+function shuffled(rng, arr){
+  const out = arr.slice();
+  for(let i=out.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [out[i],out[j]]=[out[j],out[i]]; }
+  return out;
+}
+function pickWeighted(rng, arr, scoreFn){
+  if(!arr.length) return null;
+  const scored = arr.map(x=>({x, s: Math.max(0.01, scoreFn(x))}));
+  const total = scored.reduce((a,b)=>a+b.s,0);
+  let r = rng()*total;
+  for(const it of scored){ r -= it.s; if(r<=0) return it.x; }
+  return scored[scored.length-1].x;
+}
+function eligibleGlobalCandidates(world, pos, tier){
+  const ceiling = aiSignerBudgetCeiling(tier);
+  const floor = positionNeedThreshold(tier) - 8;
+  return world.globalMarket.filter(p=>
+    !AI_EXCLUDED_CLUBS.has(p.club) && p.ovr<=ceiling && p.ovr>=floor &&
+    (p.pos===pos || (p.altPos && p.altPos.includes(pos)))
+  );
+}
+function recordTransferFeed(entry){
+  if(!Array.isArray(ST.transferFeed)) ST.transferFeed = [];
+  ST.transferFeed.push(Object.assign({}, entry, {year: ST.seasonYear}));
+  if(ST.transferFeed.length>300) ST.transferFeed = ST.transferFeed.slice(-300);
+}
+// the core CONMEBOL recruitment pass: each AI club checks its starting XI slot by slot, and where
+// its best option falls under what a club of its tier should field, tries to fix it — first by
+// shopping the global market pool (weighted toward nationality fit and a realistic price band),
+// then, failing that, by poaching a genuine surplus player from a lower-tier AI club (never the
+// user). Every signing removes the player from wherever they came from, same as a real transfer.
+function runAITransferWindow(rng){
+  const world = ST.world;
+  if(!world || !world.teams) return;
+  const teamNames = shuffled(rng, Object.keys(world.teams).filter(n=>n!==ST.teamId));
+  teamNames.forEach(name=>{
+    const team = world.teams[name];
+    const tier = tierOf(world, name);
+    let signingSlots = tier>=4 ? 2+Math.floor(rng()*2) : tier>=2 ? 1+Math.floor(rng()*2) : (rng()<0.55?1:0);
+    if(signingSlots<=0) return;
+    const need = positionNeedThreshold(tier);
+    for(const pos of shuffled(rng, AI_SIGNING_POS)){
+      if(signingSlots<=0) break;
+      const inSlot = team.players.filter(p=>p.pos===pos || (p.altPos && p.altPos.includes(pos)));
+      const best = inSlot.reduce((b,p)=> (!b||p.ovr>b.ovr)?p:b, null);
+      if(best && best.ovr>=need) continue; // slot's already good enough for this tier
+
+      let signed = null, fromClub = null, isGlobal = false;
+      const globalCands = eligibleGlobalCandidates(world, pos, tier);
+      if(globalCands.length){
+        const picked = pickWeighted(rng, globalCands, p=>{
+          let s = 10;
+          if((SA_NEIGHBORS[team.country]||[]).includes(p.nat)) s += 25; // regional scouting bias
+          s += Math.max(0, 20 - Math.abs(p.ovr-need)); // realistic fit over wild overkill
+          return s;
+        });
+        if(picked){ signed = picked; fromClub = picked.club; isGlobal = true; }
+      }
+      if(!signed){
+        // poach from a weaker AI club, but only where they have real depth (3+) at that slot —
+        // never strip a smaller club down to nothing just to fill a bigger one's need.
+        for(const donorName of teamNames){
+          if(donorName===name || tierOf(world, donorName)>=tier) continue;
+          const donor = world.teams[donorName];
+          const cands = donor.players.filter(p=>
+            (p.pos===pos || (p.altPos && p.altPos.includes(pos))) &&
+            p.ovr>=need-6 && p.ovr<=aiSignerBudgetCeiling(tier)
+          );
+          if(cands.length>=3){
+            signed = cands.slice().sort((a,b)=>b.ovr-a.ovr)[0];
+            fromClub = donorName;
+            break;
+          }
+        }
+      }
+      if(!signed) continue;
+
+      const fee = isGlobal ? globalMarketAskingPrice(signed) : askingPrice(signed, world.teams[fromClub]);
+      if(isGlobal){
+        world.globalMarket = world.globalMarket.filter(p=>p.id!==signed.id);
+      } else {
+        world.teams[fromClub].players = world.teams[fromClub].players.filter(p=>p.id!==signed.id);
+      }
+      const joined = Object.assign({}, signed, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0, value:fee});
+      delete joined.club; delete joined.league;
+      team.players.push(joined);
+      recordTransferFeed({name:signed.name, price:fee, fromClub: fromClub || "Free Agents", toClub:name, pos:signed.pos, ovr:signed.ovr});
+      signingSlots--;
+    }
+  });
+}
+// clubs OUTSIDE the Libertadores don't have real rosters in this game (the "global market" is a
+// flat player pool, not per-club squads) — so their "transfer activity" is simulated by
+// periodically reassigning a handful of pool players to a different real club under the same
+// crest system. Cosmetic, but it's also what feeds the "FABRIZIO ROMANO" widget real news on
+// seasons where CONMEBOL activity alone would otherwise be quiet.
+function runGlobalClubReshuffle(rng){
+  const pool = ST.world.globalMarket;
+  if(!pool || !pool.length) return;
+  const clubNames = Object.keys(GLOBAL_TEAM_CRESTS).filter(n=>!AI_EXCLUDED_CLUBS.has(n) && !LEGACY_PLACEHOLDER_CLUBS.has(n));
+  if(!clubNames.length) return;
+  const moves = 10 + Math.floor(rng()*10);
+  for(let i=0;i<moves;i++){
+    const p = pool[Math.floor(rng()*pool.length)];
+    if(!p || !p.club || AI_EXCLUDED_CLUBS.has(p.club)) continue;
+    let dest = clubNames[Math.floor(rng()*clubNames.length)];
+    let guard = 0;
+    while(dest===p.club && guard<5){ dest = clubNames[Math.floor(rng()*clubNames.length)]; guard++; }
+    if(dest===p.club) continue;
+    const fee = Math.max(20000, Math.round((p.value || E.calcValue(p.ovr,p.age,p.pot)) * (0.9+rng()*0.4) / 5000) * 5000);
+    recordTransferFeed({name:p.name, price:fee, fromClub:p.club, toClub:dest, pos:p.pos, ovr:p.ovr});
+    p.club = dest;
+    p.value = fee;
   }
 }
 
@@ -2409,6 +2587,7 @@ function makeOffer(playerId, sellerTeamName, offer){
     ST.budget -= offer;
     ST.newsLog.unshift({title:"Transferência concluída", text:`${p.name} contratado do ${sellerTeamName} por ${fmtMoney(offer)}.`});
     recordCareerSigning(p.name, offer);
+    recordTransferFeed({name:p.name, price:offer, fromClub:sellerTeamName, toClub:ST.teamId, pos:p.pos, ovr:p.ovr});
     if(ST.lineup.length===0) autoFillLineup();
     scheduleSave();
     return {ok:true, msg:`Negócio fechado! ${p.name} é reforço do seu time.`};
@@ -2451,6 +2630,7 @@ function buyGlobalPlayer(playerId, offer){
     ST.budget -= offer;
     ST.newsLog.unshift({title:"Contratação internacional!", text:`${p.name} (${p.club}) assina com o ${ST.teamId} por ${fmtMoney(offer)}.`});
     recordCareerSigning(p.name, offer);
+    recordTransferFeed({name:p.name, price:offer, fromClub:p.club, toClub:ST.teamId, pos:p.pos, ovr:p.ovr});
     scheduleSave();
     return {ok:true, msg:`Negócio fechado! ${p.name} chega do ${p.club}.`};
   } else if(offer>=ask*0.85){
@@ -3303,6 +3483,47 @@ function renderPreLibCompeticaoTab(){
 }
 // four distinct boxed panels, laid out 2×2 — mirrors the reference: match card,
 // standings, upcoming fixtures and top scorers each get their own separated card.
+// "FABRIZIO ROMANO" — a transfer-news card on the Competição tab reading straight off
+// ST.transferFeed (every AI signing plus the user's own purchases). Click it to flip between
+// the 5 priciest deals in the save so far and the 5 most recent ones; each row shows the fee,
+// the player, and both crests with an arrow pointing at whoever actually signed them.
+function romanoRow(t){
+  return `<div class="romano-row">
+    <div class="romano-row-crests">
+      ${clubCrestImg(t.fromClub, 22)}
+      <span class="romano-arrow">→</span>
+      ${clubCrestImg(t.toClub, 22)}
+    </div>
+    <div class="romano-row-body">
+      <div class="bold">${esc(t.name)}</div>
+      <div class="tiny dim">${esc(t.fromClub)} <span class="romano-arrow-inline">→</span> <span class="bold">${esc(t.toClub)}</span></div>
+    </div>
+    <div class="romano-row-fee gold bold mono">${fmtMoney(t.price)}</div>
+  </div>`;
+}
+function renderFabrizioRomanoCard(){
+  const feed = ST.transferFeed || [];
+  if(!feed.length){
+    return `<div class="panel romano-panel">
+      <div class="panel-title">🗞️ FABRIZIO ROMANO</div>
+      <div class="faint tiny">Mercado ainda calmo — os primeiros rumores chegam no fim da temporada. Here we go... eventually!</div>
+    </div>`;
+  }
+  const flipped = !!ST.romanoFlip;
+  const list = flipped
+    ? feed.slice(-5).reverse()
+    : feed.slice().sort((a,b)=>b.price-a.price).slice(0,5);
+  const squeeze = ST.romanoFlipping ? "transform:scaleX(0.04);" : "transform:scaleX(1);";
+  return `<div class="panel romano-panel" onclick="Game.toggleRomanoFlip()" title="Clique para virar a página" style="cursor:pointer;">
+    <div class="row" style="justify-content:space-between;">
+      <div class="panel-title" style="margin:0;">🗞️ FABRIZIO ROMANO</div>
+      <div class="tiny faint uc">${flipped?"Mais recentes":"Mais caras"} · clique p/ virar</div>
+    </div>
+    <div class="romano-flip-inner" style="${squeeze}">
+      ${list.map(romanoRow).join("")}
+    </div>
+  </div>`;
+}
 function renderCompeticaoTab(){
   if(ST.prelib) return renderPreLibCompeticaoTab();
   const comp = ST.competition;
@@ -3326,12 +3547,14 @@ function renderCompeticaoTab(){
       <div class="competicao-cell">${standingsPanel}</div>
       <div class="competicao-cell">${renderLatestEmailCard()}</div>
       <div class="competicao-cell">${renderTopScorers()}</div>
+      <div class="competicao-cell">${renderFabrizioRomanoCard()}</div>
     </div>`;
     return `<div class="competicao-grid">${leftCol}${rightCol}</div>`;
   } else {
     const bracketPanel = `<div class="panel"><div class="panel-title">${phaseLabel(comp.phase)}</div>${renderKnockoutBracket()}</div>`;
     cells = matchCell
       + `<div class="competicao-cell">${renderTopScorers()}</div>`
+      + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`
       + `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>`;
   }
   return `<div class="competicao-grid">${cells}</div>`;
@@ -4827,6 +5050,18 @@ const Game = {
   beginPreLibCareer(){ crownPreLibChampion(ST.managerName); render(); },
 
   setTab(id){ ST.hubTab=id; render(); },
+  toggleRomanoFlip(){
+    // a quick two-frame "page turn": squeeze the card edge-on, swap which 5 deals are showing,
+    // then open back up — same discrete-timed-render trick the training/penalty beats use,
+    // since a full-string re-render can't rely on a CSS transition to animate the swap.
+    ST.romanoFlipping = true;
+    render();
+    setTimeout(()=>{
+      ST.romanoFlip = !ST.romanoFlip;
+      ST.romanoFlipping = false;
+      render();
+    }, 160);
+  },
   setClubStatsScope(scope){ ST.clubStatsScope = scope; render(); },
   setClubStatsYear(year){ ST.clubStatsYear = Number(year); render(); },
   // "Editar escalação" on the match-confirm screen: jump back to the hub's Elenco tab.
