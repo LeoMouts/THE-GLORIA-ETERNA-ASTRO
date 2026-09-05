@@ -968,6 +968,7 @@ function recomputeIdCounter(){
   GLOBAL_MARKET_SRC.forEach(p=>{ if(p.id>maxId) maxId=p.id; });
   if(maxId>nextIdCounter) nextIdCounter=maxId;
   ensureGlobalMarket();
+  ensurePrelibMarket();
 }
 
 async function resetCareer(){
@@ -990,6 +991,7 @@ function startCareer(teamId, managerName){
   ST.careerStats = {goals:{}, assists:{}, signings:[]};
   ST.world = freshWorld();
   ensureGlobalMarket();
+  ensurePrelibMarket();
   ST.teamId = teamId;
   ST.managerName = managerName || "Treinador";
   ST.seasonNum = 1;
@@ -2811,6 +2813,52 @@ function buyGlobalPlayer(playerId, offer){
   return {ok:false, msg:`Proposta recusada de imediato. Tente um valor mais próximo de ${fmtMoney(ask)}.`};
 }
 
+// ---- Pré-Libertadores market — these 8 clubs (Sul-Americana side) never get a real squad in
+// ST.world.teams (they only exist as opponents inside the standalone Pré-Libertadores mini-cup),
+// so without this their entire rosters were invisible everywhere. Surfaced as a flat pool, same
+// shape as the global market, but shown inside "Times da Libertadores" since that's where the
+// user asked for them — their crests already exist in TEAM_LOGOS under the real club name.
+const PRELIB_MARKET_TEAM_NAMES = Object.keys(PRELIB_DATA.teams);
+function ensurePrelibMarket(){
+  if(!ST.world.prelibMarket){
+    const out = [];
+    Object.values(PRELIB_DATA.teams).forEach(t=>{
+      t.players.forEach(p=> out.push(Object.assign({}, p, {club:t.name})));
+    });
+    ST.world.prelibMarket = out;
+  }
+}
+function prelibMarketAskingPrice(p){
+  let f = 1.1;
+  if(p.ovr>=82) f += 0.35;
+  else if(p.ovr>=76) f += 0.15;
+  if(p.age<=21 && p.pot-p.ovr>=10) f += 0.25;
+  return Math.round(p.value*f/5000)*5000;
+}
+function buyPrelibPlayer(playerId, offer){
+  ensurePrelibMarket();
+  const p = ST.world.prelibMarket.find(x=>x.id===playerId);
+  if(!p) return {ok:false, msg:"Jogador não encontrado no mercado."};
+  if(offer>ST.budget) return {ok:false, msg:"Orçamento insuficiente."};
+  const ask = prelibMarketAskingPrice(p);
+  if(offer>=ask){
+    ST.world.prelibMarket = ST.world.prelibMarket.filter(x=>x.id!==playerId);
+    const joined = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0});
+    const fromClub = joined.club;
+    delete joined.club;
+    myTeam().players.push(joined);
+    ST.budget -= offer;
+    ST.newsLog.unshift({title:"Transferência concluída", text:`${p.name} contratado do ${fromClub} por ${fmtMoney(offer)}.`});
+    recordCareerSigning(p.name, offer);
+    recordTransferFeed({name:p.name, price:offer, fromClub, toClub:ST.teamId, pos:p.pos, ovr:p.ovr});
+    if(ST.lineup.length===0) autoFillLineup();
+    scheduleSave();
+    return {ok:true, msg:`Negócio fechado! ${p.name} é reforço do seu time.`};
+  } else if(offer>=ask*0.85){
+    return {ok:false, counter:ask, msg:`Proposta recusada. O ${p.club} pede ao menos ${fmtMoney(ask)}.`};
+  }
+  return {ok:false, msg:`Proposta recusada de imediato. Tente um valor mais próximo de ${fmtMoney(ask)}.`};
+}
 
 function quickSell(playerId){
   const t = myTeam();
@@ -2931,6 +2979,7 @@ function upgradeScoutLevel(){
 // few days observing him; a bigger scout network (ST.scoutLevel) watches faster.
 function marketPlayerLookup(teamKey, id){
   if(teamKey==="global") return (ST.world.globalMarket||[]).find(p=>p.id===id);
+  if(!ST.world.teams[teamKey]) return (ST.world.prelibMarket||[]).find(p=>p.id===id);
   return playerById(teamKey, id);
 }
 function observationKey(teamKey, id){ return teamKey+"#"+id; }
@@ -4120,6 +4169,7 @@ function renderTransfersTab(){
   const f = ST.xferFilter;
   const mode = f.mode || "buy";
   ensureGlobalMarket();
+  ensurePrelibMarket();
 
   const modeToggle = `<div class="btn-row mb16 xfer-mode-toggle">
     <button class="btn ${mode==='buy'?'btn-gold':''}" onclick="Game.setXferFilter('mode','buy')">Contratar</button>
@@ -4204,8 +4254,10 @@ function renderXferBuySubTab(f){
     `;
   }
 
-  const teamOptions = Object.keys(ST.world.teams).sort();
-  let list = allPlayersList(ST.teamId).map(x=>Object.assign({}, x.p, {_team:x.team}));
+  const teamOptions = Object.keys(ST.world.teams).concat(PRELIB_MARKET_TEAM_NAMES).sort();
+  ensurePrelibMarket();
+  let list = allPlayersList(ST.teamId).map(x=>Object.assign({}, x.p, {_team:x.team}))
+    .concat(ST.world.prelibMarket.map(p=>Object.assign({}, p, {_team:p.club})));
   if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
   if(f.team!=="ALL") list = list.filter(p=>p._team===f.team);
   if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
@@ -4994,9 +5046,13 @@ function contractPlayerCard(p){
 function renderBuyOfferModal(m){
   if(m.signing) return renderContractSigning(m.signMsg || "Contrato assinado!");
   const isGlobal = m.team==="global";
-  const p = isGlobal ? ST.world.globalMarket.find(x=>x.id===m.playerId) : ST.world.teams[m.team].players.find(x=>x.id===m.playerId);
+  const isPrelib = !isGlobal && !ST.world.teams[m.team];
+  ensurePrelibMarket();
+  const p = isGlobal ? ST.world.globalMarket.find(x=>x.id===m.playerId)
+    : isPrelib ? ST.world.prelibMarket.find(x=>x.id===m.playerId)
+    : ST.world.teams[m.team].players.find(x=>x.id===m.playerId);
   if(!p) return `<div class="modal-backdrop"><div class="modal"><p>Jogador indisponível.</p><button class="btn" onclick="Game.closeModal()">Fechar</button></div></div>`;
-  const ask = isGlobal ? globalMarketAskingPrice(p) : askingPrice(p, ST.world.teams[m.team]);
+  const ask = isGlobal ? globalMarketAskingPrice(p) : isPrelib ? prelibMarketAskingPrice(p) : askingPrice(p, ST.world.teams[m.team]);
   const lo = Math.round(ask*0.85/5000)*5000, hi = Math.round(ask*1.3/5000)*5000;
   const clubName = isGlobal ? p.club : m.team;
   return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
@@ -5360,7 +5416,9 @@ const Game = {
     if(!m || m.signing) return;
     const input = document.getElementById("offerInput");
     const offer = Math.max(0, digitsFromMoneyInput(input.value));
-    const res = team==="global" ? buyGlobalPlayer(playerId, offer) : makeOffer(playerId, team, offer);
+    const res = team==="global" ? buyGlobalPlayer(playerId, offer)
+      : !ST.world.teams[team] ? buyPrelibPlayer(playerId, offer)
+      : makeOffer(playerId, team, offer);
     const msgEl = document.getElementById("offerMsg");
     if(res.ok){
       m.signing = true; m.signMsg = "Contrato Assinado!";
