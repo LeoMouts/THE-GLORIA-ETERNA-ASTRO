@@ -596,6 +596,10 @@ function finalizeBrasaSeason(){
   ST.reputation = E.clamp(ST.reputation + ST.lastSeasonSummary.repChange, 5, 99);
   ST.newsLog.unshift({title:"Fim de temporada — Brasileirão", text:`${champion} é o campeão. Você terminou em ${pos}º lugar e recebeu ${fmtMoney(prize)} em premiação.`});
   ageWorld();
+  // bump year/num here (not in startNewBrasaSeason) so the season-end screen itself already
+  // shows the upcoming season — same order the Libertadores flow's endOfSeason() uses.
+  ST.seasonNum += 1;
+  ST.seasonYear += 1;
   ST.stage = "season_end";
   scheduleSave();
 }
@@ -603,8 +607,6 @@ function finalizeBrasaSeason(){
 // this game yet, so relegation/promotion stays a news-item for now rather than an actual squad
 // swap; the same 20 clubs carry over season to season until that piece is built.
 function startNewBrasaSeason(){
-  ST.seasonYear++;
-  ST.seasonNum++;
   const order = shuffled(E.makeRNG(nextSeed()), SERIE_A_2026);
   ST.brasileirao = { year: ST.seasonYear, rounds: E.doubleRoundRobin(order), currentRound: 0, standings: {}, scorers: {} };
   ST.stage = "hub";
