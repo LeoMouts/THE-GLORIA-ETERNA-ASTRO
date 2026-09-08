@@ -554,6 +554,7 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.brasaZonesHistory = {};
   ST.sulamericana = null;
   ST.libertadoresCompleto = null;
+  ST.lastUserMatchType = null;
   startCopaDoBrasil();
   startSulamericanaIfEligible(); // the 7 real 2026 Sul-Americana entrants play it from season 1 — everyone else only reaches it via a future season's own table position
   startLibertadoresCompletoIfEligible(); // same idea for the 6 real 2026 Libertadores entrants
@@ -570,9 +571,17 @@ function advanceBrasileiraoStep(){
   const b = ST.brasileirao;
   if(!b || b.currentRound>=b.rounds.length){ return; }
   decrementAvailability();
-  if(tickCopaDoBrasil()) return; // a Copa do Brasil match day was triggered this turn — wait for it
-  if(tickSulamericana()) return; // same idea for the Sul-Americana campaign, when the user's club is in it
-  if(tickLibertadoresCompleto()) return; // ...and for the real Libertadores, when the user's club is in it instead
+  // never let two cup/continental match days land back-to-back — the user's last actual match
+  // always has to have been a Brasileirão league game before another Copa/Sul-Americana/
+  // Libertadores one is allowed to trigger. Skipping the tick calls entirely (rather than just
+  // not acting on them) leaves every counter exactly where it was, so nothing is lost — the same
+  // competition simply gets its turn one Brasileirão round later than it otherwise would have.
+  const lastWasCup = ST.lastUserMatchType==="copa" || ST.lastUserMatchType==="sula" || ST.lastUserMatchType==="lib";
+  if(!lastWasCup){
+    if(tickCopaDoBrasil()) return; // a Copa do Brasil match day was triggered this turn — wait for it
+    if(tickSulamericana()) return; // same idea for the Sul-Americana campaign, when the user's club is in it
+    if(tickLibertadoresCompleto()) return; // ...and for the real Libertadores, when the user's club is in it instead
+  }
   const round = b.rounds[b.currentRound];
   let pendingUser = null;
   round.forEach(m=>{
@@ -612,6 +621,8 @@ function finalizeBrasaSeason(){
   ST.brasaStandingsHistory[ST.seasonYear] = table.map(r=>r.team); // feeds next year's Copa do Brasil seeding
   const copaChampion = (ST.copaDoBrasil && ST.copaDoBrasil.phase==="copa_done") ? ST.copaDoBrasil.champion : null;
   const sulaChampion = (ST.sulamericana && ST.sulamericana.phase==="sula_done" && ST.sulamericana.year===ST.seasonYear) ? ST.sulamericana.champion : null;
+  const libChampion = (ST.libertadoresCompleto && ST.libertadoresCompleto.phase==="lib_done" && ST.libertadoresCompleto.year===ST.seasonYear) ? ST.libertadoresCompleto.champion : null;
+  const wonAnyTrophy = champion===ST.teamId || copaChampion===ST.teamId || sulaChampion===ST.teamId || libChampion===ST.teamId;
   const zones = computeNextSeasonZones(table, copaChampion, sulaChampion);
   if(!ST.brasaZonesHistory) ST.brasaZonesHistory = {};
   ST.brasaZonesHistory[ST.seasonYear] = zones; // feeds next year's Sul-Americana (and, eventually, Libertadores) qualification
@@ -624,7 +635,9 @@ function finalizeBrasaSeason(){
   };
   ST.reputation = E.clamp(ST.reputation + ST.lastSeasonSummary.repChange, 5, 99);
   ST.newsLog.unshift({title:"Fim de temporada — Brasileirão", text:`${champion} é o campeão. Você terminou em ${pos}º lugar e recebeu ${fmtMoney(prize)} em premiação.`});
+  applyDynamicPotentialGrowth(wonAnyTrophy);
   ageWorld();
+  ST.lastSeasonSummary.development = ST.lastDevelopmentReport; // who leveled up / retired — feeds the season-end screen's animated reveal
   // bump year/num here (not in startNewBrasaSeason) so the season-end screen itself already
   // shows the upcoming season — same order the Libertadores flow's endOfSeason() uses.
   ST.seasonNum += 1;
@@ -1795,8 +1808,14 @@ function runSquadTraining(){
   const result = {};
   squad.forEach(p=>{
     if(p.ovr>=p.pot){ result[p.id] = {gain:0, leveledUp:false}; return; } // already maxed out
-    const youthBonus = p.age<=21 ? 4 : p.age<=25 ? 1 : 0;
-    const gain = 8 + rng()*14 + youthBonus;
+    // Modo Completo's full 38-round season packs in roughly 5x as many training days as the
+    // classic Libertadores-only career — at the old 8-22%+youth-bonus rate that meant a young
+    // prospect could blow straight through their whole potential gap in a single season, years
+    // before a real footballer peaks. Recalibrated so the season-long total (training days here
+    // PLUS the age-curve jump in ageOnePlayer(), which already lands most players near their
+    // ceiling around 26-28 on its own) reads as a gradual, multi-season development arc instead.
+    const youthBonus = p.age<=21 ? 0.6 : p.age<=25 ? 0.2 : 0;
+    const gain = 1.1 + rng()*2.0 + youthBonus;
     p.trainProgress = (p.trainProgress||0) + gain;
     let leveledUp = false;
     while(p.trainProgress>=100 && p.ovr<p.pot){
@@ -3341,6 +3360,7 @@ function finishPendingMatch(){
   ST.calendarDaysLeft = null; // the next fixture gets its own fresh 3-4 day countdown
   ST.matchesPlayedTotal = (ST.matchesPlayedTotal||0)+1; // gates the scout-report cooldown
   const ctx = pm.context;
+  ST.lastUserMatchType = ctx.type; // Modo Completo reads this to make sure a cup match day is always followed by a Brasileirão one — see advanceBrasileiraoStep()
   ST.pendingMatch = null;
   if(String(ctx.type).indexOf("prelib_")===0){
     finishPrelibMatch(ctx.tieId);
@@ -3462,6 +3482,7 @@ function endOfSeason(){
     ST.newsLog.unshift({title:"Rei da América", text:`${reiDaAmerica.name} termina a Libertadores como artilheiro da competição com ${reiDaAmerica.goals} gols e leva o Rei da América para o ${ST.teamId}.`});
   }
 
+  applyDynamicPotentialGrowth(placement==="Campeão");
   ageWorld();
 
   ST.fired = ST.reputation<=15;
@@ -3484,7 +3505,7 @@ function endOfSeason(){
     });
   }
 
-  ST.lastSeasonSummary = { placement, repChange, tier, newBudget:ST.budget, year:ST.seasonYear, reiDaAmerica };
+  ST.lastSeasonSummary = { placement, repChange, tier, newBudget:ST.budget, year:ST.seasonYear, reiDaAmerica, development: ST.lastDevelopmentReport };
 
   ST.seasonNum += 1;
   ST.seasonYear += 1;
@@ -3513,8 +3534,43 @@ function passiveDevelopmentBump(p, rng){
   const bump = Math.round(rng()*3); // 0-3, ~1.5 average — a season's worth of unattended coaching
   if(bump>0) p.ovr = E.clamp(p.ovr+bump, p.ovr, p.pot);
 }
+// ============================================================
+// POTENCIAL DINÂMICO — a player who's genuinely outperforming their ceiling (a real average
+// match rating this season, not a guess) can have their POTENTIAL itself revised upward, same
+// as a real breakout prospect forcing scouts to raise their grade — winning a trophy that same
+// season makes it even more likely, on the idea that title-winning form tends to come with real
+// growth, not just a lucky run. Only checked for the user's own squad: it's the only side of the
+// game with match-by-match ratings actually tracked (ST.clubCareer, via ensureClubSeason()) —
+// AI squads only ever age through the ordinary curve above.
+// ============================================================
+function applyDynamicPotentialGrowth(wonTrophyThisSeason){
+  const season = ensureClubSeason(); // this season's ratingSum/ratingCount per player, already fully populated by now
+  const rng = E.makeRNG(nextSeed());
+  const risers = [];
+  myTeam().players.forEach(p=>{
+    const rec = season.players[String(p.id)];
+    if(!rec || rec.ratingCount<10) return; // needs a real sample of minutes this season, not a cameo
+    const avgRating = rec.ratingSum/rec.ratingCount;
+    if(avgRating<7.2 && !wonTrophyThisSeason) return; // has to actually be playing above expectations, or the club has to be winning silverware
+    let chance = 0;
+    if(avgRating>=7.6) chance += 0.35;
+    else if(avgRating>=7.2) chance += 0.18;
+    if(wonTrophyThisSeason) chance += 0.20;
+    if(p.age<=24) chance *= 1.3; // a breakout reads as more plausible while still this young
+    if(rng()>=chance) return;
+    const bump = rng()<0.3 ? 2 : 1;
+    p.pot = Math.min(94, p.pot + bump);
+    risers.push(p.name);
+  });
+  if(risers.length){
+    ST.newsLog.unshift({title:"Potencial em alta!", text:`${risers.join(", ")} ${risers.length>1?"surpreenderam":"surpreendeu"} pelo rendimento${wonTrophyThisSeason?" numa temporada de título":""} e ${risers.length>1?"tiveram":"teve"} o potencial revisado para cima pelo departamento de scouts.`});
+  }
+}
 function ageWorld(){
   const rng = E.makeRNG(nextSeed());
+  // only the user's own squad is worth reporting on the season-end screen — the manager cares
+  // about who broke out and who hung up the boots at THEIR club, not the other 19 combined.
+  const developmentReport = { leveledUp: [], retired: [] };
   Object.values(ST.world.teams).forEach(team=>{
     const isUserTeam = team.name===ST.teamId;
     const newPlayers = [];
@@ -3524,16 +3580,20 @@ function ageWorld(){
         // retire -> replace with a youth prospect
         const tierOvr = Math.round(teamAvgOvr(team));
         const pos = p.pos;
+        if(isUserTeam) developmentReport.retired.push({name:p.name, pos:p.pos, age:p.age, ovr:p.ovr});
         newPlayers.push(genYouthPlayer(p.nat, pos, tierOvr, rng, nextId));
         return;
       }
+      const preOvr = p.ovr;
       E.ageOnePlayer(p, rng);
       if(!isUserTeam) passiveDevelopmentBump(p, rng);
+      if(isUserTeam && p.ovr>preOvr) developmentReport.leveledUp.push({name:p.name, pos:p.pos, age:p.age, from:preOvr, to:p.ovr});
       p.injured=false; p.suspended=false; p.injuredMatches=0; p.suspendedMatches=0; p.form=0;
       newPlayers.push(p);
     });
     team.players = newPlayers;
   });
+  ST.lastDevelopmentReport = developmentReport; // consumed by the season-end screen's animated reveal
   // players outside the Libertadores (the global market pool — foreign clubs like Barcelona,
   // Real Madrid etc.) never play a competition of their own in this game, but they still need
   // to develop under the EXACT same rules as everyone else. Without this, a real wonderkid
@@ -4936,7 +4996,7 @@ function renderTrainingBlock(){
     const maxed = p.ovr>=p.pot;
     const prog = maxed ? 100 : Math.round(p.trainProgress||0);
     const r = result && result[p.id];
-    const delta = r && r.gain>0 ? `<span class="green bold train-delta">+${r.gain}%${r.leveledUp?" ↑":""}</span>` : "";
+    const delta = r && r.gain>0 ? `<span class="green bold train-delta${r.leveledUp?" train-delta-levelup":""}">+${r.gain}%${r.leveledUp?" ↑ SUBIU!":""}</span>` : "";
     return `<div class="train-row">
       <span class="train-name">${esc(p.name)} <span class="faint tiny">${p.pos}</span></span>
       <span class="train-bar-wrap"><span class="train-bar-fill${maxed?" train-bar-maxed":""}" style="width:${prog}%;"></span></span>
@@ -6761,8 +6821,31 @@ function renderSeasonEndScreen(){
       <div class="faint tiny uc mt12">Sul-Americana</div>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;">${s.zones.sula.map(name=>`<span class="row" style="gap:5px;align-items:center;">${clubCrestImg(name,18,null)}<span class="tiny bold">${esc(name)}</span></span>`).join("")}</div>
     </div>` : ""}
+    ${renderDevelopmentReportPanel(s.development)}
     ${s.reiDaAmerica ? renderReiDaAmericaPanel(s.reiDaAmerica) : ""}
     <button class="btn btn-gold btn-lg mt24" onclick="Game.continueSeason()">Ir para ${ST.seasonYear} →</button>
+  </div>`;
+}
+// who leveled up (age-curve growth crossing an OVR point, see ageWorld()) and who retired this
+// off-season, for the user's own squad only — each row fades/slides in with a small stagger
+// (see .dev-row in global.css) so growth actually reads as a beat instead of a silent stat change.
+function renderDevelopmentReportPanel(dev){
+  if(!dev || (!dev.leveledUp.length && !dev.retired.length)) return "";
+  const leveledUp = dev.leveledUp.slice().sort((a,b)=>(b.to-b.from)-(a.to-a.from)).slice(0,12);
+  const upRows = leveledUp.map((p,i)=>`<div class="dev-row dev-row-up" style="animation-delay:${i*70}ms;">
+    <span class="dev-row-icon">⬆</span>
+    <span class="dev-row-name">${esc(p.name)} <span class="faint tiny">${esc(p.pos)} · ${p.age} anos</span></span>
+    <span class="dev-row-ovr">${p.from} <span class="dev-row-arrow">→</span><span class="green">${p.to}</span></span>
+  </div>`).join("");
+  const retiredRows = dev.retired.map((p,i)=>`<div class="dev-row dev-row-retire" style="animation-delay:${(leveledUp.length+i)*70}ms;">
+    <span class="dev-row-icon">👋</span>
+    <span class="dev-row-name">${esc(p.name)} <span class="faint tiny">${esc(p.pos)} · ${p.age} anos</span></span>
+    <span class="dev-row-ovr faint">aposentou-se · ${p.ovr} OVR</span>
+  </div>`).join("");
+  return `<div class="panel mt16" style="max-width:420px;">
+    <div class="panel-title">Desenvolvimento do Elenco</div>
+    ${leveledUp.length?`<div class="faint tiny uc mt8">Evoluíram</div>${upRows}`:""}
+    ${dev.retired.length?`<div class="faint tiny uc mt12">Aposentadorias</div>${retiredRows}`:""}
   </div>`;
 }
 // individual-award reveal — only shown when the tournament's outright top scorer plays for
