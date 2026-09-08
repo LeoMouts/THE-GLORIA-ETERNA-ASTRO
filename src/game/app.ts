@@ -551,7 +551,10 @@ function startBrasileiraoCareer(teamId, managerName){
     assisters: {},
   };
   ST.brasaStandingsHistory = {};
+  ST.brasaZonesHistory = {};
+  ST.sulamericana = null;
   startCopaDoBrasil();
+  startSulamericanaIfEligible(); // the 7 real 2026 Sul-Americana entrants play it from season 1 — everyone else only reaches it via a future season's own table position
   autoFillLineup();
   scheduleSave();
 }
@@ -566,6 +569,7 @@ function advanceBrasileiraoStep(){
   if(!b || b.currentRound>=b.rounds.length){ return; }
   decrementAvailability();
   if(tickCopaDoBrasil()) return; // a Copa do Brasil match day was triggered this turn — wait for it
+  if(tickSulamericana()) return; // same idea for the Sul-Americana campaign, when the user's club is in it
   const round = b.rounds[b.currentRound];
   let pendingUser = null;
   round.forEach(m=>{
@@ -603,12 +607,17 @@ function finalizeBrasaSeason(){
   const relegated = table.slice(16).map(r=>r.team);
   if(!ST.brasaStandingsHistory) ST.brasaStandingsHistory = {};
   ST.brasaStandingsHistory[ST.seasonYear] = table.map(r=>r.team); // feeds next year's Copa do Brasil seeding
+  const copaChampion = (ST.copaDoBrasil && ST.copaDoBrasil.phase==="copa_done") ? ST.copaDoBrasil.champion : null;
+  const sulaChampion = (ST.sulamericana && ST.sulamericana.phase==="sula_done" && ST.sulamericana.year===ST.seasonYear) ? ST.sulamericana.champion : null;
+  const zones = computeNextSeasonZones(table, copaChampion, sulaChampion);
+  if(!ST.brasaZonesHistory) ST.brasaZonesHistory = {};
+  ST.brasaZonesHistory[ST.seasonYear] = zones; // feeds next year's Sul-Americana (and, eventually, Libertadores) qualification
   ST.lastSeasonSummary = {
     year: ST.seasonYear,
     placement: pos===1 ? "Campeão" : `${pos}º lugar`,
-    repChange: pos<=6 ? 3 : pos<=12 ? 0 : -3,
+    repChange: pos<=6 ? 3 : pos<=13 ? 0 : -3,
     isBrasileirao: true,
-    champion, relegated, position: pos,
+    champion, relegated, position: pos, zones,
   };
   ST.reputation = E.clamp(ST.reputation + ST.lastSeasonSummary.repChange, 5, 99);
   ST.newsLog.unshift({title:"Fim de temporada — Brasileirão", text:`${champion} é o campeão. Você terminou em ${pos}º lugar e recebeu ${fmtMoney(prize)} em premiação.`});
@@ -629,6 +638,7 @@ function startNewBrasaSeason(){
   ST.stage = "hub";
   ST.hubTab = "competicao";
   startCopaDoBrasil(); // may override ST.stage to "copa_draw" (2027+) for the round-of-16 reveal
+  startSulamericanaIfEligible();
 }
 
 // ============================================================
@@ -1187,6 +1197,8 @@ function startCareer(teamId, managerName){
   // without this, the hub keeps thinking it's still showing the Sul-Americana bracket.
   ST.mode = "libertadores";
   ST.brasileirao = null;
+  ST.copaDoBrasil = null;
+  ST.sulamericana = null; // Modo Completo's Sul-Americana campaign is unrelated to this classic mode
   ST.careerStats = {goals:{}, assists:{}, signings:[]};
   ST.world = freshWorld();
   ensureGlobalMarket();
@@ -1408,6 +1420,8 @@ function stageLabelFor(type){
     prelib_qf:"Pré-Libertadores — Quartas de Final", prelib_sf:"Pré-Libertadores — Semifinal", prelib_final:"Pré-Libertadores — Final",
     copa_r16:"Copa do Brasil — Oitavas de Final", copa_qf:"Copa do Brasil — Quartas de Final",
     copa_sf:"Copa do Brasil — Semifinal", copa_final:"Copa do Brasil — Final", copa_done:"Copa do Brasil — Encerrada",
+    sula_groups:"Sul-Americana — Fase de Grupos", sula_r16:"Sul-Americana — Oitavas de Final", sula_qf:"Sul-Americana — Quartas de Final",
+    sula_sf:"Sul-Americana — Semifinal", sula_final:"Sul-Americana — Final", sula_done:"Sul-Americana — Encerrada",
     brasileirao:"Brasileirão"}[type] || type;
 }
 
@@ -2205,6 +2219,29 @@ function applyShootoutResult(ctx, winner){
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) payCopaStagePrize("copa_final");
     ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${winner} conquista a Copa do Brasil ${cb.year} nos pênaltis.`});
+  } else if(ctx.type==="sulaTie"){
+    const round = currentSulaKORound();
+    const tie = round.ties.find(t=>t.id===ctx.tieId);
+    if(tie) tie.winner = winner;
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    const s = ST.sulamericana;
+    const userTie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
+    if(userTie){
+      if(userTie.winner===ST.teamId) paySulaStagePrize(s.phase);
+      else if(!s.userEliminated){
+        s.userEliminated = true;
+        s.placementReached = stageLabelFor(s.phase);
+        ST.newsLog.unshift({title:"Eliminado na Sul-Americana", text:`O ${ST.teamId} caiu na ${stageLabelFor(s.phase)} da Sul-Americana ${s.year} nos pênaltis. O torneio segue sem você.`});
+      }
+    }
+    progressSulaBracket();
+  } else if(ctx.type==="sulaFinal"){
+    const s = ST.sulamericana;
+    s.champion = winner;
+    s.phase = "sula_done";
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    if(winner===ST.teamId) paySulaStagePrize("sula_final");
+    ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${winner} conquista a Sul-Americana ${s.year} nos pênaltis.`});
   }
 }
 
@@ -2473,6 +2510,330 @@ function tickCopaDoBrasil(){
   return advanceCopaLeg();
 }
 
+// ============================================================
+// CASCADING QUALIFICATION — who plays continental football next season, straight off this
+// season's final Brasileirão table (positions 1-6 Libertadores, 7-13 Sul-Americana), with the
+// Copa do Brasil champion and the Sul-Americana champion each guaranteed a Libertadores berth.
+// A guaranteed berth only bumps someone if the champion didn't already qualify by table position:
+// the club that WOULD have taken the last Libertadores spot slides down into the Sul-Americana
+// zone instead, and if that pushes the Sul-Americana zone past 7 clubs, whoever's lowest there
+// (by table position) drops out of continental football entirely for the year — exactly the real
+// CONMEBOL cascade, just without a Série B to also shuffle (that still doesn't exist in this game).
+// ============================================================
+function computeNextSeasonZones(table, copaChampion, sulaChampion){
+  const order = table.map(r=>r.team); // full 20 clubs, by final position
+  let liber = order.slice(0,6);
+  let sula = order.slice(6,13);
+  [copaChampion, sulaChampion].forEach(champ=>{
+    // a foreign Sul-Americana champion (Racing, River Plate, etc.) doesn't compete for a
+    // Brazilian Libertadores berth at all — only cascade for a club that's actually in this
+    // Brasileirão table. Copa do Brasil's champion always is one; Sul-Americana's often isn't.
+    if(!champ || !order.includes(champ) || liber.includes(champ)) return; // no cascade needed — already in by table position, or not a Brazilian club
+    liber.push(champ);
+    sula = sula.filter(t=>t!==champ);
+    let worst=null, worstPos=-1;
+    liber.forEach(t=>{ if(t===champ) return; const p=order.indexOf(t); if(p>worstPos){ worstPos=p; worst=t; } });
+    if(worst){ liber = liber.filter(t=>t!==worst); sula.unshift(worst); }
+    if(sula.length>7){
+      sula.sort((a,b)=>order.indexOf(a)-order.indexOf(b));
+      sula.pop(); // lowest-positioned Sul-Americana slot misses out this cycle
+    }
+  });
+  return { liber, sula };
+}
+
+// ============================================================
+// CONMEBOL SUL-AMERICANA — group stage (8 groups of 4, real 2026 draw) then knockout from the
+// oitavas on, running alongside the Brasileirão season exactly like the Copa do Brasil above
+// (see tickSulamericana(), paced out over the calendar). Only actually simulated for a season
+// when the user's own club is part of that year's 32-club field — for 2026 that's the 7 real
+// entrants hardcoded in SULAMERICANA_2026; for 2027+ it's whoever the previous season's table
+// (plus the cascade above) put in the Sul-Americana zone. Every other club never gets a
+// ST.sulamericana object at all — there's no user reason to fully simulate a campaign nobody
+// is watching, and it keeps this feature's cost proportional to how often it's actually used.
+// ============================================================
+// the 7 clubs the fixed 2026 template hardcodes into Brazilian slots, in the exact order
+// sulamericanaGroupsForYear() swaps in that season's real 7 qualifiers — same simplification
+// Copa do Brasil already makes for its own foreign-opponent-free bracket: no real future-year
+// draw exists for the other 25 (non-Brasileirão) clubs, so they stay fixed across seasons.
+const SULAMERICANA_BR_SLOTS = ["Atlético Mineiro","São Paulo","Santos","Botafogo","Grêmio","Vasco da Gama","Red Bull Bragantino"];
+// {group, idx} for each of the 7 slots above, resolved once against the fixed 2026 template —
+// NEVER re-searched against the mutated copy below, which is what a naive name-based
+// search-and-replace would do; since some slot's REPLACEMENT name can collide with a later
+// slot's SEARCH name (e.g. one year's zone hands "Vasco da Gama" the Botafogo slot, but "Vasco
+// da Gama" is itself also one of the 7 original slot names), that would cascade into the same
+// club landing in multiple groups. Resolving positions up front against the untouched template
+// avoids that entirely — each of the 7 slots is a fixed (group, index) coordinate, full stop.
+function sulamericanaBrSlotPositions(){
+  return SULAMERICANA_BR_SLOTS.map(name=>{
+    for(const g of Object.keys(SULAMERICANA_2026)){
+      const idx = SULAMERICANA_2026[g].indexOf(name);
+      if(idx!==-1) return {group:g, idx};
+    }
+    return null;
+  });
+}
+function sulamericanaGroupsForYear(year){
+  if(year<=2026) return SULAMERICANA_2026;
+  const zones = (ST.brasaZonesHistory||{})[year-1];
+  if(!zones || !zones.sula || zones.sula.length<7) return SULAMERICANA_2026; // safety net before any season has completed
+  const groups = {};
+  Object.keys(SULAMERICANA_2026).forEach(g=>{ groups[g] = SULAMERICANA_2026[g].slice(); });
+  sulamericanaBrSlotPositions().forEach((pos,i)=>{
+    if(!pos) return;
+    const newClub = zones.sula[i];
+    if(!newClub) return;
+    groups[pos.group][pos.idx] = newClub;
+  });
+  return groups;
+}
+function sulaUserGroup(){
+  const s = ST.sulamericana;
+  return s ? Object.keys(s.groups).find(g=>s.groups[g].includes(ST.teamId)) : null;
+}
+function startSulamericanaIfEligible(){
+  const groups = sulamericanaGroupsForYear(ST.seasonYear);
+  const flat = Object.values(groups).flat();
+  if(!flat.includes(ST.teamId)){ ST.sulamericana = null; return; }
+  flat.forEach(name=>{
+    if(ST.world.teams[name]) return;
+    const src = sulamericanaTeamSource(name);
+    if(!src) return;
+    const players = src.players.map(p=>Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0}));
+    let maxId=0; players.forEach(p=>{ if(p.id>maxId) maxId=p.id; });
+    if(maxId>nextIdCounter) nextIdCounter = maxId;
+    ST.world.teams[name] = { name, country: src.country||"", flag: src.flag||"", group:null, source: src.source||"gen", players };
+  });
+  const groupFixtures = {};
+  Object.keys(groups).forEach(g=>{
+    const rounds = E.doubleRoundRobin(groups[g]);
+    groupFixtures[g] = rounds.map(round=>round.map(m=>({home:m.home, away:m.away, played:false, hs:null, as:null})));
+  });
+  ST.sulamericana = {
+    year: ST.seasonYear,
+    phase: "sula_groups",
+    groups, groupFixtures,
+    currentRound: 0,
+    knockout: { sula_r16:null, sula_qf:null, sula_sf:null, sula_final:null },
+    champion: null, userEliminated: false, placementReached: null,
+    roundsUntilNextLeg: 2, // paces Sul-Americana match days out across the Brasileirão calendar, see advanceBrasileiraoStep()
+  };
+  const g = sulaUserGroup();
+  ST.newsLog.unshift({title:"Sul-Americana "+ST.seasonYear, text:`O ${ST.teamId} está na fase de grupos da CONMEBOL Sul-Americana ${ST.seasonYear} — Grupo ${g}.`});
+}
+function sulaGroupStandingsFor(groupLetter){
+  const table = {};
+  ST.sulamericana.groupFixtures[groupLetter].forEach(round=>round.forEach(m=>{
+    if(m.played) E.applyResultToStandings(table, m.home, m.away, m.hs, m.as);
+  }));
+  return E.sortedStandings(table, ST.sulamericana.groups[groupLetter]);
+}
+function sulaPrizeForStage(stage){
+  return {sula_groups:700000, sula_r16:1300000, sula_qf:2200000, sula_sf:3800000, sula_final:7000000}[stage] || 0;
+}
+function paySulaStagePrize(stage){
+  const prize = sulaPrizeForStage(stage);
+  if(!prize) return;
+  ST.budget += prize;
+  ST.newsLog.unshift({title:"Premiação da Sul-Americana", text:`Classificação rende ${fmtMoney(prize)} aos cofres do ${ST.teamId}.`});
+}
+function advanceSulaGroupRound(){
+  const s = ST.sulamericana;
+  let pendingUser = null;
+  Object.keys(s.groupFixtures).forEach(g=>{
+    const round = s.groupFixtures[g][s.currentRound];
+    if(!round) return;
+    round.forEach(m=>{
+      if(m.played) return;
+      if(m.home===ST.teamId || m.away===ST.teamId){ pendingUser = m; }
+      else { const res = simFast(m.home, m.away); m.hs=res.homeScore; m.as=res.awayScore; m.played=true; }
+    });
+  });
+  if(pendingUser){
+    goToMatchDay(pendingUser, {type:"sula", phase:"sula_groups", round:s.currentRound});
+    return true;
+  }
+  finishSulaGroupRound();
+  return false;
+}
+function finishSulaGroupRound(){
+  const s = ST.sulamericana;
+  s.currentRound++;
+  if(s.currentRound<6) return;
+  const winners=[], runnersUp=[];
+  Object.keys(s.groups).forEach(g=>{
+    const table = sulaGroupStandingsFor(g);
+    winners.push({team:table[0].team, group:g});
+    runnersUp.push({team:table[1].team, group:g});
+  });
+  const userGroupLetter = sulaUserGroup();
+  const userTable = sulaGroupStandingsFor(userGroupLetter);
+  const userPos = userTable.findIndex(r=>r.team===ST.teamId)+1;
+  if(userPos>2){
+    s.userEliminated = true;
+    s.placementReached = "Fase de Grupos";
+    ST.newsLog.unshift({title:"Eliminado na Sul-Americana", text:`O ${ST.teamId} terminou em ${userPos}º no Grupo ${userGroupLetter} e está fora da Sul-Americana ${s.year} já na fase de grupos.`});
+  } else {
+    paySulaStagePrize("sula_groups");
+  }
+  const rng = E.makeRNG(nextSeed());
+  const shuffledRunners = shuffled(rng, runnersUp);
+  const winnersShuffled = shuffled(rng, winners);
+  const usedRunner = new Set();
+  const pairs = winnersShuffled.map(w=>{
+    let idx = shuffledRunners.findIndex((r,i)=>!usedRunner.has(i) && r.group!==w.group);
+    if(idx===-1) idx = shuffledRunners.findIndex((r,i)=>!usedRunner.has(i));
+    usedRunner.add(idx);
+    return [w, shuffledRunners[idx]];
+  });
+  const ties = pairs.map((pair,i)=>makeTie(pair[0].team, pair[1].team, i<4?0:1, i%4));
+  s.knockout.sula_r16 = { ties, legIndex:0 };
+  s.phase = "sula_r16";
+  ST.newsLog.unshift({title:"Fase de grupos da Sul-Americana encerrada", text:"Classificados para as oitavas de final definidos."});
+}
+function currentSulaKORound(){ return ST.sulamericana.knockout[ST.sulamericana.phase]; }
+function advanceSulaLeg(){
+  const round = currentSulaKORound();
+  const legIndex = round.legIndex;
+  let pendingUser = null;
+  round.ties.forEach(tie=>{
+    const leg = tie.legs[legIndex];
+    if(leg.played) return;
+    if(tie.teamA===ST.teamId || tie.teamB===ST.teamId){ pendingUser = { ref:leg, tie }; }
+    else { const res = simFast(leg.home, leg.away); leg.hs=res.homeScore; leg.as=res.awayScore; leg.played=true; }
+  });
+  if(pendingUser){
+    goToMatchDay(pendingUser.ref, {type:"sula", phase:ST.sulamericana.phase, tieId:pendingUser.tie.id, legIndex});
+    return true;
+  }
+  finishSulaLeg();
+  return false;
+}
+function finishSulaLeg(){
+  const round = currentSulaKORound();
+  if(round.legIndex===0){ round.legIndex = 1; return; }
+  const rng = E.makeRNG(nextSeed());
+  let drawnUserTie = null;
+  round.ties.forEach(tie=>{
+    const l1=tie.legs[0], l2=tie.legs[1];
+    const aggA = l1.as + l2.hs;
+    const aggB = l1.hs + l2.as;
+    tie.aggA=aggA; tie.aggB=aggB;
+    const isUserTie = tie.teamA===ST.teamId || tie.teamB===ST.teamId;
+    if(aggA>aggB) tie.winner=tie.teamA;
+    else if(aggB>aggA) tie.winner=tie.teamB;
+    else if(isUserTie){ tie.wentToPens=true; drawnUserTie=tie; }
+    else { tie.wentToPens=true; tie.winner = rng()<0.5?tie.teamA:tie.teamB; }
+  });
+  if(drawnUserTie){
+    startShootout(drawnUserTie.teamA, drawnUserTie.teamB, {type:"sulaTie", tieId:drawnUserTie.id});
+    return;
+  }
+  const s = ST.sulamericana;
+  const userTie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
+  if(userTie){
+    if(userTie.winner===ST.teamId) paySulaStagePrize(s.phase);
+    else if(!s.userEliminated){
+      s.userEliminated = true;
+      s.placementReached = stageLabelFor(s.phase);
+      ST.newsLog.unshift({title:"Eliminado na Sul-Americana", text:`O ${ST.teamId} caiu na ${stageLabelFor(s.phase)} da Sul-Americana ${s.year}. O torneio segue sem você.`});
+    }
+  }
+  progressSulaBracket();
+}
+function progressSulaBracket(){
+  const s = ST.sulamericana;
+  if(s.phase==="sula_r16"){
+    const r16 = s.knockout.sula_r16.ties;
+    const qfTies = [];
+    for(let half=0; half<2; half++){
+      const a = r16.find(t=>t.half===half && t.slot===0).winner;
+      const b = r16.find(t=>t.half===half && t.slot===1).winner;
+      const c = r16.find(t=>t.half===half && t.slot===2).winner;
+      const d = r16.find(t=>t.half===half && t.slot===3).winner;
+      qfTies.push(makeTie(a,b,half,0));
+      qfTies.push(makeTie(c,d,half,1));
+    }
+    s.knockout.sula_qf = { ties: qfTies, legIndex:0 };
+    s.phase = "sula_qf";
+    ST.newsLog.unshift({title:"Fim das oitavas da Sul-Americana", text:"Classificados para as quartas de final definidos."});
+  } else if(s.phase==="sula_qf"){
+    const qf = s.knockout.sula_qf.ties;
+    const sfTies = [];
+    for(let half=0; half<2; half++){
+      const a = qf.find(t=>t.half===half && t.slot===0).winner;
+      const b = qf.find(t=>t.half===half && t.slot===1).winner;
+      sfTies.push(makeTie(a,b,half,0));
+    }
+    s.knockout.sula_sf = { ties: sfTies, legIndex:0 };
+    s.phase = "sula_sf";
+    ST.newsLog.unshift({title:"Fim das quartas da Sul-Americana", text:"Semifinalistas definidos."});
+  } else if(s.phase==="sula_sf"){
+    const sf = s.knockout.sula_sf.ties;
+    const home = sf.find(t=>t.half===0).winner;
+    const away = sf.find(t=>t.half===1).winner;
+    s.knockout.sula_final = { home, away, played:false, hs:null, as:null };
+    s.phase = "sula_final";
+    ST.newsLog.unshift({title:"Final da Sul-Americana definida!", text:`${home} e ${away} disputarão o título da Sul-Americana ${s.year}.`});
+  }
+}
+function advanceSulaFinalStep(){
+  const s = ST.sulamericana;
+  const f = s.knockout.sula_final;
+  if(f.home===ST.teamId || f.away===ST.teamId){
+    goToMatchDay(f, {type:"sula", phase:"sula_final"});
+    return true;
+  }
+  const res = simFast(f.home, f.away);
+  let hs=res.homeScore, as=res.awayScore;
+  if(hs===as){ const rng=E.makeRNG(nextSeed()); if(rng()<0.5) hs++; else as++; }
+  f.hs=hs; f.as=as; f.played=true;
+  s.champion = hs>as ? f.home : f.away;
+  s.phase = "sula_done";
+  if(s.champion===ST.teamId) paySulaStagePrize("sula_final");
+  ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${s.champion} conquista a Sul-Americana ${s.year}.`});
+  return false;
+}
+// called from advanceBrasileiraoStep() every round — same pacing idea as tickCopaDoBrasil(),
+// just a tighter 2-round spacing (13 legs/matchdays total vs. the Copa's 8, over the same
+// 38-round season) and with a group-stage phase to page through before the knockout starts.
+function tickSulamericana(){
+  const s = ST.sulamericana;
+  if(!s || s.phase==="sula_done") return false;
+  if(s.roundsUntilNextLeg>0){ s.roundsUntilNextLeg--; return false; }
+  s.roundsUntilNextLeg = 2;
+  if(s.phase==="sula_groups") return advanceSulaGroupRound();
+  if(s.phase==="sula_final") return advanceSulaFinalStep();
+  return advanceSulaLeg();
+}
+// mirrors copaPendingUserMatch() — if the very next AVANÇAR DIA is the one where
+// tickSulamericana() actually fires and it involves the user's own team, preview THAT instead
+// of the Brasileirão fixture, so the calendar/crests shown during the countdown never lie about
+// what match is actually coming up.
+function sulaPendingUserMatch(){
+  const s = ST.sulamericana;
+  if(!s || s.userEliminated || s.phase==="sula_done" || s.roundsUntilNextLeg>0) return null;
+  if(s.phase==="sula_groups"){
+    const g = sulaUserGroup();
+    const round = s.groupFixtures[g][s.currentRound];
+    if(!round) return null;
+    const m = round.find(x=>x.home===ST.teamId||x.away===ST.teamId);
+    if(!m || m.played) return null;
+    return {home:m.home, away:m.away, label:`Sul-Americana ${s.year} · Fase de Grupos · Rodada ${s.currentRound+1}/6`, compType:"sulamericana"};
+  }
+  if(s.phase==="sula_final"){
+    const f = s.knockout.sula_final;
+    if(f.played || (f.home!==ST.teamId && f.away!==ST.teamId)) return null;
+    return {home:f.home, away:f.away, label:`Sul-Americana ${s.year} · Final · Jogo único`, compType:"sulamericana"};
+  }
+  const round = s.knockout[s.phase];
+  const tie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
+  if(!tie) return null;
+  const leg = tie.legs[round.legIndex];
+  if(leg.played) return null;
+  return {home:leg.home, away:leg.away, label:`${stageLabelFor(s.phase)} · Jogo de ${round.legIndex===0?'ida':'volta'}`, compType:"sulamericana"};
+}
+
 function advanceFinalStep(){
   decrementAvailability();
   const comp = ST.competition;
@@ -2690,6 +3051,23 @@ function finishPendingMatch(){
       ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${cb.champion} conquista a Copa do Brasil ${cb.year}.`});
     } else {
       finishCopaLeg();
+    }
+  } else if(ctx.type==="sula"){
+    if(ctx.phase==="sula_groups"){
+      finishSulaGroupRound();
+    } else if(ctx.phase==="sula_final"){
+      const f = pm.ref;
+      if(f.hs===f.as){
+        startShootout(f.home, f.away, {type:"sulaFinal"});
+        return;
+      }
+      const s = ST.sulamericana;
+      s.champion = f.hs>f.as ? f.home : f.away;
+      s.phase = "sula_done";
+      if(s.champion===ST.teamId) paySulaStagePrize("sula_final");
+      ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${s.champion} conquista a Sul-Americana ${s.year}.`});
+    } else {
+      finishSulaLeg();
     }
   } else if(ctx.type==="group"){
     finishGroupRound();
@@ -4140,6 +4518,8 @@ function copaPendingUserMatch(){
 function getNextUserBrasaMatch(){
   const copaPreview = copaPendingUserMatch();
   if(copaPreview) return copaPreview;
+  const sulaPreview = sulaPendingUserMatch();
+  if(sulaPreview) return sulaPreview;
   const b = ST.brasileirao;
   if(!b || b.currentRound>=b.rounds.length) return null;
   const round = b.rounds[b.currentRound];
@@ -4273,7 +4653,7 @@ function renderNextMatchCard(compact){
        </div>
        ${timeConfigBtn}`
     : `${renderCalendarStrip(oppName, nm.compType)}
-       ${nm.compType==="copa"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">Copa do Brasil</div>':''}
+       ${nm.compType==="copa"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">Copa do Brasil</div>':nm.compType==="sulamericana"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">CONMEBOL Sul-Americana</div>':''}
        <div class="tac dim small mt8">Próximo jogo em ${days} dia${days===1?"":"s"}</div>
        <div class="btn-row center ${compact?'mt8':'mt16'}">
          <button class="btn btn-gold ${compact?'':'btn-lg'}" onclick="Game.advanceDay()">AVANÇAR DIA</button>
@@ -4364,10 +4744,10 @@ function renderFabrizioRomanoCard(){
 }
 // ---------------- BRASILEIRÃO TAB ----------------
 // zone stripe by final table position — real Série A convention: top 6 go straight into next
-// year's Libertadores, 7-12 into the Sul-Americana, 17-20 get relegated.
+// year's Libertadores, 7-13 into the Sul-Americana (7 real 2026 Brazilian entrants), 17-20 get relegated.
 function brasaZoneClass(pos){
   if(pos<=6) return "brasa-zone-liberta";
-  if(pos<=12) return "brasa-zone-sula";
+  if(pos<=13) return "brasa-zone-sula";
   if(pos>=17) return "brasa-zone-rebaixamento";
   return "";
 }
@@ -4478,14 +4858,24 @@ function renderCopaDoBrasilPanel(){
 // Artilheiros/assistências (top 25 each) and the full 20-team table moved to DESEMPENHO.
 function renderBrasileiraoCompeticaoTab(){
   const table = brasaSortedStandings();
-  // when it's Copa time (a Copa match is what's actually coming up next — same condition that
-  // paints the calendar square green), the Série A table gives way to the Copa chaveamento
-  // instead, so the bracket is what's front-and-center right when it matters.
+  // when it's Copa (or Sul-Americana) time — a match in one of them is what's actually coming
+  // up next, same condition that paints the calendar square green — the Série A table gives
+  // way to that competition's own panel instead, so it's front-and-center right when it matters.
   const copaUp = !!copaPendingUserMatch();
   const cb = ST.copaDoBrasil;
-  /* an eliminated user stops seeing the Copa altogether — it plays out in the background (other clubs' semis/final still update ST.copaDoBrasil) but never takes over this tab again until startCopaDoBrasil() resets userEliminated for next season's real run. */ const showBracket = !!cb && !cb.userEliminated && (copaUp || cb.phase==="copa_final" || cb.phase==="copa_done");
-  if(showBracket){
-    /* avançar keeps its usual compact top-left spot; the bracket tree needs real width to lay out without scrolling sideways, so it gets its own full-width row right below avançar (grid auto-placement just leaves row 1's other half blank); e-mails/contratações close out the page in one more row. */ const bracketPanel = `<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>`; const cells = `<div class="competicao-cell">${renderNextMatchCard(true)}</div>` + `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>` + `<div class="competicao-cell">${renderLatestEmailCard()}</div>` + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`; return `<div class="competicao-grid">${cells}</div>`;
+  /* an eliminated user stops seeing the Copa altogether — it plays out in the background (other clubs' semis/final still update ST.copaDoBrasil) but never takes over this tab again until startCopaDoBrasil() resets userEliminated for next season's real run. */ const showCopaBracket = !!cb && !cb.userEliminated && (copaUp || cb.phase==="copa_final" || cb.phase==="copa_done");
+  const sulaUp = !!sulaPendingUserMatch();
+  const s = ST.sulamericana;
+  const showSulaPanel = !!s && !s.userEliminated && (sulaUp || s.phase==="sula_final" || s.phase==="sula_done");
+  if(showCopaBracket || showSulaPanel){
+    /* avançar keeps its usual compact top-left spot; each competition panel needs real width to lay out without scrolling sideways, so each gets its own full-width row right below avançar (grid auto-placement just leaves row 1's other half blank) — stacked one after another if both a Copa and a Sul-Americana campaign are live at once; e-mails/contratações close out the page in one more row. */
+    const panels = [];
+    if(showCopaBracket) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>`);
+    if(showSulaPanel) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(s.phase))} ${s.year}</div>${renderSulaCompetitionPanel()}</div>`);
+    const cells = `<div class="competicao-cell">${renderNextMatchCard(true)}</div>`
+      + panels.map(p=>`<div class="competicao-cell" style="grid-column:1 / -1;">${p}</div>`).join("")
+      + `<div class="competicao-cell">${renderLatestEmailCard()}</div>` + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`;
+    return `<div class="competicao-grid">${cells}</div>`;
   }
   // avançar (compact) top-left, e-mails + contratações below it; the Série A table (top 10)
   // fills the whole right column. Artilheiros/assistências moved to the Desempenho tab (top 25
@@ -4799,6 +5189,50 @@ function renderCopaBracket(){
     <div class="bracket-center-col">
       <div class="bracket-round-label gold">Final</div>
       ${competitionTrophyImg("copa", 54, champion?1:0.45)}
+      ${finalBox}
+      ${champion?`<div class="gold bold tiny tac mt8">CAMPEÃO</div>`:''}
+    </div>
+    <div class="bracket-side right">${bracketHalfHtml(comp,1)}</div>
+  </div>`;
+}
+// the Sul-Americana panel — group table while s.phase is "sula_groups", otherwise the same
+// bracket primitives renderCopaBracket() and renderKnockoutBracket() already use, just adapted
+// into the {knockout:{r16,qf,sf,final}} shape those expect (identical 16-team/8-tie oitavas
+// shape as both of those, so nothing about bracketHalfHtml/effectiveFinal needs to change).
+function renderSulaCompetitionPanel(){
+  const s = ST.sulamericana;
+  if(s.phase==="sula_groups"){
+    const g = sulaUserGroup();
+    const standings = sulaGroupStandingsFor(g);
+    return `<div class="faint tiny uc mb8">Grupo ${g} — Rodada ${Math.min(s.currentRound+1,6)}/6</div>${renderStandingsTable(standings)}`;
+  }
+  if(s.phase==="sula_done"){
+    return `<div class="row" style="align-items:center;gap:10px;">
+      ${clubCrestImg(s.champion,32,null)}
+      <div><div class="faint tiny uc">Campeão</div><div class="bold gold">${esc(s.champion)}</div></div>
+    </div>`;
+  }
+  const comp = { knockout: { r16: s.knockout.sula_r16, qf: s.knockout.sula_qf, sf: s.knockout.sula_sf, final: s.knockout.sula_final } };
+  const finalTie = effectiveFinal(comp);
+  const finalIsUser = finalTie.home===ST.teamId || finalTie.away===ST.teamId;
+  const champion = (s.phase==="sula_final" && finalTie.played) ? (finalTie.hs>finalTie.as?finalTie.home:finalTie.away) : null;
+  const finalBox = `<div class="bm ${finalIsUser?'user-tie':''}">
+    <div class="bm-row ${champion&&champion===finalTie.home?'winner':''} ${!finalTie.home?'tbd':''}">
+      <span class="bm-crest">${crestMini(finalTie.home)}</span>
+      <span class="bm-name">${finalTie.home?esc(finalTie.home):'A definir'}</span>
+      <span class="bm-score">${finalTie.played?finalTie.hs:'-'}</span>
+    </div>
+    <div class="bm-row ${champion&&champion===finalTie.away?'winner':''} ${!finalTie.away?'tbd':''}">
+      <span class="bm-crest">${crestMini(finalTie.away)}</span>
+      <span class="bm-name">${finalTie.away?esc(finalTie.away):'A definir'}</span>
+      <span class="bm-score">${finalTie.played?finalTie.as:'-'}</span>
+    </div>
+  </div>`;
+  return `<div class="bracket-wrap">
+    <div class="bracket-side left">${bracketHalfHtml(comp,0)}</div>
+    <div class="bracket-center-col">
+      <div class="bracket-round-label gold">Final</div>
+      ${competitionTrophyImg("sulamericana", 54, champion?1:0.45)}
       ${finalBox}
       ${champion?`<div class="gold bold tiny tac mt8">CAMPEÃO</div>`:''}
     </div>
@@ -5429,8 +5863,8 @@ function eventText(ev, homeName, awayName){
 function renderMatch(){
   const pm = ST.pendingMatch;
   const home = pm.ref.home, away = pm.ref.away;
-  const stageLblType = pm.context.type==="copa" ? pm.context.phase : pm.context.type;
-  const stageLbl = stageLabelFor(stageLblType) + (pm.context.legIndex!=null ? ` — jogo de ${pm.context.legIndex===0?'ida':'volta'}` : ((stageLblType==="final"||stageLblType==="copa_final"||String(stageLblType).indexOf("prelib_")===0)?" — jogo único":""));
+  const stageLblType = (pm.context.type==="copa"||pm.context.type==="sula") ? pm.context.phase : pm.context.type;
+  const stageLbl = stageLabelFor(stageLblType) + (pm.context.legIndex!=null ? ` — jogo de ${pm.context.legIndex===0?'ida':'volta'}` : ((stageLblType==="final"||stageLblType==="copa_final"||stageLblType==="sula_final"||String(stageLblType).indexOf("prelib_")===0)?" — jogo único":""));
   if(!pm.result){
     const lp = lineupPlayers();
     const missing = lp.filter(p=>!p).length;
@@ -5938,6 +6372,14 @@ function renderSeasonEndScreen(){
         ${s.relegated.map(name=>`<span class="row" style="gap:5px;align-items:center;">${clubCrestImg(name,18,null)}<span class="tiny red bold">${esc(name)}</span></span>`).join("")}
       </div>
       ${ST.copaDoBrasil && ST.copaDoBrasil.champion ? `<div class="faint tiny uc mt12">Campeão da Copa do Brasil ${ST.copaDoBrasil.year}</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(ST.copaDoBrasil.champion,20,null)}<span class="bold gold">${esc(ST.copaDoBrasil.champion)}</span></div>` : ""}
+      ${ST.sulamericana && ST.sulamericana.champion ? `<div class="faint tiny uc mt12">Campeão da Sul-Americana ${ST.sulamericana.year}</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(ST.sulamericana.champion,20,null)}<span class="bold gold">${esc(ST.sulamericana.champion)}</span></div>` : ""}
+    </div>` : ""}
+    ${s.zones ? `<div class="panel mt16" style="max-width:420px;">
+      <div class="panel-title">Classificados para ${ST.seasonYear}</div>
+      <div class="faint tiny uc mt8">Libertadores</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;">${s.zones.liber.map(name=>`<span class="row" style="gap:5px;align-items:center;">${clubCrestImg(name,18,null)}<span class="tiny bold">${esc(name)}</span></span>`).join("")}</div>
+      <div class="faint tiny uc mt12">Sul-Americana</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;">${s.zones.sula.map(name=>`<span class="row" style="gap:5px;align-items:center;">${clubCrestImg(name,18,null)}<span class="tiny bold">${esc(name)}</span></span>`).join("")}</div>
     </div>` : ""}
     ${s.reiDaAmerica ? renderReiDaAmericaPanel(s.reiDaAmerica) : ""}
     <button class="btn btn-gold btn-lg mt24" onclick="Game.continueSeason()">Ir para ${ST.seasonYear} →</button>
