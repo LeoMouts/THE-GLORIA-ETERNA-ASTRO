@@ -6,6 +6,7 @@ import * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
 import { PRELIB_DATA } from "./prelib";
+import { SERIE_A_EXTRA_TEAMS } from "./serieA";
 
 const GOAT_MASCOT_URI = "/images/image-1787868287812.webp";
 
@@ -208,6 +209,9 @@ const GLOBAL_TEAM_CRESTS = {
   "Real Betis":"betis", "Santos Laguna":"santos-laguna", "Shakhtar Donetsk":"shakhtar", "Slavia Praga":"slavia-prague",
   "St. Pauli":"st-pauli", "VfB Stuttgart":"stuttgart", "Villarreal":"villarreal", "Werder Bremen":"werder",
   "Wolfsburg":"wolfsburg", "Wolverhampton":"wolves",
+  // the 4 of the 8 new Série A placeholder clubs (serieA.ts) with a real crest available —
+  // Bragantino, Athletico-PR, Coritiba and Chapecoense already had one from earlier batches.
+  "Internacional":"internacional", "Bahia":"bahia", "Vitória":"vitoria-ba", "Remo":"remo",
 };
 let _globalCrestSeq = 0;
 function clubCrestImg(clubName, size, playerName){
@@ -2818,11 +2822,18 @@ function buyGlobalPlayer(playerId, offer){
 // so without this their entire rosters were invisible everywhere. Surfaced as a flat pool, same
 // shape as the global market, but shown inside "Times da Libertadores" since that's where the
 // user asked for them — their crests already exist in TEAM_LOGOS under the real club name.
-const PRELIB_MARKET_TEAM_NAMES = Object.keys(PRELIB_DATA.teams);
+// first wave of the Brasileirão overhaul: the 8 real Série A 2026 clubs that had no squad
+// anywhere in the game (see serieA.ts) ride the same flat "extra teams" market pool as the
+// Pré-Libertadores clubs — same buy/price/lookup plumbing, just a second source feeding it —
+// until the full league/calendar rework gives them (and everyone else) a real fixture list.
+const PRELIB_MARKET_TEAM_NAMES = Object.keys(PRELIB_DATA.teams).concat(Object.keys(SERIE_A_EXTRA_TEAMS));
 function ensurePrelibMarket(){
   if(!ST.world.prelibMarket){
     const out = [];
     Object.values(PRELIB_DATA.teams).forEach(t=>{
+      t.players.forEach(p=> out.push(Object.assign({}, p, {club:t.name})));
+    });
+    Object.values(SERIE_A_EXTRA_TEAMS).forEach(t=>{
       t.players.forEach(p=> out.push(Object.assign({}, p, {club:t.name})));
     });
     ST.world.prelibMarket = out;
