@@ -4124,7 +4124,7 @@ function getNextUserPrelibMatch(){
 // what actually plays out on match day, which is exactly what read as "bugged" before this.
 function copaPendingUserMatch(){
   const cb = ST.copaDoBrasil;
-  if(!cb || cb.phase==="copa_done" || cb.roundsUntilNextLeg>0) return null;
+  /* once you're out, the Copa keeps going without you — no calendar highlight, no bracket takeover — until it starts fresh next season and you're actually in it again. */ if(!cb || cb.userEliminated || cb.phase==="copa_done" || cb.roundsUntilNextLeg>0) return null;
   if(cb.phase==="copa_final"){
     const f = cb.knockout.copa_final;
     if(f.played || (f.home!==ST.teamId && f.away!==ST.teamId)) return null;
@@ -4483,7 +4483,7 @@ function renderBrasileiraoCompeticaoTab(){
   // instead, so the bracket is what's front-and-center right when it matters.
   const copaUp = !!copaPendingUserMatch();
   const cb = ST.copaDoBrasil;
-  const showBracket = copaUp || (cb && (cb.phase==="copa_final" || cb.phase==="copa_done"));
+  /* an eliminated user stops seeing the Copa altogether — it plays out in the background (other clubs' semis/final still update ST.copaDoBrasil) but never takes over this tab again until startCopaDoBrasil() resets userEliminated for next season's real run. */ const showBracket = !!cb && !cb.userEliminated && (copaUp || cb.phase==="copa_final" || cb.phase==="copa_done");
   if(showBracket){
     /* avançar keeps its usual compact top-left spot; the bracket tree needs real width to lay out without scrolling sideways, so it gets its own full-width row right below avançar (grid auto-placement just leaves row 1's other half blank); e-mails/contratações close out the page in one more row. */ const bracketPanel = `<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>`; const cells = `<div class="competicao-cell">${renderNextMatchCard(true)}</div>` + `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>` + `<div class="competicao-cell">${renderLatestEmailCard()}</div>` + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`; return `<div class="competicao-grid">${cells}</div>`;
   }
