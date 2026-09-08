@@ -49,7 +49,7 @@ export interface Team {
   country: string;
   flag: string;
   group: GroupLetter;
-  source: "real" | "gen";
+  source: "real" | "gen" | "mixed";
   players: Player[];
 }
 
