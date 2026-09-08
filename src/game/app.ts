@@ -553,8 +553,10 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.brasaStandingsHistory = {};
   ST.brasaZonesHistory = {};
   ST.sulamericana = null;
+  ST.libertadoresCompleto = null;
   startCopaDoBrasil();
   startSulamericanaIfEligible(); // the 7 real 2026 Sul-Americana entrants play it from season 1 — everyone else only reaches it via a future season's own table position
+  startLibertadoresCompletoIfEligible(); // same idea for the 6 real 2026 Libertadores entrants
   autoFillLineup();
   scheduleSave();
 }
@@ -570,6 +572,7 @@ function advanceBrasileiraoStep(){
   decrementAvailability();
   if(tickCopaDoBrasil()) return; // a Copa do Brasil match day was triggered this turn — wait for it
   if(tickSulamericana()) return; // same idea for the Sul-Americana campaign, when the user's club is in it
+  if(tickLibertadoresCompleto()) return; // ...and for the real Libertadores, when the user's club is in it instead
   const round = b.rounds[b.currentRound];
   let pendingUser = null;
   round.forEach(m=>{
@@ -639,6 +642,7 @@ function startNewBrasaSeason(){
   ST.hubTab = "competicao";
   startCopaDoBrasil(); // may override ST.stage to "copa_draw" (2027+) for the round-of-16 reveal
   startSulamericanaIfEligible();
+  startLibertadoresCompletoIfEligible();
 }
 
 // ============================================================
@@ -1199,6 +1203,7 @@ function startCareer(teamId, managerName){
   ST.brasileirao = null;
   ST.copaDoBrasil = null;
   ST.sulamericana = null; // Modo Completo's Sul-Americana campaign is unrelated to this classic mode
+  ST.libertadoresCompleto = null; // ...same for Modo Completo's own Libertadores campaign
   ST.careerStats = {goals:{}, assists:{}, signings:[]};
   ST.world = freshWorld();
   ensureGlobalMarket();
@@ -1422,6 +1427,8 @@ function stageLabelFor(type){
     copa_sf:"Copa do Brasil — Semifinal", copa_final:"Copa do Brasil — Final", copa_done:"Copa do Brasil — Encerrada",
     sula_groups:"Sul-Americana — Fase de Grupos", sula_r16:"Sul-Americana — Oitavas de Final", sula_qf:"Sul-Americana — Quartas de Final",
     sula_sf:"Sul-Americana — Semifinal", sula_final:"Sul-Americana — Final", sula_done:"Sul-Americana — Encerrada",
+    lib_groups:"Libertadores — Fase de Grupos", lib_r16:"Libertadores — Oitavas de Final", lib_qf:"Libertadores — Quartas de Final",
+    lib_sf:"Libertadores — Semifinal", lib_final:"Libertadores — Final", lib_done:"Libertadores — Encerrada",
     brasileirao:"Brasileirão"}[type] || type;
 }
 
@@ -2242,6 +2249,29 @@ function applyShootoutResult(ctx, winner){
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) paySulaStagePrize("sula_final");
     ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${winner} conquista a Sul-Americana ${s.year} nos pênaltis.`});
+  } else if(ctx.type==="libTie"){
+    const round = currentLibKORound();
+    const tie = round.ties.find(t=>t.id===ctx.tieId);
+    if(tie) tie.winner = winner;
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    const l = ST.libertadoresCompleto;
+    const userTie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
+    if(userTie){
+      if(userTie.winner===ST.teamId) payLibStagePrize(l.phase);
+      else if(!l.userEliminated){
+        l.userEliminated = true;
+        l.placementReached = stageLabelFor(l.phase);
+        ST.newsLog.unshift({title:"Eliminado na Libertadores", text:`O ${ST.teamId} caiu na ${stageLabelFor(l.phase)} da Libertadores ${l.year} nos pênaltis. O torneio segue sem você.`});
+      }
+    }
+    progressLibBracket();
+  } else if(ctx.type==="libFinal"){
+    const l = ST.libertadoresCompleto;
+    l.champion = winner;
+    l.phase = "lib_done";
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    if(winner===ST.teamId) payLibStagePrize("lib_final");
+    ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${winner} conquista a Libertadores ${l.year} nos pênaltis.`});
   }
 }
 
@@ -2834,6 +2864,290 @@ function sulaPendingUserMatch(){
   return {home:leg.home, away:leg.away, label:`${stageLabelFor(s.phase)} · Jogo de ${round.legIndex===0?'ida':'volta'}`, compType:"sulamericana"};
 }
 
+// ============================================================
+// CONMEBOL LIBERTADORES (MODO COMPLETO) — the real, full Libertadores (DATA.groups' actual
+// 2026 draw: 32 clubs, 6 of them Brazilian), running alongside the Brasileirão career exactly
+// like the Sul-Americana campaign above — same group-stage-then-knockout shape, same tick
+// pacing, same "only exists for a season the user's own club is actually in" scoping. This is
+// entirely separate from the classic standalone Libertadores mode's ST.competition (which still
+// works exactly as it always did, under ST.mode==="libertadores") — no shared state between the
+// two, so nothing here can disturb that mode's own season-end/reputation/budget flow.
+// ============================================================
+// the 6 Brazilian clubs DATA.groups' fixed 2026 draw hardcodes, in the order libertadoresBrSlotPositions()
+// resolves them (A,C,D,E,F,G) — same substitution trick as SULAMERICANA_BR_SLOTS above, and for
+// the same reason: no real future-year foreign-club draw exists, so the other 26 clubs stay fixed.
+const LIBERTADORES_BR_SLOTS = ["Flamengo","Fluminense","Cruzeiro","Corinthians","Palmeiras","Mirassol"];
+function libertadoresBrSlotPositions(){
+  return LIBERTADORES_BR_SLOTS.map(name=>{
+    for(const g of Object.keys(DATA.groups)){
+      const idx = DATA.groups[g].indexOf(name);
+      if(idx!==-1) return {group:g, idx};
+    }
+    return null;
+  });
+}
+function libertadoresGroupsForYear(year){
+  if(year<=2026) return DATA.groups;
+  const zones = (ST.brasaZonesHistory||{})[year-1];
+  if(!zones || !zones.liber || zones.liber.length<6) return DATA.groups; // safety net before any season has completed
+  const groups = {};
+  Object.keys(DATA.groups).forEach(g=>{ groups[g] = DATA.groups[g].slice(); });
+  libertadoresBrSlotPositions().forEach((pos,i)=>{
+    if(!pos) return;
+    const newClub = zones.liber[i];
+    if(!newClub) return;
+    groups[pos.group][pos.idx] = newClub;
+  });
+  return groups;
+}
+function libUserGroup(){
+  const l = ST.libertadoresCompleto;
+  return l ? Object.keys(l.groups).find(g=>l.groups[g].includes(ST.teamId)) : null;
+}
+function startLibertadoresCompletoIfEligible(){
+  const groups = libertadoresGroupsForYear(ST.seasonYear);
+  const flat = Object.values(groups).flat();
+  if(!flat.includes(ST.teamId)){ ST.libertadoresCompleto = null; return; }
+  flat.forEach(name=>{
+    if(ST.world.teams[name]) return;
+    // covers all 32 real Libertadores clubs (DATA.teams) plus any Brasileirão club swapped into
+    // a Brazilian slot (already resolves through PRELIB_DATA/SERIE_A_EXTRA_TEAMS/SULAMERICANA_EXTRA_TEAMS)
+    const src = sulamericanaTeamSource(name);
+    if(!src) return;
+    const players = src.players.map(p=>Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0}));
+    let maxId=0; players.forEach(p=>{ if(p.id>maxId) maxId=p.id; });
+    if(maxId>nextIdCounter) nextIdCounter = maxId;
+    ST.world.teams[name] = { name, country: src.country||"", flag: src.flag||"", group:null, source: src.source||"gen", players };
+  });
+  const groupFixtures = {};
+  Object.keys(groups).forEach(g=>{
+    const rounds = E.doubleRoundRobin(groups[g]);
+    groupFixtures[g] = rounds.map(round=>round.map(m=>({home:m.home, away:m.away, played:false, hs:null, as:null})));
+  });
+  ST.libertadoresCompleto = {
+    year: ST.seasonYear,
+    phase: "lib_groups",
+    groups, groupFixtures,
+    currentRound: 0,
+    knockout: { lib_r16:null, lib_qf:null, lib_sf:null, lib_final:null },
+    champion: null, userEliminated: false, placementReached: null,
+    roundsUntilNextLeg: 2, // paces Libertadores match days out across the Brasileirão calendar, see advanceBrasileiraoStep()
+  };
+  const g = libUserGroup();
+  ST.newsLog.unshift({title:"Libertadores "+ST.seasonYear, text:`O ${ST.teamId} está na fase de grupos da CONMEBOL Libertadores ${ST.seasonYear} — Grupo ${g}.`});
+}
+function libGroupStandingsFor(groupLetter){
+  const table = {};
+  ST.libertadoresCompleto.groupFixtures[groupLetter].forEach(round=>round.forEach(m=>{
+    if(m.played) E.applyResultToStandings(table, m.home, m.away, m.hs, m.as);
+  }));
+  return E.sortedStandings(table, ST.libertadoresCompleto.groups[groupLetter]);
+}
+function libPrizeForStage(stage){
+  return {lib_groups:2000000, lib_r16:3500000, lib_qf:6000000, lib_sf:10000000, lib_final:20000000}[stage] || 0;
+}
+function payLibStagePrize(stage){
+  const prize = libPrizeForStage(stage);
+  if(!prize) return;
+  ST.budget += prize;
+  ST.newsLog.unshift({title:"Premiação da Libertadores", text:`Classificação rende ${fmtMoney(prize)} aos cofres do ${ST.teamId}.`});
+}
+function advanceLibGroupRound(){
+  const l = ST.libertadoresCompleto;
+  let pendingUser = null;
+  Object.keys(l.groupFixtures).forEach(g=>{
+    const round = l.groupFixtures[g][l.currentRound];
+    if(!round) return;
+    round.forEach(m=>{
+      if(m.played) return;
+      if(m.home===ST.teamId || m.away===ST.teamId){ pendingUser = m; }
+      else { const res = simFast(m.home, m.away); m.hs=res.homeScore; m.as=res.awayScore; m.played=true; }
+    });
+  });
+  if(pendingUser){
+    goToMatchDay(pendingUser, {type:"lib", phase:"lib_groups", round:l.currentRound});
+    return true;
+  }
+  finishLibGroupRound();
+  return false;
+}
+function finishLibGroupRound(){
+  const l = ST.libertadoresCompleto;
+  l.currentRound++;
+  if(l.currentRound<6) return;
+  const winners=[], runnersUp=[];
+  Object.keys(l.groups).forEach(g=>{
+    const table = libGroupStandingsFor(g);
+    winners.push({team:table[0].team, group:g});
+    runnersUp.push({team:table[1].team, group:g});
+  });
+  const userGroupLetter = libUserGroup();
+  const userTable = libGroupStandingsFor(userGroupLetter);
+  const userPos = userTable.findIndex(r=>r.team===ST.teamId)+1;
+  if(userPos>2){
+    l.userEliminated = true;
+    l.placementReached = "Fase de Grupos";
+    ST.newsLog.unshift({title:"Eliminado na Libertadores", text:`O ${ST.teamId} terminou em ${userPos}º no Grupo ${userGroupLetter} e está fora da Libertadores ${l.year} já na fase de grupos.`});
+  } else {
+    payLibStagePrize("lib_groups");
+  }
+  const rng = E.makeRNG(nextSeed());
+  const shuffledRunners = shuffled(rng, runnersUp);
+  const winnersShuffled = shuffled(rng, winners);
+  const usedRunner = new Set();
+  const pairs = winnersShuffled.map(w=>{
+    let idx = shuffledRunners.findIndex((r,i)=>!usedRunner.has(i) && r.group!==w.group);
+    if(idx===-1) idx = shuffledRunners.findIndex((r,i)=>!usedRunner.has(i));
+    usedRunner.add(idx);
+    return [w, shuffledRunners[idx]];
+  });
+  const ties = pairs.map((pair,i)=>makeTie(pair[0].team, pair[1].team, i<4?0:1, i%4));
+  l.knockout.lib_r16 = { ties, legIndex:0 };
+  l.phase = "lib_r16";
+  ST.newsLog.unshift({title:"Fase de grupos da Libertadores encerrada", text:"Classificados para as oitavas de final definidos."});
+}
+function currentLibKORound(){ return ST.libertadoresCompleto.knockout[ST.libertadoresCompleto.phase]; }
+function advanceLibLeg(){
+  const round = currentLibKORound();
+  const legIndex = round.legIndex;
+  let pendingUser = null;
+  round.ties.forEach(tie=>{
+    const leg = tie.legs[legIndex];
+    if(leg.played) return;
+    if(tie.teamA===ST.teamId || tie.teamB===ST.teamId){ pendingUser = { ref:leg, tie }; }
+    else { const res = simFast(leg.home, leg.away); leg.hs=res.homeScore; leg.as=res.awayScore; leg.played=true; }
+  });
+  if(pendingUser){
+    goToMatchDay(pendingUser.ref, {type:"lib", phase:ST.libertadoresCompleto.phase, tieId:pendingUser.tie.id, legIndex});
+    return true;
+  }
+  finishLibLeg();
+  return false;
+}
+function finishLibLeg(){
+  const round = currentLibKORound();
+  if(round.legIndex===0){ round.legIndex = 1; return; }
+  const rng = E.makeRNG(nextSeed());
+  let drawnUserTie = null;
+  round.ties.forEach(tie=>{
+    const l1=tie.legs[0], l2=tie.legs[1];
+    const aggA = l1.as + l2.hs;
+    const aggB = l1.hs + l2.as;
+    tie.aggA=aggA; tie.aggB=aggB;
+    const isUserTie = tie.teamA===ST.teamId || tie.teamB===ST.teamId;
+    if(aggA>aggB) tie.winner=tie.teamA;
+    else if(aggB>aggA) tie.winner=tie.teamB;
+    else if(isUserTie){ tie.wentToPens=true; drawnUserTie=tie; }
+    else { tie.wentToPens=true; tie.winner = rng()<0.5?tie.teamA:tie.teamB; }
+  });
+  if(drawnUserTie){
+    startShootout(drawnUserTie.teamA, drawnUserTie.teamB, {type:"libTie", tieId:drawnUserTie.id});
+    return;
+  }
+  const l = ST.libertadoresCompleto;
+  const userTie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
+  if(userTie){
+    if(userTie.winner===ST.teamId) payLibStagePrize(l.phase);
+    else if(!l.userEliminated){
+      l.userEliminated = true;
+      l.placementReached = stageLabelFor(l.phase);
+      ST.newsLog.unshift({title:"Eliminado na Libertadores", text:`O ${ST.teamId} caiu na ${stageLabelFor(l.phase)} da Libertadores ${l.year}. O torneio segue sem você.`});
+    }
+  }
+  progressLibBracket();
+}
+function progressLibBracket(){
+  const l = ST.libertadoresCompleto;
+  if(l.phase==="lib_r16"){
+    const r16 = l.knockout.lib_r16.ties;
+    const qfTies = [];
+    for(let half=0; half<2; half++){
+      const a = r16.find(t=>t.half===half && t.slot===0).winner;
+      const b = r16.find(t=>t.half===half && t.slot===1).winner;
+      const c = r16.find(t=>t.half===half && t.slot===2).winner;
+      const d = r16.find(t=>t.half===half && t.slot===3).winner;
+      qfTies.push(makeTie(a,b,half,0));
+      qfTies.push(makeTie(c,d,half,1));
+    }
+    l.knockout.lib_qf = { ties: qfTies, legIndex:0 };
+    l.phase = "lib_qf";
+    ST.newsLog.unshift({title:"Fim das oitavas da Libertadores", text:"Classificados para as quartas de final definidos."});
+  } else if(l.phase==="lib_qf"){
+    const qf = l.knockout.lib_qf.ties;
+    const sfTies = [];
+    for(let half=0; half<2; half++){
+      const a = qf.find(t=>t.half===half && t.slot===0).winner;
+      const b = qf.find(t=>t.half===half && t.slot===1).winner;
+      sfTies.push(makeTie(a,b,half,0));
+    }
+    l.knockout.lib_sf = { ties: sfTies, legIndex:0 };
+    l.phase = "lib_sf";
+    ST.newsLog.unshift({title:"Fim das quartas da Libertadores", text:"Semifinalistas definidos."});
+  } else if(l.phase==="lib_sf"){
+    const sf = l.knockout.lib_sf.ties;
+    const home = sf.find(t=>t.half===0).winner;
+    const away = sf.find(t=>t.half===1).winner;
+    l.knockout.lib_final = { home, away, played:false, hs:null, as:null };
+    l.phase = "lib_final";
+    ST.newsLog.unshift({title:"Final da Libertadores definida!", text:`${home} e ${away} disputarão o título da Libertadores ${l.year}.`});
+  }
+}
+function advanceLibFinalStep(){
+  const l = ST.libertadoresCompleto;
+  const f = l.knockout.lib_final;
+  if(f.home===ST.teamId || f.away===ST.teamId){
+    goToMatchDay(f, {type:"lib", phase:"lib_final"});
+    return true;
+  }
+  const res = simFast(f.home, f.away);
+  let hs=res.homeScore, as=res.awayScore;
+  if(hs===as){ const rng=E.makeRNG(nextSeed()); if(rng()<0.5) hs++; else as++; }
+  f.hs=hs; f.as=as; f.played=true;
+  l.champion = hs>as ? f.home : f.away;
+  l.phase = "lib_done";
+  if(l.champion===ST.teamId) payLibStagePrize("lib_final");
+  ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${l.champion} conquista a Libertadores ${l.year}.`});
+  return false;
+}
+// called from advanceBrasileiraoStep() every round — same pacing idea as tickSulamericana().
+// Never fires the same season as tickSulamericana() for the user's own club: the Libertadores
+// and Sul-Americana zones computed by computeNextSeasonZones() are always disjoint, so a given
+// club is eligible for at most one of ST.libertadoresCompleto / ST.sulamericana in any season.
+function tickLibertadoresCompleto(){
+  const l = ST.libertadoresCompleto;
+  if(!l || l.phase==="lib_done") return false;
+  if(l.roundsUntilNextLeg>0){ l.roundsUntilNextLeg--; return false; }
+  l.roundsUntilNextLeg = 2;
+  if(l.phase==="lib_groups") return advanceLibGroupRound();
+  if(l.phase==="lib_final") return advanceLibFinalStep();
+  return advanceLibLeg();
+}
+// mirrors sulaPendingUserMatch() — previews the Libertadores fixture instead of the Brasileirão
+// one whenever it's the match actually coming up next on the calendar.
+function libPendingUserMatch(){
+  const l = ST.libertadoresCompleto;
+  if(!l || l.userEliminated || l.phase==="lib_done" || l.roundsUntilNextLeg>0) return null;
+  if(l.phase==="lib_groups"){
+    const g = libUserGroup();
+    const round = l.groupFixtures[g][l.currentRound];
+    if(!round) return null;
+    const m = round.find(x=>x.home===ST.teamId||x.away===ST.teamId);
+    if(!m || m.played) return null;
+    return {home:m.home, away:m.away, label:`Libertadores ${l.year} · Fase de Grupos · Rodada ${l.currentRound+1}/6`, compType:"libertadores"};
+  }
+  if(l.phase==="lib_final"){
+    const f = l.knockout.lib_final;
+    if(f.played || (f.home!==ST.teamId && f.away!==ST.teamId)) return null;
+    return {home:f.home, away:f.away, label:`Libertadores ${l.year} · Final · Jogo único`, compType:"libertadores"};
+  }
+  const round = l.knockout[l.phase];
+  const tie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
+  if(!tie) return null;
+  const leg = tie.legs[round.legIndex];
+  if(leg.played) return null;
+  return {home:leg.home, away:leg.away, label:`${stageLabelFor(l.phase)} · Jogo de ${round.legIndex===0?'ida':'volta'}`, compType:"libertadores"};
+}
+
 function advanceFinalStep(){
   decrementAvailability();
   const comp = ST.competition;
@@ -3068,6 +3382,23 @@ function finishPendingMatch(){
       ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${s.champion} conquista a Sul-Americana ${s.year}.`});
     } else {
       finishSulaLeg();
+    }
+  } else if(ctx.type==="lib"){
+    if(ctx.phase==="lib_groups"){
+      finishLibGroupRound();
+    } else if(ctx.phase==="lib_final"){
+      const f = pm.ref;
+      if(f.hs===f.as){
+        startShootout(f.home, f.away, {type:"libFinal"});
+        return;
+      }
+      const l = ST.libertadoresCompleto;
+      l.champion = f.hs>f.as ? f.home : f.away;
+      l.phase = "lib_done";
+      if(l.champion===ST.teamId) payLibStagePrize("lib_final");
+      ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${l.champion} conquista a Libertadores ${l.year}.`});
+    } else {
+      finishLibLeg();
     }
   } else if(ctx.type==="group"){
     finishGroupRound();
@@ -4520,6 +4851,8 @@ function getNextUserBrasaMatch(){
   if(copaPreview) return copaPreview;
   const sulaPreview = sulaPendingUserMatch();
   if(sulaPreview) return sulaPreview;
+  const libPreview = libPendingUserMatch();
+  if(libPreview) return libPreview;
   const b = ST.brasileirao;
   if(!b || b.currentRound>=b.rounds.length) return null;
   const round = b.rounds[b.currentRound];
@@ -4653,7 +4986,7 @@ function renderNextMatchCard(compact){
        </div>
        ${timeConfigBtn}`
     : `${renderCalendarStrip(oppName, nm.compType)}
-       ${nm.compType==="copa"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">Copa do Brasil</div>':nm.compType==="sulamericana"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">CONMEBOL Sul-Americana</div>':''}
+       ${nm.compType==="copa"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">Copa do Brasil</div>':nm.compType==="sulamericana"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">CONMEBOL Sul-Americana</div>':nm.compType==="libertadores"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">CONMEBOL Libertadores</div>':''}
        <div class="tac dim small mt8">Próximo jogo em ${days} dia${days===1?"":"s"}</div>
        <div class="btn-row center ${compact?'mt8':'mt16'}">
          <button class="btn btn-gold ${compact?'':'btn-lg'}" onclick="Game.advanceDay()">AVANÇAR DIA</button>
@@ -4867,11 +5200,15 @@ function renderBrasileiraoCompeticaoTab(){
   const sulaUp = !!sulaPendingUserMatch();
   const s = ST.sulamericana;
   const showSulaPanel = !!s && !s.userEliminated && (sulaUp || s.phase==="sula_final" || s.phase==="sula_done");
-  if(showCopaBracket || showSulaPanel){
-    /* avançar keeps its usual compact top-left spot; each competition panel needs real width to lay out without scrolling sideways, so each gets its own full-width row right below avançar (grid auto-placement just leaves row 1's other half blank) — stacked one after another if both a Copa and a Sul-Americana campaign are live at once; e-mails/contratações close out the page in one more row. */
+  const libUp = !!libPendingUserMatch();
+  const l = ST.libertadoresCompleto;
+  const showLibPanel = !!l && !l.userEliminated && (libUp || l.phase==="lib_final" || l.phase==="lib_done");
+  if(showCopaBracket || showSulaPanel || showLibPanel){
+    /* avançar keeps its usual compact top-left spot; each competition panel needs real width to lay out without scrolling sideways, so each gets its own full-width row right below avançar (grid auto-placement just leaves row 1's other half blank) — stacked one after another if more than one campaign is live at once (Copa always can be; at most one of Sul-Americana/Libertadores ever is, since a club never qualifies for both in the same season); e-mails/contratações close out the page in one more row. */
     const panels = [];
     if(showCopaBracket) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>`);
     if(showSulaPanel) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(s.phase))} ${s.year}</div>${renderSulaCompetitionPanel()}</div>`);
+    if(showLibPanel) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(l.phase))} ${l.year}</div>${renderLibCompletoCompetitionPanel()}</div>`);
     const cells = `<div class="competicao-cell">${renderNextMatchCard(true)}</div>`
       + panels.map(p=>`<div class="competicao-cell" style="grid-column:1 / -1;">${p}</div>`).join("")
       + `<div class="competicao-cell">${renderLatestEmailCard()}</div>` + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`;
@@ -5233,6 +5570,48 @@ function renderSulaCompetitionPanel(){
     <div class="bracket-center-col">
       <div class="bracket-round-label gold">Final</div>
       ${competitionTrophyImg("sulamericana", 54, champion?1:0.45)}
+      ${finalBox}
+      ${champion?`<div class="gold bold tiny tac mt8">CAMPEÃO</div>`:''}
+    </div>
+    <div class="bracket-side right">${bracketHalfHtml(comp,1)}</div>
+  </div>`;
+}
+// same idea, for the Modo Completo Libertadores campaign — identical shape to renderSulaCompetitionPanel(),
+// just reading ST.libertadoresCompleto and its own "lib_"-prefixed phases/trophy.
+function renderLibCompletoCompetitionPanel(){
+  const l = ST.libertadoresCompleto;
+  if(l.phase==="lib_groups"){
+    const g = libUserGroup();
+    const standings = libGroupStandingsFor(g);
+    return `<div class="faint tiny uc mb8">Grupo ${g} — Rodada ${Math.min(l.currentRound+1,6)}/6</div>${renderStandingsTable(standings)}`;
+  }
+  if(l.phase==="lib_done"){
+    return `<div class="row" style="align-items:center;gap:10px;">
+      ${clubCrestImg(l.champion,32,null)}
+      <div><div class="faint tiny uc">Campeão</div><div class="bold gold">${esc(l.champion)}</div></div>
+    </div>`;
+  }
+  const comp = { knockout: { r16: l.knockout.lib_r16, qf: l.knockout.lib_qf, sf: l.knockout.lib_sf, final: l.knockout.lib_final } };
+  const finalTie = effectiveFinal(comp);
+  const finalIsUser = finalTie.home===ST.teamId || finalTie.away===ST.teamId;
+  const champion = (l.phase==="lib_final" && finalTie.played) ? (finalTie.hs>finalTie.as?finalTie.home:finalTie.away) : null;
+  const finalBox = `<div class="bm ${finalIsUser?'user-tie':''}">
+    <div class="bm-row ${champion&&champion===finalTie.home?'winner':''} ${!finalTie.home?'tbd':''}">
+      <span class="bm-crest">${crestMini(finalTie.home)}</span>
+      <span class="bm-name">${finalTie.home?esc(finalTie.home):'A definir'}</span>
+      <span class="bm-score">${finalTie.played?finalTie.hs:'-'}</span>
+    </div>
+    <div class="bm-row ${champion&&champion===finalTie.away?'winner':''} ${!finalTie.away?'tbd':''}">
+      <span class="bm-crest">${crestMini(finalTie.away)}</span>
+      <span class="bm-name">${finalTie.away?esc(finalTie.away):'A definir'}</span>
+      <span class="bm-score">${finalTie.played?finalTie.as:'-'}</span>
+    </div>
+  </div>`;
+  return `<div class="bracket-wrap">
+    <div class="bracket-side left">${bracketHalfHtml(comp,0)}</div>
+    <div class="bracket-center-col">
+      <div class="bracket-round-label gold">Final</div>
+      ${competitionTrophyImg("libertadores", 54, champion?1:0.45)}
       ${finalBox}
       ${champion?`<div class="gold bold tiny tac mt8">CAMPEÃO</div>`:''}
     </div>
@@ -5863,8 +6242,8 @@ function eventText(ev, homeName, awayName){
 function renderMatch(){
   const pm = ST.pendingMatch;
   const home = pm.ref.home, away = pm.ref.away;
-  const stageLblType = (pm.context.type==="copa"||pm.context.type==="sula") ? pm.context.phase : pm.context.type;
-  const stageLbl = stageLabelFor(stageLblType) + (pm.context.legIndex!=null ? ` — jogo de ${pm.context.legIndex===0?'ida':'volta'}` : ((stageLblType==="final"||stageLblType==="copa_final"||stageLblType==="sula_final"||String(stageLblType).indexOf("prelib_")===0)?" — jogo único":""));
+  const stageLblType = (pm.context.type==="copa"||pm.context.type==="sula"||pm.context.type==="lib") ? pm.context.phase : pm.context.type;
+  const stageLbl = stageLabelFor(stageLblType) + (pm.context.legIndex!=null ? ` — jogo de ${pm.context.legIndex===0?'ida':'volta'}` : ((stageLblType==="final"||stageLblType==="copa_final"||stageLblType==="sula_final"||stageLblType==="lib_final"||String(stageLblType).indexOf("prelib_")===0)?" — jogo único":""));
   if(!pm.result){
     const lp = lineupPlayers();
     const missing = lp.filter(p=>!p).length;
@@ -6373,6 +6752,7 @@ function renderSeasonEndScreen(){
       </div>
       ${ST.copaDoBrasil && ST.copaDoBrasil.champion ? `<div class="faint tiny uc mt12">Campeão da Copa do Brasil ${ST.copaDoBrasil.year}</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(ST.copaDoBrasil.champion,20,null)}<span class="bold gold">${esc(ST.copaDoBrasil.champion)}</span></div>` : ""}
       ${ST.sulamericana && ST.sulamericana.champion ? `<div class="faint tiny uc mt12">Campeão da Sul-Americana ${ST.sulamericana.year}</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(ST.sulamericana.champion,20,null)}<span class="bold gold">${esc(ST.sulamericana.champion)}</span></div>` : ""}
+      ${ST.libertadoresCompleto && ST.libertadoresCompleto.champion ? `<div class="faint tiny uc mt12">Campeão da Libertadores ${ST.libertadoresCompleto.year}</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(ST.libertadoresCompleto.champion,20,null)}<span class="bold gold">${esc(ST.libertadoresCompleto.champion)}</span></div>` : ""}
     </div>` : ""}
     ${s.zones ? `<div class="panel mt16" style="max-width:420px;">
       <div class="panel-title">Classificados para ${ST.seasonYear}</div>
