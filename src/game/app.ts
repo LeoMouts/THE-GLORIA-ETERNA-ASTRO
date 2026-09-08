@@ -4485,15 +4485,7 @@ function renderBrasileiraoCompeticaoTab(){
   const cb = ST.copaDoBrasil;
   const showBracket = copaUp || (cb && (cb.phase==="copa_final" || cb.phase==="copa_done"));
   if(showBracket){
-    // the bracket tree needs real width to lay out without scrolling sideways — give it the
-    // whole row instead of squeezing it into a half-width column, and put avançar/e-mails/
-    // contratações in a row underneath instead of stacked, so nothing needs to scroll either.
-    const bracketPanel = `<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>`;
-    const cells = `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>`
-      + `<div class="competicao-cell">${renderNextMatchCard(true)}</div>`
-      + `<div class="competicao-cell">${renderLatestEmailCard()}</div>`
-      + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`;
-    return `<div class="competicao-grid competicao-grid-3">${cells}</div>`;
+    /* avançar keeps its usual compact top-left spot; the bracket tree needs real width to lay out without scrolling sideways, so it gets its own full-width row right below avançar (grid auto-placement just leaves row 1's other half blank); e-mails/contratações close out the page in one more row. */ const bracketPanel = `<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>`; const cells = `<div class="competicao-cell">${renderNextMatchCard(true)}</div>` + `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>` + `<div class="competicao-cell">${renderLatestEmailCard()}</div>` + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`; return `<div class="competicao-grid">${cells}</div>`;
   }
   // avançar (compact) top-left, e-mails + contratações below it; the Série A table (top 10)
   // fills the whole right column. Artilheiros/assistências moved to the Desempenho tab (top 25
