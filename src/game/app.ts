@@ -4050,12 +4050,14 @@ function renderHub(){
       <button class="btn btn-ghost btn-sm" onclick="Game.goHome()" title="Voltar ao menu principal">Início</button>
     </div>
   </div>
+  ${renderNextMatchCard()}
   <div class="tabs">
     ${tabBtn("competicao","Competição")}
     ${tabBtn("elenco","Elenco")}
     ${tabBtn("transfers","Transferências")}
     ${tabBtn("scout","Olheiro")}
     ${tabBtn("email",iconEnvelope(13)+" E-mail"+(unreadMailCount()?` <span class="badge-mail">${unreadMailCount()}</span>`:""))}
+    ${ST.mode==="brasileirao"?tabBtn("desempenho","Desempenho"):""}
     ${tabBtn("clube","Meu Clube")}
   </div>
   <div class="tab-content">
@@ -4064,6 +4066,7 @@ function renderHub(){
     ${ST.hubTab==="transfers"?renderTransfersTab():""}
     ${ST.hubTab==="scout"?renderScoutTab():""}
     ${ST.hubTab==="email"?renderEmailTab():""}
+    ${ST.hubTab==="desempenho"?renderDesempenhoTab():""}
     ${ST.hubTab==="clube"?renderMeuClubeTab():""}
   </div>`;
 }
@@ -4210,48 +4213,46 @@ function renderTrainingBlock(){
     <div class="train-list mt16">${rows}</div>
     ${actions}`;
 }
+// lives in the persistent hub header now (below the club-info bar, above the tabs) — visible
+// no matter which tab is open, instead of eating space inside the Competição tab's own grid.
+// A training day still takes over the whole bar (full squad list), everything else is one
+// compact row: who's next, the AVANÇAR calendar strip, and the advance/simulate controls.
 function renderNextMatchCard(){
   const nm = getNextUserMatch();
   if(!nm) return "";
   ensureCalendarCountdown();
   const days = ST.calendarDaysLeft;
   const oppName = nm.home===ST.teamId ? nm.away : nm.home;
+  if(ST.trainingPending){
+    return `<div class="matchbar matchbar-expanded">${renderTrainingBlock()}</div>`;
+  }
+  const teamsBlock = `<div class="matchbar-teams">
+    <span class="matchbar-crest">${clubCrestImg(nm.home,30,null)}</span>
+    <span class="matchbar-x">×</span>
+    <span class="matchbar-crest">${clubCrestImg(nm.away,30,null)}</span>
+    <span class="matchbar-label">${esc(nm.label)}</span>
+  </div>`;
   // match day itself drops the calendar entirely and goes back to exactly how this card
   // worked before AVANÇAR DIA existed: simulate straight away, at whatever pace/speed.
-  const actionBlock = ST.trainingPending
-    ? renderTrainingBlock()
-    : days<=0
-    ? `<div class="gold bold uc tac mt16" style="letter-spacing:.06em;">⚽ Dia do jogo!</div>
-       <div class="btn-row center mt16">
-         <button class="btn btn-gold" onclick="Game.advanceSlow()">▶ Simulação Lenta</button>
-         <button class="btn" onclick="Game.advanceFast()">⏭ Ir para o Resultado</button>
-       </div>
-       <div class="btn-row center mt8">
-         <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
-       </div>`
-    : `${renderCalendarStrip(oppName, nm.compType)}
-       ${nm.compType==="copa"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">Copa do Brasil</div>':''}
-       <div class="tac dim small mt8">Próximo jogo em ${days} dia${days===1?"":"s"}</div>
-       <div class="btn-row center mt16">
-         <button class="btn btn-gold btn-lg" onclick="Game.advanceDay()">AVANÇAR DIA</button>
-       </div>
-       <div class="btn-row center mt8">
-         <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
-       </div>`;
-  return `<div class="panel" style="text-align:center;">
-    <div class="faint tiny uc mb12">${esc(nm.label)}</div>
-    <div class="row center" style="gap:28px;">
-      <div style="width:90px;">
-        <div style="width:64px;height:auto;margin:0 auto;">${clubCrestImg(nm.home,64,null)}</div>
-        <div class="bold small mt8">${esc(nm.home)}</div>
+  if(days<=0){
+    return `<div class="matchbar">
+      ${teamsBlock}
+      <div class="matchbar-action">
+        <span class="gold bold uc tiny" style="letter-spacing:.06em;">⚽ Dia do jogo!</span>
+        <button class="btn btn-gold btn-sm" onclick="Game.advanceSlow()">▶ Lenta</button>
+        <button class="btn btn-sm" onclick="Game.advanceFast()">⏭ Resultado</button>
+        <button class="btn btn-sm btn-ghost" onclick="Game.openTimeConfig()" title="Configuração de tempo">⏱</button>
       </div>
-      <div class="faint" style="font-family:var(--font-display);font-size:22px;font-weight:800;">VS</div>
-      <div style="width:90px;">
-        <div style="width:64px;height:auto;margin:0 auto;">${clubCrestImg(nm.away,64,null)}</div>
-        <div class="bold small mt8">${esc(nm.away)}</div>
-      </div>
+    </div>`;
+  }
+  return `<div class="matchbar">
+    ${teamsBlock}
+    ${renderCalendarStrip(oppName, nm.compType)}
+    <div class="matchbar-action">
+      <span class="dim tiny">Próximo jogo em ${days}d</span>
+      <button class="btn btn-gold btn-sm" onclick="Game.advanceDay()">AVANÇAR DIA</button>
+      <button class="btn btn-sm btn-ghost" onclick="Game.openTimeConfig()" title="Configuração de tempo">⏱</button>
     </div>
-    ${actionBlock}
   </div>`;
 }
 // the Pré-Libertadores flavor of the Competição tab: same "próximo jogo" card (with its
@@ -4259,7 +4260,6 @@ function renderNextMatchCard(){
 // group table, plus whatever status the run is currently in.
 function renderPreLibCompeticaoTab(){
   const p = ST.prelib;
-  const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
   const bracketPanel = `<div class="panel"><div class="panel-title">🏆 Pré-Libertadores ${p.year}</div>${renderPreLibBracketColumns(p)}</div>`;
 
   let statusPanel;
@@ -4274,8 +4274,7 @@ function renderPreLibCompeticaoTab(){
     statusPanel = renderTopScorers();
   }
 
-  const cells = matchCell
-    + `<div class="competicao-cell">${statusPanel}</div>`
+  const cells = `<div class="competicao-cell" style="grid-column:1 / -1;">${statusPanel}</div>`
     + `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>`;
   return `<div class="competicao-grid">${cells}</div>`;
 }
@@ -4331,31 +4330,41 @@ function brasaZoneClass(pos){
   if(pos>=17) return "brasa-zone-rebaixamento";
   return "";
 }
-function renderBrasaTable(rows){
+// opts.cap: show only the top N rows (Competição tab's compact view) with a fade + a "ver
+// tabela completa" shortcut into the Desempenho tab — if the user's own club falls outside
+// that cut, its row gets pinned right below the fade instead of just vanishing off-screen.
+function renderBrasaTable(rows, opts){
+  opts = opts || {};
+  const cap = opts.cap;
+  const capped = !!(cap && rows.length>cap);
+  const shown = capped ? rows.slice(0, cap) : rows;
+  const userIdx = rows.findIndex(r=>r.team===ST.teamId);
+  const pinnedUser = capped && userIdx>=cap ? {row:rows[userIdx], pos:userIdx+1} : null;
+  const rowHtml = (r,pos)=>`<tr class="${brasaZoneClass(pos)} ${r.team===ST.teamId?'brasa-row-user':''}">
+    <td class="dim">${pos}</td>
+    <td class="bold"><span class="standings-team"><span class="standings-crest">${clubCrestImg(r.team,18,null)}</span><span>${esc(r.team)}</span>${r.team===ST.teamId?' <span class="brasa-you">(você)</span>':''}</span></td>
+    <td class="tac bold brasa-pts">${r.pts}</td>
+    <td class="tac">${r.played}</td><td class="tac">${r.w}</td><td class="tac">${r.d}</td><td class="tac">${r.l}</td>
+    <td class="tac">${r.gf}</td><td class="tac">${r.ga}</td><td class="tac">${r.gd>0?'+':''}${r.gd}</td>
+  </tr>`;
   return `<div class="brasa-table-card">
     <div class="brasa-table-head">
       <img src="/images/brasileirao-logo.png" alt="" class="brasa-logo" onerror="this.style.display='none';"/>
       <div class="brasa-table-title">Tabela Série A</div>
       <div class="brasa-table-sub">Brasileirão · ${ST.seasonYear}ª edição</div>
     </div>
-    <div class="scroll-x"><table class="data brasa-table">
-      <thead><tr>
-        <th>#</th><th>Time</th><th class="tac">P</th><th class="tac">J</th><th class="tac">V</th>
-        <th class="tac">E</th><th class="tac">D</th><th class="tac">GP</th><th class="tac">GC</th><th class="tac">SG</th>
-      </tr></thead>
-      <tbody>
-      ${rows.map((r,i)=>{
-        const pos = i+1;
-        return `<tr class="${brasaZoneClass(pos)} ${r.team===ST.teamId?'brasa-row-user':''}">
-          <td class="dim">${pos}</td>
-          <td class="bold"><span class="standings-team"><span class="standings-crest">${clubCrestImg(r.team,18,null)}</span><span>${esc(r.team)}</span>${r.team===ST.teamId?' <span class="brasa-you">(você)</span>':''}</span></td>
-          <td class="tac bold brasa-pts">${r.pts}</td>
-          <td class="tac">${r.played}</td><td class="tac">${r.w}</td><td class="tac">${r.d}</td><td class="tac">${r.l}</td>
-          <td class="tac">${r.gf}</td><td class="tac">${r.ga}</td><td class="tac">${r.gd>0?'+':''}${r.gd}</td>
-        </tr>`;
-      }).join("")}
-      </tbody>
-    </table></div>
+    <div class="brasa-table-scroll${capped?' is-capped':''}">
+      <div class="scroll-x"><table class="data brasa-table">
+        <thead><tr>
+          <th>#</th><th>Time</th><th class="tac">P</th><th class="tac">J</th><th class="tac">V</th>
+          <th class="tac">E</th><th class="tac">D</th><th class="tac">GP</th><th class="tac">GC</th><th class="tac">SG</th>
+        </tr></thead>
+        <tbody>${shown.map((r,i)=>rowHtml(r,i+1)).join("")}</tbody>
+      </table></div>
+      ${capped?'<div class="brasa-table-fade"></div>':''}
+    </div>
+    ${pinnedUser?`<div class="scroll-x"><table class="data brasa-table brasa-table-pinned"><tbody>${rowHtml(pinnedUser.row,pinnedUser.pos)}</tbody></table></div>`:''}
+    ${capped?`<div class="tac mt8"><button class="btn btn-sm btn-ghost" onclick="Game.setTab('desempenho')">Ver tabela completa →</button></div>`:''}
     <div class="brasa-legend">
       <span><i class="brasa-dot brasa-zone-liberta"></i> Libertadores</span>
       <span><i class="brasa-dot brasa-zone-sula"></i> Sul-Americana</span>
@@ -4417,9 +4426,11 @@ function renderCopaDoBrasilPanel(){
     ${round.ties.map(copaTieRow).join("")}
   </div>`;
 }
+// the "próximo jogo" card now lives in the persistent header (see renderNextMatchCard(),
+// wired into renderHub()) — this tab is left free for exactly what it's for: the tables of
+// whatever's actually happening, artilheiros, contratações and the latest e-mails, sized to
+// fit in one view. The full 20-team table + form guide moved to its own DESEMPENHO tab.
 function renderBrasileiraoCompeticaoTab(){
-  const b = ST.brasileirao;
-  const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
   const table = brasaSortedStandings();
   // when it's Copa time (a Copa match is what's actually coming up next — same condition that
   // paints the calendar square green), the Série A table gives way to the Copa chaveamento
@@ -4428,22 +4439,59 @@ function renderBrasileiraoCompeticaoTab(){
   const cb = ST.copaDoBrasil;
   const showBracket = copaUp || (cb && (cb.phase==="copa_final" || cb.phase==="copa_done"));
   const leftCol = `<div class="competicao-col">
-    ${matchCell}
-    <div class="competicao-cell">${renderCopaDoBrasilPanel()}</div>
-    <div class="competicao-cell">${renderLatestEmailCard()}</div>
     <div class="competicao-cell">${renderBrasaTopScorers()}</div>
+    <div class="competicao-cell">${renderLatestEmailCard()}</div>
     <div class="competicao-cell">${renderFabrizioRomanoCard()}</div>
   </div>`;
   const rightCol = `<div class="competicao-col">
-    <div class="competicao-cell">${showBracket ? `<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>` : renderBrasaTable(table)}</div>
+    <div class="competicao-cell">${showBracket ? `<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>` : renderBrasaTable(table, {cap:10})}</div>
   </div>`;
   return `<div class="competicao-grid">${leftCol}${rightCol}</div>`;
+}
+// last N rounds' results for a club, most recent first — read straight off the fixed
+// double round-robin schedule (ST.brasileirao.rounds), no separate history log needed.
+function brasaRecentForm(teamName, n){
+  const b = ST.brasileirao;
+  if(!b) return [];
+  const out = [];
+  const lastRound = Math.min(b.currentRound, b.rounds.length);
+  for(let r=0; r<lastRound; r++){
+    const m = b.rounds[r].find(x=>(x.home===teamName||x.away===teamName) && x.played);
+    if(!m) continue;
+    const isHome = m.home===teamName;
+    const gf = isHome?m.hs:m.as, ga = isHome?m.as:m.hs;
+    out.push({round:r+1, opp:isHome?m.away:m.home, home:isHome, gf, ga, res: gf>ga?"V":gf<ga?"D":"E"});
+  }
+  return out.slice(-n).reverse();
+}
+// full 20-team table + the user's recent form guide — everything the compact Competição
+// tab's capped table leaves out, one click away via "Ver tabela completa →".
+function renderDesempenhoTab(){
+  const table = brasaSortedStandings();
+  const form = brasaRecentForm(ST.teamId, 10);
+  const formPills = form.map(f=>`<span class="form-pill form-pill-${f.res.toLowerCase()}" title="${f.home?'vs.':'@'} ${esc(f.opp)} (${f.gf}-${f.ga})">${f.res}</span>`).join("")
+    || `<span class="faint tiny">Nenhuma partida disputada ainda nesta temporada.</span>`;
+  const formList = form.map(f=>`<div class="form-row">
+    <span class="form-row-res form-pill-${f.res.toLowerCase()}">${f.res}</span>
+    <span class="form-row-round faint tiny mono">R${f.round}</span>
+    <span class="form-row-opp">${f.home?'vs.':'@'} ${clubCrestImg(f.opp,16,null)}<span>${esc(f.opp)}</span></span>
+    <span class="form-row-score mono bold">${f.gf}-${f.ga}</span>
+  </div>`).join("");
+  return `<div class="desempenho-grid">
+    <div class="desempenho-col">
+      <div class="panel">
+        <div class="panel-title">Sequência recente — ${esc(ST.teamId)}</div>
+        <div class="form-pills">${formPills}</div>
+        <div class="form-list mt12">${formList}</div>
+      </div>
+    </div>
+    <div class="desempenho-col desempenho-col-wide">${renderBrasaTable(table)}</div>
+  </div>`;
 }
 function renderCompeticaoTab(){
   if(ST.prelib) return renderPreLibCompeticaoTab();
   if(ST.mode==="brasileirao") return renderBrasileiraoCompeticaoTab();
   const comp = ST.competition;
-  const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
   let cells;
   if(comp.phase==="groups"){
     const g = userGroup();
@@ -4456,7 +4504,6 @@ function renderCompeticaoTab(){
     // E-mails" shortcut can sit exactly where it was asked for: right column, between the
     // group standings and the top scorers.
     const leftCol = `<div class="competicao-col">
-      ${matchCell}
       <div class="competicao-cell">${renderUpcomingFixtures(g)}</div>
     </div>`;
     const rightCol = `<div class="competicao-col">
@@ -4468,8 +4515,7 @@ function renderCompeticaoTab(){
     return `<div class="competicao-grid">${leftCol}${rightCol}</div>`;
   } else {
     const bracketPanel = `<div class="panel"><div class="panel-title">${phaseLabel(comp.phase)}</div>${renderKnockoutBracket()}</div>`;
-    cells = matchCell
-      + `<div class="competicao-cell">${renderTopScorers()}</div>`
+    cells = `<div class="competicao-cell">${renderTopScorers()}</div>`
       + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`
       + `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>`;
   }
