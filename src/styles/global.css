@@ -924,3 +924,34 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .romano-row-body{flex:1;min-width:0;}
 .romano-row-body .bold{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .romano-row-fee{flex:0 0 auto;font-size:12.5px;white-space:nowrap;}
+
+/* ---------------- BRASILEIRÃO — Série A table (Competição tab, Brasileirão career mode) ---------------- */
+.brasa-table-card{
+  background:linear-gradient(180deg,#0a1830,#0d2142);
+  border:1px solid #1c3a63;
+  border-radius:var(--radius);
+  padding:16px;
+  color:#eaf2ff;
+}
+.brasa-table-head{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+.brasa-logo{width:34px;height:34px;object-fit:contain;flex:0 0 auto;}
+.brasa-table-title{font-family:var(--font-display);text-transform:uppercase;font-weight:900;font-size:20px;letter-spacing:.02em;color:#d4ff4d;}
+.brasa-table-sub{font-family:var(--font-mono);font-size:11px;color:#8fb0d9;letter-spacing:.04em;text-transform:uppercase;margin-left:auto;}
+.brasa-table-card table.brasa-table{color:#eaf2ff;}
+.brasa-table-card table th{
+  color:#8fb0d9;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.03em;border-bottom:1px solid #1c3a63;padding:6px 8px;text-align:left;
+}
+.brasa-table-card table td{padding:7px 8px;border-bottom:1px solid #132a4a;color:#eaf2ff;white-space:nowrap;}
+.brasa-table-card table tr:hover td{background:rgba(212,255,77,.04);}
+.brasa-table-card tr.brasa-zone-liberta td:first-child{box-shadow:inset 3px 0 0 #4ee14e;}
+.brasa-table-card tr.brasa-zone-sula td:first-child{box-shadow:inset 3px 0 0 #4e9bd6;}
+.brasa-table-card tr.brasa-zone-rebaixamento td:first-child{box-shadow:inset 3px 0 0 #e2453c;}
+.brasa-row-user td{background:rgba(212,255,77,.08);}
+.brasa-you{color:#d4ff4d;font-size:11px;font-weight:700;}
+.brasa-pts{color:#d4ff4d;}
+.brasa-legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:11px;color:#8fb0d9;}
+.brasa-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:1px;}
+.brasa-dot.brasa-zone-liberta{background:#4ee14e;}
+.brasa-dot.brasa-zone-sula{background:#4e9bd6;}
+.brasa-dot.brasa-zone-rebaixamento{background:#e2453c;}
