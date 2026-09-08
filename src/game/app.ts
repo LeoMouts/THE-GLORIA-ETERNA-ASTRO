@@ -3592,21 +3592,32 @@ function brasaTierOf(name){
 }
 function renderBrasaTeamSelect(){
   const sel = ST.tmpSelectedTeam;
-  const rows = SERIE_A_2026.slice().sort().map(name=>{
-    const tier = brasaTierOf(name);
-    const isSel = sel===name;
-    return `<div class="team-row ${isSel?'selected':''}" onclick="Game.pickBrasaTeam('${escJs(name)}')">
-      <span style="width:22px;display:inline-flex;">${clubCrestImg(name, 20, null)}</span>
-      <span class="team-name">${esc(name)}</span>
-      <span class="team-tier tier-${tier}">${tierLabel(tier)}</span>
-    </div>`;
+  // same visual shape as the Libertadores team-select (several short group-cards side by
+  // side in a grid, instead of one long scrolling list) — split alphabetically into 4 even
+  // columns since Brasileirão has no real "group" concept to split by.
+  const alpha = SERIE_A_2026.slice().sort();
+  const chunkSize = Math.ceil(alpha.length/4);
+  const chunks = [];
+  for(let i=0;i<alpha.length;i+=chunkSize) chunks.push(alpha.slice(i,i+chunkSize));
+  const groupCards = chunks.map(chunk=>{
+    const rows = chunk.map(name=>{
+      const tier = brasaTierOf(name);
+      const isSel = sel===name;
+      return `<div class="team-row ${isSel?'selected':''}" onclick="Game.pickBrasaTeam('${escJs(name)}')">
+        <span style="width:22px;display:inline-flex;">${clubCrestImg(name, 20, null)}</span>
+        <span class="team-name">${esc(name)}</span>
+        <span class="team-tier tier-${tier}">${tierLabel(tier)}</span>
+      </div>`;
+    }).join("");
+    const label = chunk[0][0]+"–"+chunk[chunk.length-1][0];
+    return `<div class="group-card"><div class="group-label">${label}</div>${rows}</div>`;
   }).join("");
   return `
   <div style="padding:26px 20px 10px;">
     <button class="btn btn-ghost btn-sm" onclick="Game.goHome()">← Voltar</button>
     <h2 class="panel-title" style="font-size:22px;margin-top:18px;">Escolha seu time — Brasileirão Série A 2026</h2>
-    <p class="dim small">Os 20 clubes da Série A 2026. Times com selo "Elite" e "Forte" partem favoritos — comandar um time modesto é mais desafiador, mas mais gratificante.</p>
-    <div class="group-grid"><div class="group-card">${rows}</div></div>
+    <p class="dim small">Os 20 clubes da Série A 2026, em ordem alfabética. Times com selo "Elite" e "Forte" partem favoritos — comandar um time modesto é mais desafiador, mas mais gratificante.</p>
+    <div class="group-grid">${groupCards}</div>
   </div>
   <div style="position:sticky;bottom:0;background:linear-gradient(180deg,transparent,rgba(8,16,14,.97) 30%);padding:22px 20px 26px;text-align:center;">
     <button class="btn btn-gold btn-lg" ${sel?"":"disabled"} onclick="Game.confirmBrasaTeam()">
@@ -3740,7 +3751,7 @@ function renderHub(){
   <div class="hub-header">
     <div class="hub-header-inner">
       <div class="club-chip">
-        <div class="club-badge" style="background:none;border:none;">${crestSVG(team.name, 40)}</div>
+        <div class="club-badge" style="background:none;border:none;">${clubCrestImg(team.name, 40, null)}</div>
         <div>
           <div class="bold" style="font-size:15px;">${esc(team.name)}</div>
           <div class="faint tiny">${team.flag} ${esc(team.country)} · ${ST.prelib ? `Pré-Libertadores ${ST.prelib.year}` : `Temporada ${ST.seasonYear} (${ST.seasonNum}/10)`}</div>
@@ -3842,7 +3853,7 @@ function renderCalendarStrip(oppName){
     const isMatchDay = i===days;
     const isTrainingDay = !isMatchDay && i===daysUntilTraining && daysUntilTraining>0 && daysUntilTraining<days;
     let icon = "";
-    if(isMatchDay) icon = crestSVG(oppName,20);
+    if(isMatchDay) icon = clubCrestImg(oppName,20,null);
     else if(isTrainingDay) icon = `<img src="${TRAINING_ICON}" alt="Treino" style="width:100%;height:100%;object-fit:contain;"/>`;
     cells += `<div class="cal-day${isMatchDay?' cal-day-match':''}${isTrainingDay?' cal-day-training':''}${i===0?' cal-day-today':''}">
       <div class="cal-day-label">${WEEKDAYS[wIdx]}</div>
@@ -3927,12 +3938,12 @@ function renderNextMatchCard(){
     <div class="faint tiny uc mb12">${esc(nm.label)}</div>
     <div class="row center" style="gap:28px;">
       <div style="width:90px;">
-        <div style="width:64px;height:auto;margin:0 auto;">${crestSVG(nm.home,64)}</div>
+        <div style="width:64px;height:auto;margin:0 auto;">${clubCrestImg(nm.home,64,null)}</div>
         <div class="bold small mt8">${esc(nm.home)}</div>
       </div>
       <div class="faint" style="font-family:var(--font-display);font-size:22px;font-weight:800;">VS</div>
       <div style="width:90px;">
-        <div style="width:64px;height:auto;margin:0 auto;">${crestSVG(nm.away,64)}</div>
+        <div style="width:64px;height:auto;margin:0 auto;">${clubCrestImg(nm.away,64,null)}</div>
         <div class="bold small mt8">${esc(nm.away)}</div>
       </div>
     </div>
@@ -4898,8 +4909,8 @@ function renderMomentumWave(wave, homeName, awayName, uptoMinute){
   return `<div class="panel-title" style="font-size:11px;margin-top:18px;">Fluxo da partida</div>
   <div class="momentum-wave-wrap">
     <div class="momentum-wave-crests">
-      <span title="${esc(homeName)}">${crestSVG(homeName,20)}</span>
-      <span title="${esc(awayName)}">${crestSVG(awayName,20)}</span>
+      <span title="${esc(homeName)}">${clubCrestImg(homeName,20,null)}</span>
+      <span title="${esc(awayName)}">${clubCrestImg(awayName,20,null)}</span>
     </div>
     <svg class="momentum-wave-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
       <line x1="0" y1="${midY}" x2="${W}" y2="${midY}" stroke="var(--line-strong)" stroke-width="1"/>
@@ -4943,12 +4954,12 @@ function renderMatch(){
       <div class="tac faint tiny uc mb8">${esc(stageLbl)}</div>
       <div class="scoreboard">
         <div class="score-side">
-          <span class="match-crest">${crestSVG(home,44)}</span>
+          <span class="match-crest">${clubCrestImg(home,44,null)}</span>
           <div class="bold" style="font-size:16px;">${esc(home)}</div>
         </div>
         <div class="score-num">VS</div>
         <div class="score-side">
-          <span class="match-crest">${crestSVG(away,44)}</span>
+          <span class="match-crest">${clubCrestImg(away,44,null)}</span>
           <div class="bold" style="font-size:16px;">${esc(away)}</div>
         </div>
       </div>
@@ -5034,7 +5045,7 @@ function renderMatch(){
     <div class="tac faint tiny uc mb8">${esc(stageLbl)}</div>
     <div class="scoreboard">
       <div class="score-side">
-        <span class="match-crest">${crestSVG(home,40)}</span>
+        <span class="match-crest">${clubCrestImg(home,40,null)}</span>
         <div class="bold" style="font-size:15px;">${esc(home)}</div>
       </div>
       <div>
@@ -5042,7 +5053,7 @@ function renderMatch(){
         <div class="score-min tac">${done? "FIM DE JOGO" : lastMin+"'"}</div>
       </div>
       <div class="score-side">
-        <span class="match-crest">${crestSVG(away,40)}</span>
+        <span class="match-crest">${clubCrestImg(away,40,null)}</span>
         <div class="bold" style="font-size:15px;">${esc(away)}</div>
       </div>
     </div>
@@ -5385,7 +5396,7 @@ function renderBuyOfferModal(m){
       <div class="contract-panel">
         <div class="contract-panel-header">Jogador</div>
         <div class="contract-crest-row">
-          ${isGlobal ? `<div style="font-size:28px;">🌍</div>` : `<div style="width:40px;">${crestSVG(clubName,40)}</div>`}
+          ${isGlobal ? `<div style="font-size:28px;">🌍</div>` : `<div style="width:40px;">${clubCrestImg(clubName,40,null)}</div>`}
           <div><div class="faint tiny uc">Time</div><div class="bold">${esc(clubName)}</div>${isGlobal?'<div class="faint tiny">Fora da Libertadores</div>':''}</div>
         </div>
         <div class="contract-kv"><span>Tipo de transferência</span><span>Comprar</span></div>
