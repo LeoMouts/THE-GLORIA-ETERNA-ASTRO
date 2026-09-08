@@ -211,7 +211,7 @@ const GLOBAL_TEAM_CRESTS = {
   "Wolfsburg":"wolfsburg", "Wolverhampton":"wolves",
   // the 4 of the 8 new Série A placeholder clubs (serieA.ts) with a real crest available —
   // Bragantino, Athletico-PR, Coritiba and Chapecoense already had one from earlier batches.
-  "Internacional":"internacional", "Bahia":"bahia", "Vitória":"vitoria-ba", "Remo":"remo",
+  "Internacional":"internacional", "Bahia":"bahia", "Vitória":"vitoria-ba", "Remo":"remo", /* Sul-Americana 2026 field (sulamericana.ts) — 19 of the 25 non-Brasileirão clubs have a real crest; the other 6 (Juventud, O'Higgins, Recoleta, Independiente Petrolero, Deportivo Riestra, Blooming) fall back to the usual initials badge. Olimpia, América de Cali, Tigre, Millonarios, San Lorenzo, Palestino, Audax Italiano and Barracas Central were already mapped above (foreign transfer-market clubs) — same real club, no need to repeat them. */ "Macará":"macara", "Alianza Atlético":"alianza-atletico", "Cienciano":"cienciano", "Puerto Cabello":"academia-puerto-cabello", "Boston River":"boston-river", "Deportivo Cuenca":"deportivo-cuenca", "Racing":"racing", "Caracas":"caracas-fc", "Montevideo City Torque":"montevideo-ct", "River Plate":"river", "Carabobo":"carabobo",
 };
 let _globalCrestSeq = 0;
 function clubCrestImg(clubName, size, playerName){
