@@ -1816,6 +1816,7 @@ function runSquadTraining(){
     // ceiling around 26-28 on its own) reads as a gradual, multi-season development arc instead.
     const youthBonus = p.age<=21 ? 0.6 : p.age<=25 ? 0.2 : 0;
     const gain = 1.1 + rng()*2.0 + youthBonus;
+    const fromOvr = p.ovr;
     p.trainProgress = (p.trainProgress||0) + gain;
     let leveledUp = false;
     while(p.trainProgress>=100 && p.ovr<p.pot){
@@ -1825,7 +1826,7 @@ function runSquadTraining(){
       leveledUp = true;
     }
     if(p.ovr>=p.pot) p.trainProgress = 0;
-    result[p.id] = {gain: Math.round(gain), leveledUp};
+    result[p.id] = {gain: Math.round(gain), leveledUp, fromOvr, toOvr:p.ovr, name:p.name, pos:p.pos};
   });
   ST.trainingResult = result;
   if(leveled.length){
@@ -4992,11 +4993,14 @@ function renderTrainingBlock(){
   }
   const squad = myTeam().players.slice().sort((a,b)=>b.ovr-a.ovr);
   const result = ST.trainingResult;
+  const leveledUpCards = result
+    ? Object.values(result).filter(r=>r.leveledUp).map((r,i)=>renderLevelUpCard(r.name, r.pos, r.fromOvr, r.toOvr, i*250)).join("")
+    : "";
   const rows = squad.map(p=>{
     const maxed = p.ovr>=p.pot;
     const prog = maxed ? 100 : Math.round(p.trainProgress||0);
     const r = result && result[p.id];
-    const delta = r && r.gain>0 ? `<span class="green bold train-delta${r.leveledUp?" train-delta-levelup":""}">+${r.gain}%${r.leveledUp?" ↑ SUBIU!":""}</span>` : "";
+    const delta = r && r.gain>0 ? `<span class="green bold train-delta">+${r.gain}%</span>` : "";
     return `<div class="train-row">
       <span class="train-name">${esc(p.name)} <span class="faint tiny">${p.pos}</span></span>
       <span class="train-bar-wrap"><span class="train-bar-fill${maxed?" train-bar-maxed":""}" style="width:${prog}%;"></span></span>
@@ -5017,8 +5021,26 @@ function renderTrainingBlock(){
     <p class="dim small tac mt8">${result
       ? "Treino concluído! Ganhos de hoje em verde — quem completou a barra subiu de overall."
       : "Simular o treino desenvolve o elenco aos poucos — cada jogador enche sua barra e sobe de overall (até o potencial). Pular o treino atrapalha o desenvolvimento e pode até custar potencial."}</p>
+    ${leveledUpCards ? `<div class="levelup-deck mt16">${leveledUpCards}</div>` : ""}
     <div class="train-list mt16">${rows}</div>
     ${actions}`;
+}
+// the "quadrado que sobe" level-up celebration: a card that rises in, a track bar that fills
+// left-to-right from the old OVR to the new one, and a "+N GER" that lands right after the bar
+// finishes — shared between the Dia de Treino result screen and the season-end Desenvolvimento
+// do Elenco panel, since both are fundamentally the same moment (a player just gained OVR).
+function renderLevelUpCard(name, pos, fromOvr, toOvr, delayMs){
+  delayMs = delayMs||0;
+  const gain = toOvr - fromOvr;
+  return `<div class="levelup-card" style="animation-delay:${delayMs}ms;">
+    <div class="levelup-name">${esc(name)} <span class="faint tiny">${esc(pos)}</span></div>
+    <div class="levelup-bar-track">
+      <span class="levelup-bar-num">${fromOvr}</span>
+      <span class="levelup-bar-rail"><span class="levelup-bar-fill" style="animation-delay:${delayMs+150}ms;"></span></span>
+      <span class="levelup-bar-num">${toOvr}</span>
+    </div>
+    <div class="levelup-plus" style="animation-delay:${delayMs+1350}ms;">+${gain} GER</div>
+  </div>`;
 }
 // the "próximo jogo" card — lives inside the Competição tab (below the tabs, part of its own
 // grid), not the persistent header. compact:true is the small square-ish version used in the
@@ -6831,20 +6853,21 @@ function renderSeasonEndScreen(){
 // (see .dev-row in global.css) so growth actually reads as a beat instead of a silent stat change.
 function renderDevelopmentReportPanel(dev){
   if(!dev || (!dev.leveledUp.length && !dev.retired.length)) return "";
-  const leveledUp = dev.leveledUp.slice().sort((a,b)=>(b.to-b.from)-(a.to-a.from)).slice(0,12);
-  const upRows = leveledUp.map((p,i)=>`<div class="dev-row dev-row-up" style="animation-delay:${i*70}ms;">
-    <span class="dev-row-icon">⬆</span>
-    <span class="dev-row-name">${esc(p.name)} <span class="faint tiny">${esc(p.pos)} · ${p.age} anos</span></span>
-    <span class="dev-row-ovr">${p.from} <span class="dev-row-arrow">→</span><span class="green">${p.to}</span></span>
-  </div>`).join("");
-  const retiredRows = dev.retired.map((p,i)=>`<div class="dev-row dev-row-retire" style="animation-delay:${(leveledUp.length+i)*70}ms;">
+  // the biggest jumps get the full rise-and-fill card treatment (capped at 6 so the screen isn't
+  // a wall of them); anyone else who leveled up this season still gets a quick, plain mention.
+  const sorted = dev.leveledUp.slice().sort((a,b)=>(b.to-b.from)-(a.to-a.from));
+  const cardPlayers = sorted.slice(0,6);
+  const restPlayers = sorted.slice(6);
+  const upCards = cardPlayers.map((p,i)=>renderLevelUpCard(p.name, p.pos, p.from, p.to, i*220)).join("");
+  const restLine = restPlayers.length ? `<p class="faint tiny mt8">${restPlayers.map(p=>`${esc(p.name)} (${p.from}→${p.to})`).join(", ")} também evoluíram.</p>` : "";
+  const retiredRows = dev.retired.map((p,i)=>`<div class="dev-row dev-row-retire" style="animation-delay:${i*70}ms;">
     <span class="dev-row-icon">👋</span>
     <span class="dev-row-name">${esc(p.name)} <span class="faint tiny">${esc(p.pos)} · ${p.age} anos</span></span>
     <span class="dev-row-ovr faint">aposentou-se · ${p.ovr} OVR</span>
   </div>`).join("");
   return `<div class="panel mt16" style="max-width:420px;">
     <div class="panel-title">Desenvolvimento do Elenco</div>
-    ${leveledUp.length?`<div class="faint tiny uc mt8">Evoluíram</div>${upRows}`:""}
+    ${cardPlayers.length?`<div class="faint tiny uc mb8">Evoluíram</div><div class="levelup-deck">${upCards}</div>${restLine}`:""}
     ${dev.retired.length?`<div class="faint tiny uc mt12">Aposentadorias</div>${retiredRows}`:""}
   </div>`;
 }
