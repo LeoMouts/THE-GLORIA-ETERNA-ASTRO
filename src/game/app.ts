@@ -1132,6 +1132,9 @@ async function initApp(){
   if(ST.stage==="copa_draw" && ST.copaDoBrasil && (ST.copaDoBrasil.drawRevealed||0)<16){
     startCopaDrawAnimation();
   }
+  if(ST.stage==="copa_qf_draw" && ST.copaDoBrasil && (ST.copaDoBrasil.qfDrawRevealed||0)<8){
+    startCopaQfDrawAnimation();
+  }
   // a reload mid-training-animation has no timer to resume — clear the flag rather than
   // leaving the screen stuck on the 3s "Treinando..." beat forever.
   if(ST.trainingAnimating) ST.trainingAnimating = false;
@@ -1375,7 +1378,7 @@ function stageLabelFor(type){
   return {group:"Fase de Grupos", r16:"Oitavas de Final", qf:"Quartas de Final", sf:"Semifinal", final:"Final",
     prelib_qf:"Pré-Libertadores — Quartas de Final", prelib_sf:"Pré-Libertadores — Semifinal", prelib_final:"Pré-Libertadores — Final",
     copa_r16:"Copa do Brasil — Oitavas de Final", copa_qf:"Copa do Brasil — Quartas de Final",
-    copa_sf:"Copa do Brasil — Semifinal", copa_final:"Copa do Brasil — Final",
+    copa_sf:"Copa do Brasil — Semifinal", copa_final:"Copa do Brasil — Final", copa_done:"Copa do Brasil — Encerrada",
     brasileirao:"Brasileirão"}[type] || type;
 }
 
@@ -2152,17 +2155,22 @@ function applyShootoutResult(ctx, winner){
     ST.stage = "hub"; ST.hubTab = "competicao";
     const cb = ST.copaDoBrasil;
     const userTie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
-    if(userTie && userTie.winner!==ST.teamId && !cb.userEliminated){
-      cb.userEliminated = true;
-      cb.placementReached = stageLabelFor(cb.phase);
-      ST.newsLog.unshift({title:"Eliminado na Copa do Brasil", text:`O ${ST.teamId} caiu na ${stageLabelFor(cb.phase)} da Copa do Brasil ${cb.year} nos pênaltis. O torneio segue sem você.`});
+    if(userTie){
+      if(userTie.winner===ST.teamId) payCopaStagePrize(cb.phase);
+      else if(!cb.userEliminated){
+        cb.userEliminated = true;
+        cb.placementReached = stageLabelFor(cb.phase);
+        ST.newsLog.unshift({title:"Eliminado na Copa do Brasil", text:`O ${ST.teamId} caiu na ${stageLabelFor(cb.phase)} da Copa do Brasil ${cb.year} nos pênaltis. O torneio segue sem você.`});
+      }
     }
     progressCopaBracket();
+    if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw();
   } else if(ctx.type==="copaFinal"){
     const cb = ST.copaDoBrasil;
     cb.champion = winner;
     cb.phase = "copa_done";
     ST.stage = "hub"; ST.hubTab = "competicao";
+    if(winner===ST.teamId) payCopaStagePrize("copa_final");
     ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${winner} conquista a Copa do Brasil ${cb.year} nos pênaltis.`});
   }
 }
@@ -2237,6 +2245,17 @@ function copaSeedTeams(){
   if(prevTable && prevTable.length>=16) return prevTable.slice(0,16);
   return SERIE_A_2026.filter(n=>!COPA_2026_EXCLUDED.has(n)); // safety net, shouldn't trigger
 }
+// prize money for REACHING each stage (paid once, the moment the user's tie/match is won) —
+// gradual, on top of whatever the Brasileirão table position pays at season's end.
+function copaPrizeForStage(stageJustWon){
+  return {copa_r16:900000, copa_qf:1600000, copa_sf:2800000, copa_final:5000000}[stageJustWon] || 0;
+}
+function payCopaStagePrize(stageJustWon){
+  const prize = copaPrizeForStage(stageJustWon);
+  if(!prize) return;
+  ST.budget += prize;
+  ST.newsLog.unshift({title:"Premiação da Copa do Brasil", text:`Classificação na ${stageLabelFor(stageJustWon)} rende ${fmtMoney(prize)} aos cofres do ${ST.teamId}.`});
+}
 function startCopaDoBrasil(){
   const teams = copaSeedTeams();
   const rng = E.makeRNG(nextSeed());
@@ -2251,6 +2270,7 @@ function startCopaDoBrasil(){
     userEliminated: false,
     placementReached: null,
     drawRevealed: 0,
+    pendingQfWinners: null,
     roundsUntilNextLeg: 3, // paces Copa legs out across the Brasileirão calendar, see advanceBrasileiraoStep()
   };
   if(ST.seasonYear>=2027){
@@ -2266,6 +2286,36 @@ function startCopaDrawAnimation(){
     if(ST.stage!=="copa_draw"){ clearInterval(drawTimer); drawTimer = null; return; }
     ST.copaDoBrasil.drawRevealed = (ST.copaDoBrasil.drawRevealed||0)+1;
     if(ST.copaDoBrasil.drawRevealed>=16){ clearInterval(drawTimer); drawTimer = null; }
+    render();
+  }, 550);
+}
+// the quarterfinal pairing is a FRESH random draw among the 8 oitavas winners (not fixed
+// bracket-slot progression like every round after it) — gets its own short animation, same
+// mechanics as the round-of-16 draw, just 4 confrontos instead of 8.
+function startCopaQfDraw(){
+  const cb = ST.copaDoBrasil;
+  const winners = cb.pendingQfWinners;
+  const rng = E.makeRNG(nextSeed());
+  const shuffled8 = shuffled(rng, winners);
+  const pairs = E.pairKnockout(shuffled8.map(n=>({name:n, country:"Brasil"})), rng);
+  const qfTies = pairs.map((pair,i)=>makeTie(pair[0].name, pair[1].name, i<2?0:1, i%2));
+  cb.knockout.copa_qf = { ties: qfTies, legIndex:0 };
+  cb.phase = "copa_qf";
+  cb.pendingQfWinners = null;
+  cb.qfDrawRevealed = 0;
+  if(ST.seasonYear>=2027){
+    ST.stage = "copa_qf_draw";
+    startCopaQfDrawAnimation();
+  } else {
+    ST.newsLog.unshift({title:"Quartas de final definidas", text:"Sorteio das quartas de final da Copa do Brasil realizado."});
+  }
+}
+function startCopaQfDrawAnimation(){
+  if(drawTimer){ clearInterval(drawTimer); drawTimer = null; }
+  drawTimer = setInterval(()=>{
+    if(ST.stage!=="copa_qf_draw"){ clearInterval(drawTimer); drawTimer = null; return; }
+    ST.copaDoBrasil.qfDrawRevealed = (ST.copaDoBrasil.qfDrawRevealed||0)+1;
+    if(ST.copaDoBrasil.qfDrawRevealed>=8){ clearInterval(drawTimer); drawTimer = null; }
     render();
   }, 550);
 }
@@ -2292,7 +2342,7 @@ function advanceCopaLeg(){
     return true; // a real match day was triggered — caller should stop and wait for it
   }
   finishCopaLeg();
-  return false;
+  return ST.stage==="copa_qf_draw"; // a mid-season QF draw also needs the caller to stop and wait
 }
 function finishCopaLeg(){
   const round = currentCopaRound();
@@ -2323,29 +2373,25 @@ function finishCopaLeg(){
   }
   const cb = ST.copaDoBrasil;
   const userTie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
-  if(userTie && userTie.winner!==ST.teamId && !cb.userEliminated){
-    cb.userEliminated = true;
-    cb.placementReached = stageLabelFor(cb.phase);
-    ST.newsLog.unshift({title:"Eliminado na Copa do Brasil", text:`O ${ST.teamId} caiu na ${stageLabelFor(cb.phase)} da Copa do Brasil ${cb.year}. O torneio segue sem você.`});
+  if(userTie){
+    if(userTie.winner===ST.teamId) payCopaStagePrize(cb.phase);
+    else if(!cb.userEliminated){
+      cb.userEliminated = true;
+      cb.placementReached = stageLabelFor(cb.phase);
+      ST.newsLog.unshift({title:"Eliminado na Copa do Brasil", text:`O ${ST.teamId} caiu na ${stageLabelFor(cb.phase)} da Copa do Brasil ${cb.year}. O torneio segue sem você.`});
+    }
   }
   progressCopaBracket();
+  if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw();
 }
 function progressCopaBracket(){
   const cb = ST.copaDoBrasil;
   if(cb.phase==="copa_r16"){
-    const r16 = cb.knockout.copa_r16.ties;
-    const qfTies = [];
-    for(let half=0; half<2; half++){
-      const a = r16.find(t=>t.half===half && t.slot===0).winner;
-      const b = r16.find(t=>t.half===half && t.slot===1).winner;
-      const c = r16.find(t=>t.half===half && t.slot===2).winner;
-      const d = r16.find(t=>t.half===half && t.slot===3).winner;
-      qfTies.push(makeTie(a,b,half,0));
-      qfTies.push(makeTie(c,d,half,1));
-    }
-    cb.knockout.copa_qf = { ties: qfTies, legIndex:0 };
-    cb.phase = "copa_qf";
-    ST.newsLog.unshift({title:"Fim das oitavas da Copa do Brasil", text:"Classificados para as quartas de final definidos."});
+    // NOT built here — the quarterfinal pairing is a fresh draw, resolved by startCopaQfDraw()
+    // right after this (see finishCopaLeg()). This phase is just a transient marker.
+    cb.pendingQfWinners = cb.knockout.copa_r16.ties.map(t=>t.winner);
+    cb.phase = "copa_qf_draw_pending";
+    ST.newsLog.unshift({title:"Fim das oitavas da Copa do Brasil", text:"Sorteio das quartas de final será realizado."});
   } else if(cb.phase==="copa_qf"){
     const qf = cb.knockout.copa_qf.ties;
     const sfTies = [];
@@ -2607,6 +2653,7 @@ function finishPendingMatch(){
       const cb = ST.copaDoBrasil;
       cb.champion = f.hs>f.as ? f.home : f.away;
       cb.phase = "copa_done";
+      if(cb.champion===ST.teamId) payCopaStagePrize("copa_final");
       ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${cb.champion} conquista a Copa do Brasil ${cb.year}.`});
     } else {
       finishCopaLeg();
@@ -3554,6 +3601,7 @@ function render(){
     else if(ST.stage==="season_end") html = renderSeasonEndScreen();
     else if(ST.stage==="group_draw") html = renderGroupDraw();
     else if(ST.stage==="copa_draw") html = renderCopaDraw();
+    else if(ST.stage==="copa_qf_draw") html = renderCopaQfDraw();
     else if(ST.stage==="job_offers") html = renderJobOffers();
     else if(ST.stage==="career_over") html = renderCareerOver();
     else if(ST.stage==="penaltyShootout") html = renderPenaltyShootoutScreen();
@@ -4035,12 +4083,33 @@ function getNextUserPrelibMatch(){
   const roundLabel = {qf:"Quartas de Final", sf:"Semifinal", final:"Final"}[p.phase] || p.phase;
   return {home:tie.home, away:tie.away, label:`Pré-Libertadores ${p.year} · ${roundLabel} · Jogo único`};
 }
+// if the very next AVANÇAR DIA is the one where tickCopaDoBrasil() actually fires (rather than
+// just counting down), and it would involve the user's own team, preview THAT instead of the
+// Brasileirão fixture — otherwise the opponent shown during the whole countdown wouldn't match
+// what actually plays out on match day, which is exactly what read as "bugged" before this.
+function copaPendingUserMatch(){
+  const cb = ST.copaDoBrasil;
+  if(!cb || cb.phase==="copa_done" || cb.roundsUntilNextLeg>0) return null;
+  if(cb.phase==="copa_final"){
+    const f = cb.knockout.copa_final;
+    if(f.played || (f.home!==ST.teamId && f.away!==ST.teamId)) return null;
+    return {home:f.home, away:f.away, label:`Copa do Brasil ${cb.year} · Final · Jogo único`, compType:"copa"};
+  }
+  const round = cb.knockout[cb.phase];
+  const tie = round.ties.find(t=>t.teamA===ST.teamId||t.teamB===ST.teamId);
+  if(!tie) return null;
+  const leg = tie.legs[round.legIndex];
+  if(leg.played) return null;
+  return {home:leg.home, away:leg.away, label:`${stageLabelFor(cb.phase)} · Jogo de ${round.legIndex===0?'ida':'volta'}`, compType:"copa"};
+}
 function getNextUserBrasaMatch(){
+  const copaPreview = copaPendingUserMatch();
+  if(copaPreview) return copaPreview;
   const b = ST.brasileirao;
   if(!b || b.currentRound>=b.rounds.length) return null;
   const round = b.rounds[b.currentRound];
   const m = round.find(x=>x.home===ST.teamId||x.away===ST.teamId);
-  return m ? {home:m.home, away:m.away, label:`Brasileirão · Rodada ${b.currentRound+1}/${b.rounds.length}`} : null;
+  return m ? {home:m.home, away:m.away, label:`Brasileirão · Rodada ${b.currentRound+1}/${b.rounds.length}`, compType:"brasileirao"} : null;
 }
 function getNextUserMatch(){
   if(ST.prelib) return getNextUserPrelibMatch();
@@ -4073,7 +4142,7 @@ function getNextUserMatch(){
 // caption line below it still says exactly how many days remain).
 // the match-day cell shows the actual opponent's crest (not a generic ball icon) — a tiny
 // preview of who's up, right on the calendar itself.
-function renderCalendarStrip(oppName){
+function renderCalendarStrip(oppName, compType){
   const days = ST.calendarDaysLeft;
   const todayIdx = ST.calendarWeekdayIdx;
   // how many more AVANÇAR DIA clicks until daysSinceTraining actually hits 2 and a training
@@ -4088,7 +4157,8 @@ function renderCalendarStrip(oppName){
     let icon = "";
     if(isMatchDay) icon = clubCrestImg(oppName,20,null);
     else if(isTrainingDay) icon = `<img src="${TRAINING_ICON}" alt="Treino" style="width:100%;height:100%;object-fit:contain;"/>`;
-    cells += `<div class="cal-day${isMatchDay?' cal-day-match':''}${isTrainingDay?' cal-day-training':''}${i===0?' cal-day-today':''}">
+    const matchClass = isMatchDay ? (compType==="copa" ? " cal-day-match cal-day-copa" : compType==="libertadores" ? " cal-day-match cal-day-liberta" : compType==="sulamericana" ? " cal-day-match cal-day-sula" : " cal-day-match") : "";
+    cells += `<div class="cal-day${matchClass}${isTrainingDay?' cal-day-training':''}${i===0?' cal-day-today':''}">
       <div class="cal-day-label">${WEEKDAYS[wIdx]}</div>
       <div class="cal-day-icon">${icon}</div>
     </div>`;
@@ -4159,7 +4229,8 @@ function renderNextMatchCard(){
        <div class="btn-row center mt8">
          <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
        </div>`
-    : `${renderCalendarStrip(oppName)}
+    : `${renderCalendarStrip(oppName, nm.compType)}
+       ${nm.compType==="copa"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">Copa do Brasil</div>':''}
        <div class="tac dim small mt8">Próximo jogo em ${days} dia${days===1?"":"s"}</div>
        <div class="btn-row center mt16">
          <button class="btn btn-gold btn-lg" onclick="Game.advanceDay()">AVANÇAR DIA</button>
@@ -4350,6 +4421,12 @@ function renderBrasileiraoCompeticaoTab(){
   const b = ST.brasileirao;
   const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
   const table = brasaSortedStandings();
+  // when it's Copa time (a Copa match is what's actually coming up next — same condition that
+  // paints the calendar square green), the Série A table gives way to the Copa chaveamento
+  // instead, so the bracket is what's front-and-center right when it matters.
+  const copaUp = !!copaPendingUserMatch();
+  const cb = ST.copaDoBrasil;
+  const showBracket = copaUp || (cb && (cb.phase==="copa_final" || cb.phase==="copa_done"));
   const leftCol = `<div class="competicao-col">
     ${matchCell}
     <div class="competicao-cell">${renderCopaDoBrasilPanel()}</div>
@@ -4358,7 +4435,7 @@ function renderBrasileiraoCompeticaoTab(){
     <div class="competicao-cell">${renderFabrizioRomanoCard()}</div>
   </div>`;
   const rightCol = `<div class="competicao-col">
-    <div class="competicao-cell">${renderBrasaTable(table)}</div>
+    <div class="competicao-cell">${showBracket ? `<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>` : renderBrasaTable(table)}</div>
   </div>`;
   return `<div class="competicao-grid">${leftCol}${rightCol}</div>`;
 }
@@ -4489,7 +4566,7 @@ function renderGroupFixtureList(g){
   </tbody></table></div>`;
 }
 function crestMini(name){
-  return name ? crestSVG(name,16) : `<span style="width:16px;height:18px;display:inline-block;background:#ffffff14;border-radius:3px;"></span>`;
+  return name ? clubCrestImg(name,16,null) : `<span style="width:16px;height:18px;display:inline-block;background:#ffffff14;border-radius:3px;"></span>`;
 }
 function bracketScoreDisplay(tie){
   if(!tie || !tie.legs) return {a:"-", b:"-"};
@@ -4566,6 +4643,38 @@ function renderKnockoutBracket(){
   const finalTie = effectiveFinal(comp);
   const finalIsUser = finalTie.home===ST.teamId || finalTie.away===ST.teamId;
   const champion = (comp.phase==="done" && finalTie.played) ? (finalTie.hs>finalTie.as?finalTie.home:finalTie.away) : null;
+  const finalBox = `<div class="bm ${finalIsUser?'user-tie':''}">
+    <div class="bm-row ${champion&&champion===finalTie.home?'winner':''} ${!finalTie.home?'tbd':''}">
+      <span class="bm-crest">${crestMini(finalTie.home)}</span>
+      <span class="bm-name">${finalTie.home?esc(finalTie.home):'A definir'}</span>
+      <span class="bm-score">${finalTie.played?finalTie.hs:'-'}</span>
+    </div>
+    <div class="bm-row ${champion&&champion===finalTie.away?'winner':''} ${!finalTie.away?'tbd':''}">
+      <span class="bm-crest">${crestMini(finalTie.away)}</span>
+      <span class="bm-name">${finalTie.away?esc(finalTie.away):'A definir'}</span>
+      <span class="bm-score">${finalTie.played?finalTie.as:'-'}</span>
+    </div>
+  </div>`;
+  return `<div class="bracket-wrap">
+    <div class="bracket-side left">${bracketHalfHtml(comp,0)}</div>
+    <div class="bracket-center-col">
+      <div class="bracket-round-label gold">Final</div>
+      ${trophyImg(54, champion?1:0.45)}
+      ${finalBox}
+      ${champion?`<div class="gold bold tiny tac mt8">CAMPEÃO</div>`:''}
+    </div>
+    <div class="bracket-side right">${bracketHalfHtml(comp,1)}</div>
+  </div>`;
+}
+// reuses the same bracket primitives as renderKnockoutBracket() above — the Copa do Brasil
+// knockout object just uses "copa_"-prefixed keys, so it's adapted into the {knockout:{r16,qf,sf,final}}
+// shape those primitives expect rather than duplicating the whole rendering path.
+function renderCopaBracket(){
+  const cb = ST.copaDoBrasil;
+  const comp = { knockout: { r16: cb.knockout.copa_r16, qf: cb.knockout.copa_qf, sf: cb.knockout.copa_sf, final: cb.knockout.copa_final } };
+  const finalTie = effectiveFinal(comp);
+  const finalIsUser = finalTie.home===ST.teamId || finalTie.away===ST.teamId;
+  const champion = (cb.phase==="copa_done" && finalTie.played) ? (finalTie.hs>finalTie.as?finalTie.home:finalTie.away) : null;
   const finalBox = `<div class="bm ${finalIsUser?'user-tie':''}">
     <div class="bm-row ${champion&&champion===finalTie.home?'winner':''} ${!finalTie.home?'tbd':''}">
       <span class="bm-crest">${crestMini(finalTie.home)}</span>
@@ -5782,6 +5891,47 @@ function renderCopaDraw(){
     </div>
   </div>`;
 }
+// the quarterfinal draw ceremony — same mechanics as renderCopaDraw() above but for the 4
+// confrontos pulled from the 8 round-of-16 winners (ST.copaDoBrasil.qfDrawRevealed drives it).
+function renderCopaQfDraw(){
+  const cb = ST.copaDoBrasil;
+  const ties = cb.knockout.copa_qf.ties;
+  const revealed = cb.qfDrawRevealed||0;
+  const done = revealed>=8;
+  const boxes = ties.map((tie,tIdx)=>{
+    const pairNames = [tie.teamB, tie.teamA];
+    const slots = pairNames.map((teamName, i)=>{
+      const step = tIdx*2 + i;
+      if(step>=revealed){
+        return `<div class="draw-slot draw-slot-empty"><span class="draw-slot-roll"></span></div>`;
+      }
+      const isUser = teamName===ST.teamId;
+      const isNew = step===revealed-1;
+      return `<div class="draw-slot${isNew?" draw-slot-reveal":""}${isUser?" draw-slot-user":""}">
+        <span class="draw-slot-crest">${clubCrestImg(teamName,20,null)}</span>
+        <span class="draw-slot-name">${esc(teamName)}</span>
+      </div>`;
+    }).join("");
+    return `<div class="draw-group">
+      <div class="draw-group-title">Confronto ${tIdx+1}</div>
+      ${slots}
+    </div>`;
+  }).join("");
+  return `${cornerWatermarks()}<div class="draw-screen">
+    <div class="draw-header">
+      <div class="draw-trophy">${trophyImg(90,1)}</div>
+      <div class="draw-title-badge">CBF</div>
+      <h1 class="draw-title">Copa do Brasil</h1>
+      <div class="draw-year">SORTEIO DAS QUARTAS DE FINAL · ${cb.year}</div>
+    </div>
+    <div class="draw-grid">${boxes}</div>
+    <div class="btn-row center mt24">
+      ${done
+        ? `<button class="btn btn-gold btn-lg" onclick="Game.finishCopaQfDraw()">Continuar →</button>`
+        : `<button class="btn btn-ghost" onclick="Game.skipCopaQfDraw()">Pular animação (SKIP)</button>`}
+    </div>
+  </div>`;
+}
 function renderGroupDraw(){
   const groups = ST.competition.groupsThisSeason;
   const revealed = ST.drawRevealed||0;
@@ -6262,6 +6412,16 @@ const Game = {
     render();
   },
   finishCopaDraw(){
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    scheduleSave();
+    render();
+  },
+  skipCopaQfDraw(){
+    if(drawTimer){ clearInterval(drawTimer); drawTimer = null; }
+    ST.copaDoBrasil.qfDrawRevealed = 8;
+    render();
+  },
+  finishCopaQfDraw(){
     ST.stage = "hub"; ST.hubTab = "competicao";
     scheduleSave();
     render();
