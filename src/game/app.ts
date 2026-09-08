@@ -6,7 +6,7 @@ import * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
 import { PRELIB_DATA } from "./prelib";
-import { SERIE_A_EXTRA_TEAMS } from "./serieA";
+import { SERIE_A_EXTRA_TEAMS, SERIE_A_2026 } from "./serieA";
 
 const GOAT_MASCOT_URI = "/images/image-1787868287812.webp";
 
@@ -447,6 +447,166 @@ function freshWorld(){
 }
 
 // ============================================================
+// BRASILEIRÃO — full 20-club Série A career (see serieA.ts). Rosters come from three different
+// places depending on which project phase first generated that club — 6 from the main
+// Libertadores world (DATA.teams), 6 from the Pré-Libertadores pool (PRELIB_DATA.teams), and 8
+// brand-new placeholder squads (SERIE_A_EXTRA_TEAMS) — this just needs to find whichever one
+// actually has a given club, transparently, everywhere else in the file.
+// ============================================================
+function serieATeamSource(name){
+  return DATA.teams[name] || PRELIB_DATA.teams[name] || SERIE_A_EXTRA_TEAMS[name] || null;
+}
+function freshBrasaWorld(){
+  const teams = {};
+  SERIE_A_2026.forEach(name=>{
+    const t = serieATeamSource(name);
+    if(!t) return; // shouldn't happen — SERIE_A_2026 is exactly the union of the 3 sources
+    const players = t.players.map(p=>Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0}));
+    let maxId = 0; players.forEach(p=>{ if(p.id>maxId) maxId=p.id; });
+    if(maxId>nextIdCounter) nextIdCounter = maxId;
+    teams[name] = { name, country:"Brasil", flag:"🇧🇷", group:null, source:t.source||"gen", players };
+  });
+  GLOBAL_MARKET_SRC.forEach(p=>{ if(p.id>nextIdCounter) nextIdCounter=p.id; });
+  return { groups:null, teams, globalMarket: GLOBAL_MARKET_SRC.map(p=>Object.assign({}, p)) };
+}
+// prize money by final league position — champion earns roughly what a season-long Libertadores
+// run pays out; last place still gets something (real broadcast-revenue floor), so a rough year
+// never fully wipes out next season's transfer budget.
+function brasaPrizeForPosition(pos){
+  const top = 24000000, bottom = 3500000;
+  const frac = (20-pos)/19;
+  return Math.round((bottom + (top-bottom)*frac)/50000)*50000;
+}
+function startBrasileiraoCareer(teamId, managerName){
+  ST.prelib = null;
+  ST.mode = "brasileirao";
+  ST.careerStats = {goals:{}, assists:{}, signings:[]};
+  ST.world = freshBrasaWorld();
+  ensureGlobalMarket();
+  ensurePrelibMarket();
+  ST.teamId = teamId;
+  ST.managerName = managerName || "Treinador";
+  ST.seasonNum = 1;
+  ST.seasonYear = 2026;
+  ST.reputation = 50;
+  ST.budget = 6000000;
+  ST.history = [];
+  ST.newsLog = [{title:"Bem-vindo!", text:`${ST.managerName} assume o comando do ${teamId} para a campanha de ${ST.seasonYear} do Brasileirão Série A.`}];
+  ST.stage = "hub";
+  ST.hubTab = "competicao";
+  ST.formation = "4-3-3";
+  ST.lineup = [];
+  ST.captainId = null;
+  ST.pendingMatch = null;
+  ST.uiModal = null;
+  ST.matchAnimIdx = 0;
+  ST.matchPlaying = false;
+  ST.matchClockMinute = 0;
+  ST.jobOffers = null;
+  ST.fired = false;
+  ST.underdogOffer = false;
+  ST.lastSeasonSummary = null;
+  ST.calendarDaysLeft = null;
+  ST.calendarWeekdayIdx = 1;
+  ST.inbox = [];
+  ST.mailSeq = 0;
+  ST.openMailId = null;
+  ST.scoutedFixtureKey = null;
+  ST.scoutLevel = 1;
+  ST.scoutReport = null;
+  ST.scoutReportETA = null;
+  ST.scoutSeason = 0;
+  ST.scoutLastReportMatchCount = 0;
+  ST.matchesPlayedTotal = 0;
+  ST.observationQueue = [];
+  ST.observedKeys = [];
+  ST.daysSinceTraining = 0;
+  ST.trainingPending = false;
+  ST.trainingResult = null;
+  ST.transferFeed = [];
+  ST.xferFilter = {pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null, mode:"buy", sort:"ovr", page:1};
+  const order = shuffled(E.makeRNG(nextSeed()), SERIE_A_2026);
+  ST.brasileirao = {
+    year: 2026,
+    rounds: E.doubleRoundRobin(order),
+    currentRound: 0,
+    standings: {},
+    scorers: {},
+  };
+  autoFillLineup();
+  scheduleSave();
+}
+function brasaSortedStandings(){
+  return E.sortedStandings(ST.brasileirao.standings, SERIE_A_2026);
+}
+// advances exactly one Brasileirão round per call — every AI-vs-AI game in the round is
+// simulated immediately, and if the user's own club has a fixture that round it's the only
+// thing that stops here (handed to the normal match screen); everything else plays through.
+function advanceBrasileiraoStep(){
+  const b = ST.brasileirao;
+  if(!b || b.currentRound>=b.rounds.length){ return; }
+  decrementAvailability();
+  const round = b.rounds[b.currentRound];
+  let pendingUser = null;
+  round.forEach(m=>{
+    if(m.played) return;
+    if(m.home===ST.teamId || m.away===ST.teamId){
+      pendingUser = m;
+    } else {
+      const res = simFast(m.home, m.away);
+      m.hs=res.homeScore; m.as=res.awayScore; m.played=true;
+      E.applyResultToStandings(b.standings, m.home, m.away, m.hs, m.as);
+    }
+  });
+  if(pendingUser){
+    goToMatchDay(pendingUser, {type:"brasileirao", round:b.currentRound});
+  } else {
+    finishBrasaRound();
+  }
+}
+function finishBrasaRound(){
+  const b = ST.brasileirao;
+  b.currentRound++;
+  if(b.currentRound>=b.rounds.length){
+    finalizeBrasaSeason();
+  }
+}
+// season wrap-up: prize money by final position, a news item, and — for now — a simplified,
+// narrative-only relegation/promotion note (the real Série B doesn't have squads in this game
+// yet, so nobody's roster actually changes hands; that's the next piece of this project).
+function finalizeBrasaSeason(){
+  const table = brasaSortedStandings();
+  const pos = table.findIndex(r=>r.team===ST.teamId)+1;
+  const prize = brasaPrizeForPosition(pos);
+  ST.budget += prize;
+  const champion = table[0].team;
+  const relegated = table.slice(16).map(r=>r.team);
+  ST.lastSeasonSummary = {
+    year: ST.seasonYear,
+    placement: pos===1 ? "Campeão" : `${pos}º lugar`,
+    repChange: pos<=6 ? 3 : pos<=12 ? 0 : -3,
+    isBrasileirao: true,
+    champion, relegated, position: pos,
+  };
+  ST.reputation = E.clamp(ST.reputation + ST.lastSeasonSummary.repChange, 5, 99);
+  ST.newsLog.unshift({title:"Fim de temporada — Brasileirão", text:`${champion} é o campeão. Você terminou em ${pos}º lugar e recebeu ${fmtMoney(prize)} em premiação.`});
+  ageWorld();
+  ST.stage = "season_end";
+  scheduleSave();
+}
+// next Série A season — fresh double round-robin, clean table. No real Série B squads exist in
+// this game yet, so relegation/promotion stays a news-item for now rather than an actual squad
+// swap; the same 20 clubs carry over season to season until that piece is built.
+function startNewBrasaSeason(){
+  ST.seasonYear++;
+  ST.seasonNum++;
+  const order = shuffled(E.makeRNG(nextSeed()), SERIE_A_2026);
+  ST.brasileirao = { year: ST.seasonYear, rounds: E.doubleRoundRobin(order), currentRound: 0, standings: {}, scorers: {} };
+  ST.stage = "hub";
+  ST.hubTab = "competicao";
+}
+
+// ============================================================
 // PRÉ-LIBERTADORES — quick 8-team knockout among Sul-Americana clubs. The player is stuck
 // with their chosen team until they win it (each failed attempt rolls the year forward).
 // Winning earns a Libertadores slot the following season, in place of whoever had the
@@ -865,6 +1025,8 @@ function newCareerState(){
     lineup:{},
     captainId:null,
     competition:null,
+    mode:"libertadores",
+    brasileirao:null,
     pendingMatch:null,
     transferAsking:{},
     scoutReport:null,
@@ -909,7 +1071,7 @@ function newCareerState(){
 }
 
 // stages with no committed data yet — never worth resuming straight into these on reload.
-const PRECOMMIT_STAGES = new Set(["team_select","manager_name","mode_select","prelib_select","prelib_manager_name"]);
+const PRECOMMIT_STAGES = new Set(["team_select","manager_name","mode_select","prelib_select","prelib_manager_name","brasa_team_select","brasa_manager_name"]);
 async function initApp(){
   const loaded = await loadState();
   if(loaded && loaded.schemaVersion===SCHEMA_VERSION){
@@ -992,6 +1154,8 @@ window.__forceReset__ = () => { resetCareer(); };
 function startCareer(teamId, managerName){
   ST.prelib = null; // a real career always fully replaces any in-progress Pré-Libertadores run —
   // without this, the hub keeps thinking it's still showing the Sul-Americana bracket.
+  ST.mode = "libertadores";
+  ST.brasileirao = null;
   ST.careerStats = {goals:{}, assists:{}, signings:[]};
   ST.world = freshWorld();
   ensureGlobalMarket();
@@ -1115,7 +1279,8 @@ function setupSeasonCompetition(){
 function addScorerGoal(teamName, playerId){
   const p = playerById(teamName, playerId);
   if(!p) return;
-  const scorers = ST.competition.scorers || (ST.competition.scorers = {});
+  const store = ST.mode==="brasileirao" ? ST.brasileirao : ST.competition;
+  const scorers = store.scorers || (store.scorers = {});
   const key = teamName+"#"+playerId;
   if(!scorers[key]) scorers[key] = {id:playerId, name:p.name, team:teamName, goals:0};
   scorers[key].goals++;
@@ -1312,7 +1477,7 @@ const SCOUT_OPENERS = [
 function maybeGenerateScoutMail(){
   const nm = getNextUserMatch();
   if(!nm || ST.calendarDaysLeft!==2) return;
-  const key = nm.home+"-"+nm.away+"-"+ST.seasonYear+"-"+(ST.competition&&ST.competition.phase)+"-"+(ST.prelib?ST.prelib.phase:"");
+  const key = nm.home+"-"+nm.away+"-"+ST.seasonYear+"-"+(ST.competition&&ST.competition.phase)+"-"+(ST.prelib?ST.prelib.phase:"")+"-"+(ST.mode==="brasileirao"?ST.brasileirao.currentRound:"");
   if(ST.scoutedFixtureKey===key) return;
   ST.scoutedFixtureKey = key;
   const oppName = nm.home===ST.teamId ? nm.away : nm.home;
@@ -1320,7 +1485,8 @@ function maybeGenerateScoutMail(){
   if(!opp) return;
   const rng = E.makeRNG(nextSeed());
   const best = opp.players.slice().sort((a,b)=>b.ovr-a.ovr)[0];
-  const topScorer = Object.values(ST.competition.scorers||{}).filter(s=>s.team===oppName).sort((a,b)=>b.goals-a.goals)[0];
+  const scorersStore = (ST.mode==="brasileirao" ? ST.brasileirao.scorers : ST.competition.scorers) || {};
+  const topScorer = Object.values(scorersStore).filter(s=>s.team===oppName).sort((a,b)=>b.goals-a.goals)[0];
   const avg = teamAvgOvr(opp);
   const lines = [
     SCOUT_OPENERS[Math.floor(rng()*SCOUT_OPENERS.length)],
@@ -1715,6 +1881,7 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
 
 // -- advance the tournament by one step (called from "Avançar" button) --
 function advanceTournament(){
+  if(ST.mode==="brasileirao"){ advanceBrasileiraoStep(); return; }
   if(ST.prelib){ stepPreLib(); return; }
   const comp = ST.competition;
   if(comp.phase==="groups") advanceGroupsStep();
@@ -2222,7 +2389,10 @@ function finishPendingMatch(){
   }
   ST.stage = "hub";
   ST.hubTab = "competicao";
-  if(ctx.type==="group"){
+  if(ctx.type==="brasileirao"){
+    E.applyResultToStandings(ST.brasileirao.standings, pm.ref.home, pm.ref.away, pm.ref.hs, pm.ref.as);
+    finishBrasaRound();
+  } else if(ctx.type==="group"){
     finishGroupRound();
   } else if(ctx.type==="final"){
     const f = ST.competition.knockout.final;
@@ -2727,6 +2897,7 @@ function stayAtCurrentJob(){
 }
 
 function continueFromSeasonEnd(){
+  if(ST.mode==="brasileirao"){ startNewBrasaSeason(); scheduleSave(); return; }
   maybeEnterGroupDraw();
   scheduleSave();
 }
@@ -2830,10 +3001,16 @@ const PRELIB_MARKET_TEAM_NAMES = Object.keys(PRELIB_DATA.teams).concat(Object.ke
 function ensurePrelibMarket(){
   if(!ST.world.prelibMarket){
     const out = [];
+    // in a Brasileirão career all 20 Série A clubs already have a REAL, AI-controlled roster
+    // in ST.world.teams (see freshBrasaWorld) — skip them here so their players don't also
+    // show up as a separate, duplicate-id "buy from the market" listing.
+    const skip = ST.mode==="brasileirao" ? new Set(SERIE_A_2026) : new Set();
     Object.values(PRELIB_DATA.teams).forEach(t=>{
+      if(skip.has(t.name)) return;
       t.players.forEach(p=> out.push(Object.assign({}, p, {club:t.name})));
     });
     Object.values(SERIE_A_EXTRA_TEAMS).forEach(t=>{
+      if(skip.has(t.name)) return;
       t.players.forEach(p=> out.push(Object.assign({}, p, {club:t.name})));
     });
     ST.world.prelibMarket = out;
@@ -3150,6 +3327,8 @@ function render(){
     else if(ST.stage==="mode_select") html = renderModeSelect();
     else if(ST.stage==="team_select") html = renderTeamSelect();
     else if(ST.stage==="manager_name") html = renderManagerName();
+    else if(ST.stage==="brasa_team_select") html = renderBrasaTeamSelect();
+    else if(ST.stage==="brasa_manager_name") html = renderBrasaManagerName();
     else if(ST.stage==="hub") html = renderHub();
     else if(ST.stage==="match") html = renderMatch();
     else if(ST.stage==="season_end") html = renderSeasonEndScreen();
@@ -3331,9 +3510,10 @@ function renderModeSelect(){
     <h1 class="hero-title" style="font-size:clamp(28px,6vw,48px);">ESCOLHA SEU CAMINHO</h1>
     <div class="mt24" style="display:flex;flex-direction:column;gap:14px;max-width:380px;width:100%;">
       <button class="btn btn-gold btn-lg" onclick="Game.chooseNormalCareer()">▶ Carreira Libertadores 2026</button>
+      <button class="btn btn-ghost btn-lg" onclick="Game.chooseBrasileiraoCareer()">⚽ Carreira Brasileirão 2026</button>
       <button class="btn btn-ghost btn-lg" onclick="Game.goPreLib()">🏆 Jogar Pré-Libertadores</button>
     </div>
-    <p class="dim small mt24" style="max-width:420px;">Carreira Libertadores: assuma um dos 32 clubes já classificados. Pré-Libertadores: dispute um mata-mata entre 8 clubes da Sul-Americana — vença e ganhe uma vaga direta na Libertadores do ano seguinte.</p>
+    <p class="dim small mt24" style="max-width:420px;">Carreira Libertadores: assuma um dos 32 clubes já classificados. Carreira Brasileirão: dispute os 38 jogos da Série A com um dos 20 clubes do campeonato nacional. Pré-Libertadores: dispute um mata-mata entre 8 clubes da Sul-Americana — vença e ganhe uma vaga direta na Libertadores do ano seguinte.</p>
   </div>`;
 }
 
@@ -3394,6 +3574,58 @@ function renderManagerName(){
     <input id="mgrNameInput" class="input-inline" style="max-width:320px;width:100%;padding:14px;font-size:16px;text-align:center;" placeholder="Seu nome" value="${esc(ST.tmpManagerNameInput||'')}" />
     <div class="mt24">
       <button class="btn btn-gold btn-lg" onclick="Game.beginCareer()">Assinar contrato e começar →</button>
+    </div>
+  </div>`;
+}
+
+// ---------------- BRASILEIRÃO TEAM SELECT ----------------
+function brasaTeamAvg(name){
+  const t = serieATeamSource(name);
+  const arr = t.players.map(p=>p.ovr);
+  return arr.reduce((a,b)=>a+b,0)/arr.length;
+}
+function brasaTierOf(name){
+  const ranked = SERIE_A_2026.slice().sort((a,b)=>brasaTeamAvg(b)-brasaTeamAvg(a));
+  const idx = ranked.indexOf(name);
+  const pct = idx/(ranked.length-1);
+  if(pct<0.16) return 5; if(pct<0.38) return 4; if(pct<0.62) return 3; if(pct<0.84) return 2; return 1;
+}
+function renderBrasaTeamSelect(){
+  const sel = ST.tmpSelectedTeam;
+  const rows = SERIE_A_2026.slice().sort().map(name=>{
+    const tier = brasaTierOf(name);
+    const isSel = sel===name;
+    return `<div class="team-row ${isSel?'selected':''}" onclick="Game.pickBrasaTeam('${escJs(name)}')">
+      <span style="width:22px;display:inline-flex;">${clubCrestImg(name, 20, null)}</span>
+      <span class="team-name">${esc(name)}</span>
+      <span class="team-tier tier-${tier}">${tierLabel(tier)}</span>
+    </div>`;
+  }).join("");
+  return `
+  <div style="padding:26px 20px 10px;">
+    <button class="btn btn-ghost btn-sm" onclick="Game.goHome()">← Voltar</button>
+    <h2 class="panel-title" style="font-size:22px;margin-top:18px;">Escolha seu time — Brasileirão Série A 2026</h2>
+    <p class="dim small">Os 20 clubes da Série A 2026. Times com selo "Elite" e "Forte" partem favoritos — comandar um time modesto é mais desafiador, mas mais gratificante.</p>
+    <div class="group-grid"><div class="group-card">${rows}</div></div>
+  </div>
+  <div style="position:sticky;bottom:0;background:linear-gradient(180deg,transparent,rgba(8,16,14,.97) 30%);padding:22px 20px 26px;text-align:center;">
+    <button class="btn btn-gold btn-lg" ${sel?"":"disabled"} onclick="Game.confirmBrasaTeam()">
+      ${sel? "Assumir o "+esc(sel)+" →" : "Selecione um time"}
+    </button>
+  </div>`;
+}
+function renderBrasaManagerName(){
+  const t = ST.tmpSelectedTeam;
+  return `
+  <div class="hero" style="min-height:80vh;">
+    <div style="align-self:flex-start;margin-left:20px;"><button class="btn btn-ghost btn-sm" onclick="Game.goHome()">Início</button></div>
+    <div style="margin-bottom:14px;">${clubCrestImg(t, 76, null)}</div>
+    <div class="hero-badge">🇧🇷 Brasileirão Série A 2026</div>
+    <h1 class="hero-title" style="font-size:clamp(30px,6vw,54px);">${esc(t)}</h1>
+    <p class="hero-sub">Como devemos chamar você, treinador(a)?</p>
+    <input id="mgrNameInput" class="input-inline" style="max-width:320px;width:100%;padding:14px;font-size:16px;text-align:center;" placeholder="Seu nome" value="${esc(ST.tmpManagerNameInput||'')}" />
+    <div class="mt24">
+      <button class="btn btn-gold btn-lg" onclick="Game.beginBrasaCareer()">Assinar contrato e começar →</button>
     </div>
   </div>`;
 }
@@ -3559,8 +3791,16 @@ function getNextUserPrelibMatch(){
   const roundLabel = {qf:"Quartas de Final", sf:"Semifinal", final:"Final"}[p.phase] || p.phase;
   return {home:tie.home, away:tie.away, label:`Pré-Libertadores ${p.year} · ${roundLabel} · Jogo único`};
 }
+function getNextUserBrasaMatch(){
+  const b = ST.brasileirao;
+  if(!b || b.currentRound>=b.rounds.length) return null;
+  const round = b.rounds[b.currentRound];
+  const m = round.find(x=>x.home===ST.teamId||x.away===ST.teamId);
+  return m ? {home:m.home, away:m.away, label:`Brasileirão · Rodada ${b.currentRound+1}/${b.rounds.length}`} : null;
+}
 function getNextUserMatch(){
   if(ST.prelib) return getNextUserPrelibMatch();
+  if(ST.mode==="brasileirao") return getNextUserBrasaMatch();
   const comp = ST.competition;
   if(comp.phase==="groups"){
     const g = userGroup();
@@ -3767,8 +4007,82 @@ function renderFabrizioRomanoCard(){
     </div>
   </div>`;
 }
+// ---------------- BRASILEIRÃO TAB ----------------
+// zone stripe by final table position — real Série A convention: top 6 go straight into next
+// year's Libertadores, 7-12 into the Sul-Americana, 17-20 get relegated.
+function brasaZoneClass(pos){
+  if(pos<=6) return "brasa-zone-liberta";
+  if(pos<=12) return "brasa-zone-sula";
+  if(pos>=17) return "brasa-zone-rebaixamento";
+  return "";
+}
+function renderBrasaTable(rows){
+  return `<div class="brasa-table-card">
+    <div class="brasa-table-head">
+      <img src="/images/brasileirao-logo.png" alt="" class="brasa-logo" onerror="this.style.display='none';"/>
+      <div class="brasa-table-title">Tabela Série A</div>
+      <div class="brasa-table-sub">Brasileirão · ${ST.seasonYear}ª edição</div>
+    </div>
+    <div class="scroll-x"><table class="data brasa-table">
+      <thead><tr>
+        <th>#</th><th>Time</th><th class="tac">P</th><th class="tac">J</th><th class="tac">V</th>
+        <th class="tac">E</th><th class="tac">D</th><th class="tac">GP</th><th class="tac">GC</th><th class="tac">SG</th>
+      </tr></thead>
+      <tbody>
+      ${rows.map((r,i)=>{
+        const pos = i+1;
+        return `<tr class="${brasaZoneClass(pos)} ${r.team===ST.teamId?'brasa-row-user':''}">
+          <td class="dim">${pos}</td>
+          <td class="bold"><span class="standings-team"><span class="standings-crest">${clubCrestImg(r.team,18,null)}</span><span>${esc(r.team)}</span>${r.team===ST.teamId?' <span class="brasa-you">(você)</span>':''}</span></td>
+          <td class="tac bold brasa-pts">${r.pts}</td>
+          <td class="tac">${r.played}</td><td class="tac">${r.w}</td><td class="tac">${r.d}</td><td class="tac">${r.l}</td>
+          <td class="tac">${r.gf}</td><td class="tac">${r.ga}</td><td class="tac">${r.gd>0?'+':''}${r.gd}</td>
+        </tr>`;
+      }).join("")}
+      </tbody>
+    </table></div>
+    <div class="brasa-legend">
+      <span><i class="brasa-dot brasa-zone-liberta"></i> Libertadores</span>
+      <span><i class="brasa-dot brasa-zone-sula"></i> Sul-Americana</span>
+      <span><i class="brasa-dot brasa-zone-rebaixamento"></i> Rebaixamento</span>
+    </div>
+  </div>`;
+}
+function renderBrasaTopScorers(){
+  const scorers = Object.values((ST.brasileirao&&ST.brasileirao.scorers)||{}).sort((a,b)=>b.goals-a.goals).slice(0,5);
+  if(scorers.length===0){
+    return `<div class="panel"><div class="panel-title">Artilheiros</div><div class="faint tiny">Nenhum gol registrado ainda nesta temporada.</div></div>`;
+  }
+  return `<div class="panel">
+  <div class="panel-title">Artilheiros</div>
+  <div class="scroll-x"><table class="data"><tbody>
+  ${scorers.map((s,i)=>`<tr>
+    <td class="dim" style="width:24px;">${i+1}</td>
+    <td class="bold">${esc(s.name)} ${s.team===ST.teamId?'<span class="gold small">(você)</span>':''}</td>
+    <td class="dim">${esc(s.team)}</td>
+    <td class="tac gold bold">${s.goals}</td>
+  </tr>`).join("")}
+  </tbody></table></div>
+  </div>`;
+}
+function renderBrasileiraoCompeticaoTab(){
+  const b = ST.brasileirao;
+  const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
+  const table = brasaSortedStandings();
+  const leftCol = `<div class="competicao-col">
+    ${matchCell}
+    <div class="competicao-cell">${renderLatestEmailCard()}</div>
+    <div class="competicao-cell">${renderBrasaTopScorers()}</div>
+    <div class="competicao-cell">${renderFabrizioRomanoCard()}</div>
+  </div>`;
+  const rightCol = `<div class="competicao-col">
+    <div class="competicao-cell">${renderBrasaTable(table)}</div>
+  </div>`;
+  return `<div class="competicao-grid">${leftCol}${rightCol}</div>`;
+}
 function renderCompeticaoTab(){
   if(ST.prelib) return renderPreLibCompeticaoTab();
+  if(ST.mode==="brasileirao") return renderBrasileiraoCompeticaoTab();
   const comp = ST.competition;
   const matchCell = `<div class="competicao-cell">${renderNextMatchCard()}</div>`;
   let cells;
@@ -4221,7 +4535,7 @@ function renderXferBuySubTab(f){
   const source = f.source || "libertadores";
   const posOptions = ["GK","CB","LB","RB","DMF","CM","AM","LM","RM","LW","RW","ST"];
   const toggle = `<div class="btn-row mb16">
-    <button class="btn btn-sm ${source==='libertadores'?'btn-gold':''}" onclick="Game.setXferFilter('source','libertadores')">Times da Libertadores</button>
+    <button class="btn btn-sm ${source==='libertadores'?'btn-gold':''}" onclick="Game.setXferFilter('source','libertadores')">${ST.mode==="brasileirao"?"Times do Brasileirão":"Times da Libertadores"}</button>
     <button class="btn btn-sm ${source==='global'?'btn-gold':''}" onclick="Game.setXferFilter('source','global')">Mercado Global</button>
   </div>`;
 
@@ -5280,6 +5594,15 @@ const Game = {
     const inputEl = document.getElementById("mgrNameInput");
     const name = inputEl ? inputEl.value.trim() : "";
     startCareer(ST.tmpSelectedTeam, name || "Treinador");
+    render();
+  },
+  chooseBrasileiraoCareer(){ ST.tmpSelectedTeam=null; ST.tmpManagerNameInput=""; ST.stage="brasa_team_select"; render(); },
+  pickBrasaTeam(name){ ST.tmpSelectedTeam=name; render(); },
+  confirmBrasaTeam(){ if(!ST.tmpSelectedTeam) return; ST.stage="brasa_manager_name"; render(); },
+  beginBrasaCareer(){
+    const inputEl = document.getElementById("mgrNameInput");
+    const name = inputEl ? inputEl.value.trim() : "";
+    startBrasileiraoCareer(ST.tmpSelectedTeam, name || "Treinador");
     render();
   },
   continueCareer(){
