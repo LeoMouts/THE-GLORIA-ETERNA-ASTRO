@@ -6573,7 +6573,7 @@ window.__tryAccessLogin__ = function(){
   const u = (document.getElementById("gateUser")||{}).value || "";
   const p = (document.getElementById("gatePass")||{}).value || "";
   if(u===ACCESS_USER && p===ACCESS_PASS){
-    boot(); 
+    boot();
   } else {
     renderAccessGate("Usuário ou senha incorretos.");
   }
