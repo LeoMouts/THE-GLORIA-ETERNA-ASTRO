@@ -345,6 +345,22 @@ function trophyImg(height, opacity){
   const w = Math.round(height*TROPHY_ASPECT);
   return `<img src="${TROPHY_IMG}" alt="Taça CONMEBOL Libertadores" width="${w}" height="${height}" loading="lazy" style="display:block;height:${height}px;width:${w}px;opacity:${opacity};filter:drop-shadow(0 4px 14px rgba(0,0,0,.5));"/>`;
 }
+// real trophy art for every OTHER competition — same "thefenomeno" asset repo the crest CDN
+// already pulls from, just its trophies/ folder. Never reuse the Libertadores cutout above for
+// these: each competition gets its own actual trophy, not a stand-in.
+const TROPHY_CDN = "https://cdn.jsdelivr.net/gh/TheSMF-Group/thefenomeno-assets@main/trophies/";
+const COMPETITION_TROPHIES = {
+  brasileirao: {url:TROPHY_CDN+"LG_BRA1.png", alt:"Taça Brasileirão"},
+  copa: {url:TROPHY_CDN+"DOM_BRA.png", alt:"Taça Copa do Brasil"},
+  libertadores: {url:TROPHY_CDN+"LIB.png", alt:"Taça CONMEBOL Libertadores"},
+  sulamericana: {url:TROPHY_CDN+"SUD.png", alt:"Taça CONMEBOL Sul-Americana"},
+};
+function competitionTrophyImg(compType, height, opacity){
+  const t = COMPETITION_TROPHIES[compType] || COMPETITION_TROPHIES.brasileirao;
+  height = height || 120;
+  opacity = opacity==null ? 1 : opacity;
+  return `<img src="${t.url}" alt="${esc(t.alt)}" height="${height}" loading="lazy" style="display:block;height:${height}px;width:auto;max-width:${Math.round(height*0.88)}px;opacity:${opacity};filter:drop-shadow(0 4px 14px rgba(0,0,0,.5));"/>`;
+}
 function cornerWatermarks(){
   return `
   <div style="position:fixed;top:-30px;left:-30px;pointer-events:none;z-index:0;">${trophyImg(220,0.07)}</div>
@@ -4158,12 +4174,14 @@ function renderCalendarStrip(oppName, compType){
     const isMatchDay = i===days;
     const isTrainingDay = !isMatchDay && i===daysUntilTraining && daysUntilTraining>0 && daysUntilTraining<days;
     let icon = "";
-    if(isMatchDay) icon = clubCrestImg(oppName,20,null);
+    // the match-day square carries the competition's own trophy — not the opponent's crest
+    // (already shown up top in the VS header) and not a placeholder ball.
+    if(isMatchDay) icon = competitionTrophyImg(compType, 28, 1);
     else if(isTrainingDay) icon = `<img src="${TRAINING_ICON}" alt="Treino" style="width:100%;height:100%;object-fit:contain;"/>`;
     const matchClass = isMatchDay ? (compType==="copa" ? " cal-day-match cal-day-copa" : compType==="libertadores" ? " cal-day-match cal-day-liberta" : compType==="sulamericana" ? " cal-day-match cal-day-sula" : " cal-day-match") : "";
     cells += `<div class="cal-day${matchClass}${isTrainingDay?' cal-day-training':''}${i===0?' cal-day-today':''}">
       <div class="cal-day-label">${WEEKDAYS[wIdx]}</div>
-      <div class="cal-day-icon">${icon}</div>
+      <div class="cal-day-icon${isMatchDay?' cal-day-icon-trophy':''}">${icon}</div>
     </div>`;
   }
   return `<div class="cal-panel mt16">
@@ -4217,43 +4235,51 @@ function renderTrainingBlock(){
 // no matter which tab is open, instead of eating space inside the Competição tab's own grid.
 // A training day still takes over the whole bar (full squad list), everything else is one
 // compact row: who's next, the AVANÇAR calendar strip, and the advance/simulate controls.
+// back to the original card look (crests + VS + full calendar panel) — sits in the persistent
+// header, above the tabs, so it's still out of the Competição tab's way on every screen.
 function renderNextMatchCard(){
   const nm = getNextUserMatch();
   if(!nm) return "";
   ensureCalendarCountdown();
   const days = ST.calendarDaysLeft;
   const oppName = nm.home===ST.teamId ? nm.away : nm.home;
-  if(ST.trainingPending){
-    return `<div class="matchbar matchbar-expanded">${renderTrainingBlock()}</div>`;
-  }
-  const teamsBlock = `<div class="matchbar-teams">
-    <span class="matchbar-crest">${clubCrestImg(nm.home,30,null)}</span>
-    <span class="matchbar-x">×</span>
-    <span class="matchbar-crest">${clubCrestImg(nm.away,30,null)}</span>
-    <span class="matchbar-label">${esc(nm.label)}</span>
-  </div>`;
   // match day itself drops the calendar entirely and goes back to exactly how this card
   // worked before AVANÇAR DIA existed: simulate straight away, at whatever pace/speed.
-  if(days<=0){
-    return `<div class="matchbar">
-      ${teamsBlock}
-      <div class="matchbar-action">
-        <span class="gold bold uc tiny" style="letter-spacing:.06em;">⚽ Dia do jogo!</span>
-        <button class="btn btn-gold btn-sm" onclick="Game.advanceSlow()">▶ Lenta</button>
-        <button class="btn btn-sm" onclick="Game.advanceFast()">⏭ Resultado</button>
-        <button class="btn btn-sm btn-ghost" onclick="Game.openTimeConfig()" title="Configuração de tempo">⏱</button>
+  const actionBlock = ST.trainingPending
+    ? renderTrainingBlock()
+    : days<=0
+    ? `<div class="gold bold uc tac mt16" style="letter-spacing:.06em;">⚽ Dia do jogo!</div>
+       <div class="btn-row center mt16">
+         <button class="btn btn-gold" onclick="Game.advanceSlow()">▶ Simulação Lenta</button>
+         <button class="btn" onclick="Game.advanceFast()">⏭ Ir para o Resultado</button>
+       </div>
+       <div class="btn-row center mt8">
+         <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
+       </div>`
+    : `${renderCalendarStrip(oppName, nm.compType)}
+       ${nm.compType==="copa"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">Copa do Brasil</div>':''}
+       <div class="tac dim small mt8">Próximo jogo em ${days} dia${days===1?"":"s"}</div>
+       <div class="btn-row center mt16">
+         <button class="btn btn-gold btn-lg" onclick="Game.advanceDay()">AVANÇAR DIA</button>
+       </div>
+       <div class="btn-row center mt8">
+         <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
+       </div>`;
+  return `<div class="next-match-wrap"><div class="panel" style="text-align:center;">
+    <div class="faint tiny uc mb12">${esc(nm.label)}</div>
+    <div class="row center" style="gap:28px;">
+      <div style="width:90px;">
+        <div style="width:64px;height:auto;margin:0 auto;">${clubCrestImg(nm.home,64,null)}</div>
+        <div class="bold small mt8">${esc(nm.home)}</div>
       </div>
-    </div>`;
-  }
-  return `<div class="matchbar">
-    ${teamsBlock}
-    ${renderCalendarStrip(oppName, nm.compType)}
-    <div class="matchbar-action">
-      <span class="dim tiny">Próximo jogo em ${days}d</span>
-      <button class="btn btn-gold btn-sm" onclick="Game.advanceDay()">AVANÇAR DIA</button>
-      <button class="btn btn-sm btn-ghost" onclick="Game.openTimeConfig()" title="Configuração de tempo">⏱</button>
+      <div class="faint" style="font-family:var(--font-display);font-size:22px;font-weight:800;">VS</div>
+      <div style="width:90px;">
+        <div style="width:64px;height:auto;margin:0 auto;">${clubCrestImg(nm.away,64,null)}</div>
+        <div class="bold small mt8">${esc(nm.away)}</div>
+      </div>
     </div>
-  </div>`;
+    ${actionBlock}
+  </div></div>`;
 }
 // the Pré-Libertadores flavor of the Competição tab: same "próximo jogo" card (with its
 // AVANÇAR DIA calendar) as a real career, just showing the knockout bracket instead of a
@@ -4438,13 +4464,24 @@ function renderBrasileiraoCompeticaoTab(){
   const copaUp = !!copaPendingUserMatch();
   const cb = ST.copaDoBrasil;
   const showBracket = copaUp || (cb && (cb.phase==="copa_final" || cb.phase==="copa_done"));
+  if(showBracket){
+    // the bracket tree needs real width to lay out without scrolling sideways — give it the
+    // whole row instead of squeezing it into a half-width column, and put scorers/e-mails/
+    // contratações in a row underneath instead of stacked, so nothing needs to scroll either.
+    const bracketPanel = `<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>`;
+    const cells = `<div class="competicao-cell" style="grid-column:1 / -1;">${bracketPanel}</div>`
+      + `<div class="competicao-cell">${renderBrasaTopScorers()}</div>`
+      + `<div class="competicao-cell">${renderLatestEmailCard()}</div>`
+      + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`;
+    return `<div class="competicao-grid competicao-grid-3">${cells}</div>`;
+  }
   const leftCol = `<div class="competicao-col">
     <div class="competicao-cell">${renderBrasaTopScorers()}</div>
     <div class="competicao-cell">${renderLatestEmailCard()}</div>
     <div class="competicao-cell">${renderFabrizioRomanoCard()}</div>
   </div>`;
   const rightCol = `<div class="competicao-col">
-    <div class="competicao-cell">${showBracket ? `<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>` : renderBrasaTable(table, {cap:10})}</div>
+    <div class="competicao-cell">${renderBrasaTable(table, {cap:10})}</div>
   </div>`;
   return `<div class="competicao-grid">${leftCol}${rightCol}</div>`;
 }
@@ -4733,11 +4770,12 @@ function renderCopaBracket(){
       <span class="bm-score">${finalTie.played?finalTie.as:'-'}</span>
     </div>
   </div>`;
+  // the Copa do Brasil's own trophy — not the Libertadores cutout trophyImg() reaches for.
   return `<div class="bracket-wrap">
     <div class="bracket-side left">${bracketHalfHtml(comp,0)}</div>
     <div class="bracket-center-col">
       <div class="bracket-round-label gold">Final</div>
-      ${trophyImg(54, champion?1:0.45)}
+      ${competitionTrophyImg("copa", 54, champion?1:0.45)}
       ${finalBox}
       ${champion?`<div class="gold bold tiny tac mt8">CAMPEÃO</div>`:''}
     </div>
