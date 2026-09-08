@@ -220,6 +220,15 @@ input,select{font-family:inherit;}
 .cal-day-match .cal-day-label{color:#241a04;}
 .cal-day-training{background:linear-gradient(180deg,#8FC3EA,var(--blue));border-color:var(--blue);}
 .cal-day-training .cal-day-label{color:#0A1A24;}
+/* Copa do Brasil / Libertadores / Sul-Americana match days get their own color on the AVANÇAR
+   strip — same idea as the gold (Brasileirão) / blue (training) days, just a different hue per
+   competition so a glance at the calendar tells you which one is actually up next. */
+.cal-day-copa{background:linear-gradient(180deg,#8fe66b,#3ea832);border-color:#3ea832;}
+.cal-day-copa .cal-day-label{color:#0d2a08;}
+.cal-day-liberta{background:linear-gradient(180deg,#7fa3f2,#2f5fd6);border-color:#2f5fd6;}
+.cal-day-liberta .cal-day-label{color:#0a1230;}
+.cal-day-sula{background:linear-gradient(180deg,#f2b76a,#d9812a);border-color:#d9812a;}
+.cal-day-sula .cal-day-label{color:#2a1604;}
 
 /* ---------------- Training ("DIA DE TREINO") ---------------- */
 .train-list{max-height:320px;overflow-y:auto;text-align:left;border:1px solid var(--line);border-radius:6px;padding:4px 10px;}
