@@ -6,7 +6,7 @@ import * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
 import { PRELIB_DATA } from "./prelib";
-import { SERIE_A_EXTRA_TEAMS, SERIE_A_2026 } from "./serieA";
+import { SERIE_A_EXTRA_TEAMS, SERIE_A_2026 } from "./serieA"; import { SULAMERICANA_EXTRA_TEAMS, SULAMERICANA_2026 } from "./sulamericana";
 
 const GOAT_MASCOT_URI = "/images/image-1787868287812.webp";
 
@@ -471,7 +471,7 @@ function freshWorld(){
 // ============================================================
 function serieATeamSource(name){
   return DATA.teams[name] || PRELIB_DATA.teams[name] || SERIE_A_EXTRA_TEAMS[name] || null;
-}
+} /* same idea for the Sul-Americana 2026 field — River Plate and Racing already have real, fully-fleshed rosters in prelib.json (the Pré-Libertadores pool), so serieATeamSource() already finds those two; only the other 23 clubs (never in this game before) need SULAMERICANA_EXTRA_TEAMS's generated squads. */ function sulamericanaTeamSource(name){ return serieATeamSource(name) || SULAMERICANA_EXTRA_TEAMS[name] || null; }
 function freshBrasaWorld(){
   const teams = {};
   SERIE_A_2026.forEach(name=>{
