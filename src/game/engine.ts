@@ -419,6 +419,19 @@ function pickFastScorers(xi, count, rng) {
   return scorers;
 }
 
+// same 68%-of-goals-get-an-assist, pass-weighted pick the detailed sim uses (see the
+// "goal"/assist branch above) — so fast-simulated (AI-vs-AI) matches can feed a real
+// league-wide "Assistências" table too, not just goals.
+function pickFastAssists(scorerIds, xi, rng) {
+  const { lineup } = xi;
+  return scorerIds.map(scorerId => {
+    if (rng() >= 0.68) return null;
+    const pool = lineup.filter(p => p && p.id !== scorerId);
+    if (!pool.length) return null;
+    return weightedChoice(rng, pool, p => Math.pow(1.02, p.pas || p.ovr)).id;
+  });
+}
+
 function simulateFastMatch(teamA, teamB, rngSeedNum) {
   const rng = makeRNG(rngSeedNum);
   const bestXIA = bestAvailableXI(teamA);
@@ -436,7 +449,9 @@ function simulateFastMatch(teamA, teamB, rngSeedNum) {
   const golsB = poisson(rng, lamB);
   const scorersHome = pickFastScorers(bestXIA, golsA, rng);
   const scorersAway = pickFastScorers(bestXIB, golsB, rng);
-  return { homeScore: golsA, awayScore: golsB, scorersHome, scorersAway };
+  const assistsHome = pickFastAssists(scorersHome, bestXIA, rng);
+  const assistsAway = pickFastAssists(scorersAway, bestXIB, rng);
+  return { homeScore: golsA, awayScore: golsB, scorersHome, scorersAway, assistsHome, assistsAway };
 }
 
 function poisson(rng, lambda) {
