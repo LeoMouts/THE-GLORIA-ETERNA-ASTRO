@@ -949,7 +949,7 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .romano-arrow-inline{color:var(--marigold);font-weight:800;}
 .romano-row-body{flex:1;min-width:0;}
 .romano-row-body .bold{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.romano-row-fee{flex:0 0 auto;font-size:12.5px;white-space:nowrap;}
+.romano-row-side{flex:0 0 auto;text-align:right;} .romano-row-fee{font-size:12.5px;white-space:nowrap;} .romano-flip-scroll{max-height:320px;overflow-y:auto;}
 
 /* ---------------- BRASILEIRÃO — Série A table (Competição tab, Brasileirão career mode) ----
    Chrome (background/borders/title/points) follows the site's own warm-dark/marigold identity;
