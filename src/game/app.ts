@@ -555,6 +555,7 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.sulamericana = null;
   ST.libertadoresCompleto = null;
   ST.lastUserMatchType = null;
+  ST.desempenhoFilter = "brasileirao";
   startCopaDoBrasil();
   startSulamericanaIfEligible(); // the 7 real 2026 Sul-Americana entrants play it from season 1 — everyone else only reaches it via a future season's own table position
   startLibertadoresCompletoIfEligible(); // same idea for the 6 real 2026 Libertadores entrants
@@ -1342,21 +1343,43 @@ function setupSeasonCompetition(){
   };
 }
 
+// which competition's {scorers,assisters} a goal/assist should land in. Modo Completo runs four
+// competitions off the same ST.mode==="brasileirao", so an explicit compKey ("copa"/"sula"/"lib")
+// is how a Copa/Sul-Americana/Libertadores goal avoids landing in the Brasileirão table instead —
+// leaving compKey out keeps every pre-existing call site's behavior byte-for-byte the same.
+function competitionStatsStore(compKey){
+  if(compKey==="copa") return ST.copaDoBrasil;
+  if(compKey==="sula") return ST.sulamericana;
+  if(compKey==="lib") return ST.libertadoresCompleto;
+  return ST.mode==="brasileirao" ? ST.brasileirao : ST.competition;
+}
+// derives that same compKey from a match's own context object (ST.pendingMatch.context) —
+// shared by simulatePendingMatch() and resolvePendingPenaltyEvent(), the two places a detailed
+// (user-involved) match's goals get recorded.
+function compKeyForContext(ctx){
+  if(!ctx) return undefined;
+  if(ctx.type==="copa") return "copa";
+  if(ctx.type==="sula") return "sula";
+  if(ctx.type==="lib") return "lib";
+  return undefined;
+}
 // records one goal for the season-wide top-scorers table.
-function addScorerGoal(teamName, playerId){
+function addScorerGoal(teamName, playerId, compKey){
   const p = playerById(teamName, playerId);
   if(!p) return;
-  const store = ST.mode==="brasileirao" ? ST.brasileirao : ST.competition;
+  const store = competitionStatsStore(compKey);
+  if(!store) return;
   const scorers = store.scorers || (store.scorers = {});
   const key = teamName+"#"+playerId;
   if(!scorers[key]) scorers[key] = {id:playerId, name:p.name, team:teamName, goals:0};
   scorers[key].goals++;
 }
 // same idea, for the season-wide "Assistências" table (Desempenho tab).
-function addAssistPoint(teamName, playerId){
+function addAssistPoint(teamName, playerId, compKey){
   const p = playerById(teamName, playerId);
   if(!p) return;
-  const store = ST.mode==="brasileirao" ? ST.brasileirao : ST.competition;
+  const store = competitionStatsStore(compKey);
+  if(!store) return;
   const assisters = store.assisters || (store.assisters = {});
   const key = teamName+"#"+playerId;
   if(!assisters[key]) assisters[key] = {id:playerId, name:p.name, team:teamName, assists:0};
@@ -1365,12 +1388,14 @@ function addAssistPoint(teamName, playerId){
 
 // wraps the fast (AI-vs-AI) simulator so every match — not just the user's own —
 // still feeds real goalscorers (and assisters) into the "Artilheiros"/"Assistências" tables.
-function simFast(homeTeamName, awayTeamName){
+// compKey routes a Copa/Sul-Americana/Libertadores match's stats into that competition's own
+// table instead of the Brasileirão one — see competitionStatsStore().
+function simFast(homeTeamName, awayTeamName, compKey){
   const res = E.simulateFastMatch(ST.world.teams[homeTeamName], ST.world.teams[awayTeamName], nextSeed());
-  (res.scorersHome||[]).forEach(id=>addScorerGoal(homeTeamName, id));
-  (res.scorersAway||[]).forEach(id=>addScorerGoal(awayTeamName, id));
-  (res.assistsHome||[]).forEach(id=>{ if(id!=null) addAssistPoint(homeTeamName, id); });
-  (res.assistsAway||[]).forEach(id=>{ if(id!=null) addAssistPoint(awayTeamName, id); });
+  (res.scorersHome||[]).forEach(id=>addScorerGoal(homeTeamName, id, compKey));
+  (res.scorersAway||[]).forEach(id=>addScorerGoal(awayTeamName, id, compKey));
+  (res.assistsHome||[]).forEach(id=>{ if(id!=null) addAssistPoint(homeTeamName, id, compKey); });
+  (res.assistsAway||[]).forEach(id=>{ if(id!=null) addAssistPoint(awayTeamName, id, compKey); });
   return res;
 }
 
@@ -1920,7 +1945,7 @@ function clubCareerTotals(){
   });
   return agg;
 }
-function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, awayLineup, result){
+function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, awayLineup, result, compKey){
   const allP = homeLineup.filter(Boolean).concat(awayLineup.filter(Boolean));
   allP.forEach(p=>{
     const rating = result.ratings[p.id];
@@ -1948,10 +1973,10 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
     if(ev.type==="injury"){ p.injured=true; p.injuredMatches=Math.max(p.injuredMatches,ev.matchesOut); }
     if(ev.type==="goal"){
       const scoringTeam = ev.side==="home"?homeTeamName:awayTeamName;
-      addScorerGoal(scoringTeam, p.id);
+      addScorerGoal(scoringTeam, p.id, compKey);
       if(ev.assist){
         const assisterP = side.find(pp=>pp && pp.name===ev.assist);
-        if(assisterP) addAssistPoint(scoringTeam, assisterP.id);
+        if(assisterP) addAssistPoint(scoringTeam, assisterP.id, compKey);
       }
       if(scoringTeam===ST.teamId){
         recordCareerStat("goals", p.name);
@@ -2459,7 +2484,7 @@ function advanceCopaLeg(){
     if(tie.teamA===ST.teamId || tie.teamB===ST.teamId){
       pendingUser = { ref:leg, tie };
     } else {
-      const res = simFast(leg.home, leg.away);
+      const res = simFast(leg.home, leg.away, "copa");
       leg.hs=res.homeScore; leg.as=res.awayScore; leg.played=true;
     }
   });
@@ -2545,7 +2570,7 @@ function advanceCopaFinalStep(){
     goToMatchDay(f, {type:"copa", phase:"copa_final"});
     return true;
   }
-  const res = simFast(f.home, f.away);
+  const res = simFast(f.home, f.away, "copa");
   let hs=res.homeScore, as=res.awayScore;
   if(hs===as){ const rng=E.makeRNG(nextSeed()); if(rng()<0.5) hs++; else as++; }
   f.hs=hs; f.as=as; f.played=true;
@@ -2702,7 +2727,7 @@ function advanceSulaGroupRound(){
     round.forEach(m=>{
       if(m.played) return;
       if(m.home===ST.teamId || m.away===ST.teamId){ pendingUser = m; }
-      else { const res = simFast(m.home, m.away); m.hs=res.homeScore; m.as=res.awayScore; m.played=true; }
+      else { const res = simFast(m.home, m.away, "sula"); m.hs=res.homeScore; m.as=res.awayScore; m.played=true; }
     });
   });
   if(pendingUser){
@@ -2756,7 +2781,7 @@ function advanceSulaLeg(){
     const leg = tie.legs[legIndex];
     if(leg.played) return;
     if(tie.teamA===ST.teamId || tie.teamB===ST.teamId){ pendingUser = { ref:leg, tie }; }
-    else { const res = simFast(leg.home, leg.away); leg.hs=res.homeScore; leg.as=res.awayScore; leg.played=true; }
+    else { const res = simFast(leg.home, leg.away, "sula"); leg.hs=res.homeScore; leg.as=res.awayScore; leg.played=true; }
   });
   if(pendingUser){
     goToMatchDay(pendingUser.ref, {type:"sula", phase:ST.sulamericana.phase, tieId:pendingUser.tie.id, legIndex});
@@ -2840,7 +2865,7 @@ function advanceSulaFinalStep(){
     goToMatchDay(f, {type:"sula", phase:"sula_final"});
     return true;
   }
-  const res = simFast(f.home, f.away);
+  const res = simFast(f.home, f.away, "sula");
   let hs=res.homeScore, as=res.awayScore;
   if(hs===as){ const rng=E.makeRNG(nextSeed()); if(rng()<0.5) hs++; else as++; }
   f.hs=hs; f.as=as; f.played=true;
@@ -2988,7 +3013,7 @@ function advanceLibGroupRound(){
     round.forEach(m=>{
       if(m.played) return;
       if(m.home===ST.teamId || m.away===ST.teamId){ pendingUser = m; }
-      else { const res = simFast(m.home, m.away); m.hs=res.homeScore; m.as=res.awayScore; m.played=true; }
+      else { const res = simFast(m.home, m.away, "lib"); m.hs=res.homeScore; m.as=res.awayScore; m.played=true; }
     });
   });
   if(pendingUser){
@@ -3042,7 +3067,7 @@ function advanceLibLeg(){
     const leg = tie.legs[legIndex];
     if(leg.played) return;
     if(tie.teamA===ST.teamId || tie.teamB===ST.teamId){ pendingUser = { ref:leg, tie }; }
-    else { const res = simFast(leg.home, leg.away); leg.hs=res.homeScore; leg.as=res.awayScore; leg.played=true; }
+    else { const res = simFast(leg.home, leg.away, "lib"); leg.hs=res.homeScore; leg.as=res.awayScore; leg.played=true; }
   });
   if(pendingUser){
     goToMatchDay(pendingUser.ref, {type:"lib", phase:ST.libertadoresCompleto.phase, tieId:pendingUser.tie.id, legIndex});
@@ -3126,7 +3151,7 @@ function advanceLibFinalStep(){
     goToMatchDay(f, {type:"lib", phase:"lib_final"});
     return true;
   }
-  const res = simFast(f.home, f.away);
+  const res = simFast(f.home, f.away, "lib");
   let hs=res.homeScore, as=res.awayScore;
   if(hs===as){ const rng=E.makeRNG(nextSeed()); if(rng()<0.5) hs++; else as++; }
   f.hs=hs; f.as=as; f.played=true;
@@ -3263,7 +3288,7 @@ function simulatePendingMatch(){
   pm.homeSlots = homeXI.slots;
   pm.awayLineup = awayXI.lineup.map(p=>p?{name:p.name, pos:p.pos, id:p.id}:null);
   pm.awaySlots = awayXI.slots;
-  applyDetailedResultToWorld(home, away, homeXI.lineup, awayXI.lineup, result);
+  applyDetailedResultToWorld(home, away, homeXI.lineup, awayXI.lineup, result, compKeyForContext(pm.context));
   ST.matchPlaying = true;
   ST.matchAnimIdx = 0;
   ST.matchClockMinute = 0; // only actually driven in "slow" mode — see matchTickDelay/matchAnimDone
@@ -3325,7 +3350,7 @@ function resolvePendingPenaltyEvent(pm, idx, takerPlayerId){
 
   if(scored){
     pm.result.stats[ev.side].goals++;
-    if(shooter) addScorerGoal(atkTeamName, shooter.id);
+    if(shooter) addScorerGoal(atkTeamName, shooter.id, compKeyForContext(pm.context));
   }
   pm.result.homeScore = pm.result.stats.home.goals;
   pm.result.awayScore = pm.result.stats.away.goals;
@@ -5218,11 +5243,13 @@ function renderBrasaTable(rows, opts){
   </div>`;
 }
 // top scorers / top assisters, league-wide — used on the Desempenho tab (top 25 of each).
-function brasaTopScorersFull(n){
-  return Object.values((ST.brasileirao&&ST.brasileirao.scorers)||{}).sort((a,b)=>b.goals-a.goals).slice(0,n||25);
+// generic top-scorers/assisters readers — used for whichever competition the Desempenho tab's
+// filter currently has selected (see desempenhoAvailableComps()/renderDesempenhoTab()).
+function compTopScorersFull(store, n){
+  return Object.values((store&&store.scorers)||{}).sort((a,b)=>b.goals-a.goals).slice(0,n||25);
 }
-function brasaTopAssistersFull(n){
-  return Object.values((ST.brasileirao&&ST.brasileirao.assisters)||{}).sort((a,b)=>b.assists-a.assists).slice(0,n||25);
+function compTopAssistersFull(store, n){
+  return Object.values((store&&store.assisters)||{}).sort((a,b)=>b.assists-a.assists).slice(0,n||25);
 }
 function renderStatLeaderboard(title, rows, statKey, emptyMsg){
   if(rows.length===0){
@@ -5334,9 +5361,26 @@ function brasaRecentForm(teamName, n){
   }
   return out.slice(-n).reverse();
 }
+// which competitions the Desempenho tab can filter to — Brasileirão is always there; the other
+// three only show up once ST.teamId is actually in them this season (Copa always exists once the
+// season starts, Sul-Americana/Libertadores only exist at all when the club qualified for them —
+// see startSulamericanaIfEligible()/startLibertadoresCompletoIfEligible()).
+function desempenhoAvailableComps(){
+  const opts = [{key:"brasileirao", label:"Brasileirão"}];
+  if(ST.copaDoBrasil) opts.push({key:"copa", label:"Copa do Brasil"});
+  if(ST.sulamericana) opts.push({key:"sula", label:"Sul-Americana"});
+  if(ST.libertadoresCompleto) opts.push({key:"lib", label:"Libertadores"});
+  return opts;
+}
+function renderDesempenhoFilterBar(opts, active){
+  if(opts.length<=1) return "";
+  return `<div class="btn-row mb16">${opts.map(o=>`<button class="btn btn-sm ${active===o.key?'btn-gold':''}" onclick="Game.setDesempenhoFilter('${o.key}')">${esc(o.label)}</button>`).join("")}</div>`;
+}
 // full 20-team table + the user's recent form guide — everything the compact Competição
-// tab's capped table leaves out, one click away via "Ver tabela completa →".
-function renderDesempenhoTab(){
+// tab's capped table leaves out, one click away via "Ver tabela completa →". Only shown while
+// the filter bar above is set to "Brasileirão" — the other three competitions show their own
+// chaveamento/group table instead (see renderDesempenhoTab()).
+function renderDesempenhoBrasileiraoBlock(){
   const table = brasaSortedStandings();
   const form = brasaRecentForm(ST.teamId, 10);
   const formPills = form.map(f=>`<span class="form-pill form-pill-${f.res.toLowerCase()}" title="${f.home?'vs.':'@'} ${esc(f.opp)} (${f.gf}-${f.ga})">${f.res}</span>`).join("")
@@ -5347,8 +5391,8 @@ function renderDesempenhoTab(){
     <span class="form-row-opp">${f.home?'vs.':'@'} ${clubCrestImg(f.opp,16,null)}<span>${esc(f.opp)}</span></span>
     <span class="form-row-score mono bold">${f.gf}-${f.ga}</span>
   </div>`).join("");
-  const scorers = brasaTopScorersFull(25);
-  const assisters = brasaTopAssistersFull(25);
+  const scorers = compTopScorersFull(ST.brasileirao, 25);
+  const assisters = compTopAssistersFull(ST.brasileirao, 25);
   return `<div class="desempenho-grid">
     <div class="desempenho-col">
       <div class="panel">
@@ -5363,6 +5407,30 @@ function renderDesempenhoTab(){
     <div class="competicao-cell">${renderStatLeaderboard("Artilheiros — Top 25", scorers, "goals")}</div>
     <div class="competicao-cell">${renderStatLeaderboard("Assistências — Top 25", assisters, "assists")}</div>
   </div>`;
+}
+// the Copa do Brasil / Sul-Americana / Libertadores flavor: reuses the exact same
+// chaveamento/group-table panel already shown in the Competição tab (renderCopaBracket() etc.),
+// plus that competition's OWN top-scorers/assists — separate from the Brasileirão-wide ones,
+// via the compKey routing simFast()/applyDetailedResultToWorld() already do at match time.
+function renderDesempenhoCompBlock(key){
+  const store = key==="copa" ? ST.copaDoBrasil : key==="sula" ? ST.sulamericana : ST.libertadoresCompleto;
+  const title = key==="copa" ? `Copa do Brasil ${store.year}` : key==="sula" ? `Sul-Americana ${store.year}` : `Libertadores ${store.year}`;
+  const panelHtml = key==="copa" ? renderCopaBracket() : key==="sula" ? renderSulaCompetitionPanel() : renderLibCompletoCompetitionPanel();
+  const scorers = compTopScorersFull(store, 25);
+  const assisters = compTopAssistersFull(store, 25);
+  return `<div class="panel"><div class="panel-title">${esc(title)}</div>${panelHtml}</div>
+  <div class="competicao-grid mt16">
+    <div class="competicao-cell">${renderStatLeaderboard("Artilheiros — Top 25", scorers, "goals", "Nenhum gol registrado ainda nesta competição.")}</div>
+    <div class="competicao-cell">${renderStatLeaderboard("Assistências — Top 25", assisters, "assists", "Nenhuma assistência registrada ainda nesta competição.")}</div>
+  </div>`;
+}
+function renderDesempenhoTab(){
+  const opts = desempenhoAvailableComps();
+  if(!opts.some(o=>o.key===ST.desempenhoFilter)) ST.desempenhoFilter = "brasileirao"; // guards against a stale pick — e.g. the Sul-Americana campaign it pointed at is over and gone
+  const filter = ST.desempenhoFilter;
+  const filterBar = renderDesempenhoFilterBar(opts, filter);
+  const body = filter==="brasileirao" ? renderDesempenhoBrasileiraoBlock() : renderDesempenhoCompBlock(filter);
+  return filterBar + body;
 }
 function renderCompeticaoTab(){
   if(ST.prelib) return renderPreLibCompeticaoTab();
@@ -7149,6 +7217,7 @@ const Game = {
   beginPreLibCareer(){ crownPreLibChampion(ST.managerName); render(); },
 
   setTab(id){ ST.hubTab=id; render(); },
+  setDesempenhoFilter(key){ ST.desempenhoFilter=key; render(); },
   toggleRomanoFlip(){
     // a quick two-frame "page turn": squeeze the card edge-on, swap which 5 deals are showing,
     // then open back up — same discrete-timed-render trick the training/penalty beats use,
