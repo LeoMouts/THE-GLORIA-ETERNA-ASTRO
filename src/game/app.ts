@@ -1708,6 +1708,8 @@ function mintMailId(){ ST.mailSeq = (ST.mailSeq||0)+1; return "mail"+ST.mailSeq;
 function inboxList(){ return Array.isArray(ST.inbox) ? ST.inbox : (ST.inbox=[]); }
 function findMail(id){ return inboxList().find(m=>m.id===id); }
 function unreadMailCount(){ return inboxList().filter(m=>!m.read).length; }
+function markAllMailRead(){ inboxList().forEach(m=>{ m.read = true; }); scheduleSave(); }
+function clearInbox(){ ST.inbox = []; ST.openMailId = null; scheduleSave(); }
 // every new mail lands with today's weekday stamped on it and unread — callers only
 // need to supply {type, subject, from, preview, body?, payload?}.
 function addMail(mail){
@@ -1843,7 +1845,7 @@ function queueOfferMail(playerId, playerName, club, category, value, offer, rng,
     subject: subjects[Math.floor(rng()*subjects.length)],
     from: club,
     preview: `Proposta por ${playerName}: ${fmtMoney(offer)}.`,
-    payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0, posture: posturePick, riskPercent: initialNegotiationRisk(postureObj) },
+    payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0, posture: posturePick, riskPercent: initialNegotiationRisk(postureObj), userReplyDaysLeft:7 },
   });
 }
 const OFFER_RAISE_LINES = [
@@ -1919,6 +1921,9 @@ function negotiateOffer(mailId, askedAmountRaw){
     pl.pendingReplyDays = 1 + Math.floor(rng()*3);
     mail.thread.push(OFFER_THINK_LINES[Math.floor(rng()*OFFER_THINK_LINES.length)]);
   } else {
+    // the mail stays "pending" either way here — a fresh 7-day window to act on THIS round's
+    // number, same as a brand-new offer, rather than the clock just running out mid-negotiation.
+    pl.userReplyDaysLeft = 7;
     const meetChance = E.clamp(0.55*posture.acceptMult, 0.15, 0.85);
     if(rng() < meetChance){
       // a real concession — usually most of the way to the ask, sometimes all of it — instead
@@ -1968,7 +1973,7 @@ function tickPendingOfferReplies(){
       from: pl.club,
       preview: status==="withdrawn" ? `A negociação por ${pl.playerName} não avançou.` : `Nova posição sobre ${pl.playerName}: ${fmtMoney(newOffer)}.`,
       thread:[verdictLine],
-      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0, posture:pl.posture, riskPercent: initialNegotiationRisk(posture) },
+      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0, posture:pl.posture, riskPercent: initialNegotiationRisk(posture), userReplyDaysLeft:7 },
     });
   });
 }
@@ -2008,7 +2013,7 @@ function maybeGenerateOfferComeback(){
       from: pl.club,
       preview:`Nova proposta por ${pl.playerName}: ${fmtMoney(newOffer)}.`,
       thread:[OFFER_COMEBACK_LINES[Math.floor(rng()*OFFER_COMEBACK_LINES.length)]],
-      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1, posture:pl.posture, riskPercent: initialNegotiationRisk(offerPosture(pl)) },
+      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1, posture:pl.posture, riskPercent: initialNegotiationRisk(offerPosture(pl)), userReplyDaysLeft:7 },
     });
     break; // at most one comeback mail per day, keeps the inbox from flooding
   }
@@ -2017,11 +2022,27 @@ function maybeGenerateOfferComeback(){
 function generateDailyMail(){
   maybeGenerateScoutMail();
   tickPendingOfferReplies();
+  tickPendingOfferExpiry();
   maybeIncomingOffer(0.14);
   maybeGenerateOfferComeback();
   maybeGenerateTrainingInjury();
   tickScoutReport();
   tickObservations();
+}
+// a "pending" offer (the ball is in the manager's own court — accept it, counter it, or let it
+// sit) is only ever live for 7 days: every day it goes untouched counts down, and once it hits
+// 0 the club assumes the silence is a no and pulls the offer, same "withdrawn" status a failed
+// negotiation risk-roll produces, just flagged separately (expiredNoReply) so the mail explains
+// WHY it's gone — the manager missed the window, not that the number itself scared the club off.
+function tickPendingOfferExpiry(){
+  inboxList().filter(m=>m.type==="offer" && m.payload.status==="pending").forEach(mail=>{
+    const pl = mail.payload;
+    if(pl.userReplyDaysLeft==null) pl.userReplyDaysLeft = 7; // safety net for a save from before this existed
+    pl.userReplyDaysLeft--;
+    if(pl.userReplyDaysLeft>0) return;
+    pl.status = "withdrawn";
+    pl.expiredNoReply = true;
+  });
 }
 
 // ============================================================
@@ -6474,7 +6495,11 @@ function renderEmailTab(){
   if(!box.length){
     return `<div class="empty-state"><p>Sua caixa de entrada está vazia.</p><p class="dim small">Clique em AVANÇAR DIA na aba Competição para receber propostas, boletins médicos e relatórios de olheiro.</p></div>`;
   }
-  return `<div class="mail-list">${box.map(renderMailRow).join("")}</div>`;
+  const toolbar = `<div class="btn-row mail-toolbar">
+    <button class="btn btn-sm" onclick="Game.markAllMailRead()">✓ Marcar tudo como lido</button>
+    <button class="btn btn-sm btn-danger" onclick="Game.clearInboxConfirm()">🗑 Limpar caixa de entrada</button>
+  </div>`;
+  return `${toolbar}<div class="mail-list">${box.map(renderMailRow).join("")}</div>`;
 }
 function renderMailRow(m){
   const rowIcon = (m.type==="offer" && m.payload && m.payload.club)
@@ -6565,7 +6590,9 @@ function renderRiskGauge(percent){
 function offerStatusBanner(pl){
   if(pl.status==="accepted") return `<div class="mail-status mail-status-good">✅ Venda concluída — ${fmtMoney(pl.offer)} creditados ao orçamento.</div>`;
   if(pl.status==="rejected") return `<div class="mail-status">Você recusou esta proposta.</div>`;
-  if(pl.status==="withdrawn") return `<div class="mail-status mail-status-bad">O clube retirou a proposta após a negociação.</div>`;
+  if(pl.status==="withdrawn") return pl.expiredNoReply
+    ? `<div class="mail-status mail-status-bad">⏰ Você não respondeu à proposta dentro do prazo de 7 dias — o clube retirou a oferta.</div>`
+    : `<div class="mail-status mail-status-bad">O clube retirou a proposta após a negociação.</div>`;
   if(pl.status==="superseded") return `<div class="mail-status">Substituída por uma proposta mais recente.</div>`;
   if(pl.status==="void") return `<div class="mail-status mail-status-bad">O jogador já não está mais disponível.</div>`;
   if(pl.status==="awaiting_reply") return `<div class="mail-status">⏳ O clube pediu um tempo para pensar — responde em até ${pl.pendingReplyDays||1} dia(s). Avance os dias em Competição para receber a resposta.</div>`;
@@ -6596,7 +6623,8 @@ function renderOfferMailBody(m){
       <b>${esc(posture.label)}.</b> Estimativa: dá pra pedir com boas chances até cerca de
       <b class="gold">${fmtMoney(estMax)}</b>. Cada novo pedido aumenta o risco de a negociação melar de vez — acompanhe no medidor abaixo.
     </div>
-    ${renderRiskGauge(pl.riskPercent)}`:""}
+    ${renderRiskGauge(pl.riskPercent)}
+    ${pl.userReplyDaysLeft!=null?`<div class="tiny faint uc mt8" style="letter-spacing:.04em;">⏰ Expira em ${pl.userReplyDaysLeft} dia${pl.userReplyDaysLeft===1?"":"s"} se não for respondida</div>`:""}`:""}
     ${thread?`<div class="mt12">${thread}</div>`:""}
     ${offerStatusBanner(pl)}
     ${pending?`
@@ -7635,6 +7663,12 @@ const Game = {
     if(m.action==="quickSell") quickSell(m.payload);
     else if(m.action==="resetCareer") { resetCareer(); return; }
     else if(m.action==="confirmNewGame") { ST.stage="mode_select"; }
+    else if(m.action==="clearInbox") clearInbox();
+    render();
+  },
+  markAllMailRead(){ markAllMailRead(); render(); },
+  clearInboxConfirm(){
+    ST.uiModal = {type:"confirm", message:"Tem certeza que quer limpar a caixa de entrada? Todos os e-mails serão apagados — isso não pode ser desfeito.", action:"clearInbox"};
     render();
   },
   openBuyModal(playerId, team){ ST.uiModal={type:"buyOffer", playerId, team}; render(); },
