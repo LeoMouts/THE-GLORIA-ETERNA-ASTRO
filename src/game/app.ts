@@ -1,8 +1,6 @@
 // ============================================================
-// LIBERTADORES MANAGER — APP (state, storage, screens)
-// build marker: force-fresh-deploy-2026-09-04
-// ============================================================
-import * as E from "./engine";
+function checkForPostSeasonDeadEnd(){ const b=ST.brasileirao; if(!b||b.currentRound<b.rounds.length) return; const copaClear=!ST.copaDoBrasil||ST.copaDoBrasil.phase==="copa_done"||ST.copaDoBrasil.userEliminated; const sulaClear=!ST.sulamericana||ST.sulamericana.phase==="sula_done"||ST.sulamericana.userEliminated; const libClear=!ST.libertadoresCompleto||ST.libertadoresCompleto.phase==="lib_done"||ST.libertadoresCompleto.userEliminated; if(!(copaClear&&sulaClear&&libClear)) return; if(allCupsFinished()){ finalizeBrasaSeason(); return; } autoFinishBackgroundCups(); } function autoFinishBackgroundCups(){ let guard=0; while(!allCupsFinished()&&guard<2000){ guard++; if(ST.copaDoBrasil) ST.copaDoBrasil.roundsUntilNextLeg=0; if(ST.sulamericana) ST.sulamericana.roundsUntilNextLeg=0; if(ST.libertadoresCompleto) ST.libertadoresCompleto.roundsUntilNextLeg=0; tickCopaDoBrasil(); tickSulamericana(); tickLibertadoresCompleto(); } finalizeBrasaSeason(); } // advances exactly one Brasileirão round per call// build marker: force-fresh-deploy-2026-09-04
+function checkForPostSeasonDeadEnd(){ const b=ST.brasileirao; if(!b||b.currentRound<b.rounds.length) return; const copaClear=!ST.copaDoBrasil||ST.copaDoBrasil.phase==="copa_done"||ST.copaDoBrasil.userEliminated; const sulaClear=!ST.sulamericana||ST.sulamericana.phase==="sula_done"||ST.sulamericana.userEliminated; const libClear=!ST.libertadoresCompleto||ST.libertadoresCompleto.phase==="lib_done"||ST.libertadoresCompleto.userEliminated; if(!(copaClear&&sulaClear&&libClear)) return; if(allCupsFinished()){ finalizeBrasaSeason(); return; } autoFinishBackgroundCups(); } function autoFinishBackgroundCups(){ let guard=0; while(!allCupsFinished()&&guard<2000){ guard++; if(ST.copaDoBrasil) ST.copaDoBrasil.roundsUntilNextLeg=0; if(ST.sulamericana) ST.sulamericana.roundsUntilNextLeg=0; if(ST.libertadoresCompleto) ST.libertadoresCompleto.roundsUntilNextLeg=0; tickCopaDoBrasil(); tickSulamericana(); tickLibertadoresCompleto(); } finalizeBrasaSeason(); } function checkForPostSeasonDeadEnd(){ const b=ST.brasileirao; if(!b||b.currentRound<b.rounds.length) return; const copaClear=!ST.copaDoBrasil||ST.copaDoBrasil.phase==="copa_done"||ST.copaDoBrasil.userEliminated; const sulaClear=!ST.sulamericana||ST.sulamericana.phase==="sula_done"||ST.sulamericana.userEliminated; const libClear=!ST.libertadoresCompleto||ST.libertadoresCompleto.phase==="lib_done"||ST.libertadoresCompleto.userEliminated; if(!(copaClear&&sulaClear&&libClear)) return; if(allCupsFinished()){ finalizeBrasaSeason(); return; } autoFinishBackgroundCups(); } function autoFinishBackgroundCups(){ let guard=0; while(!allCupsFinished()&&guard<2000){ guard++; if(ST.copaDoBrasil) ST.copaDoBrasil.roundsUntilNextLeg=0; if(ST.sulamericana) ST.sulamericana.roundsUntilNextLeg=0; if(ST.libertadoresCompleto) ST.libertadoresCompleto.roundsUntilNextLeg=0; tickCopaDoBrasil(); tickSulamericana(); tickLibertadoresCompleto(); } finalizeBrasaSeason(); } // advances exactly one Brasileirão round per callimport * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
 import { PRELIB_DATA } from "./prelib";
@@ -624,7 +622,7 @@ function allCupsFinished(){
     && (!ST.sulamericana || ST.sulamericana.phase==="sula_done")
     && (!ST.libertadoresCompleto || ST.libertadoresCompleto.phase==="lib_done");
 }
-// advances exactly one Brasileirão round per call — every AI-vs-AI game in the round is
+function checkForPostSeasonDeadEnd(){ const b=ST.brasileirao; if(!b||b.currentRound<b.rounds.length) return; const copaClear=!ST.copaDoBrasil||ST.copaDoBrasil.phase==="copa_done"||ST.copaDoBrasil.userEliminated; const sulaClear=!ST.sulamericana||ST.sulamericana.phase==="sula_done"||ST.sulamericana.userEliminated; const libClear=!ST.libertadoresCompleto||ST.libertadoresCompleto.phase==="lib_done"||ST.libertadoresCompleto.userEliminated; if(!(copaClear&&sulaClear&&libClear)) return; if(allCupsFinished()){ finalizeBrasaSeason(); return; } autoFinishBackgroundCups(); } function autoFinishBackgroundCups(){ let guard=0; while(!allCupsFinished()&&guard<2000){ guard++; if(ST.copaDoBrasil) ST.copaDoBrasil.roundsUntilNextLeg=0; if(ST.sulamericana) ST.sulamericana.roundsUntilNextLeg=0; if(ST.libertadoresCompleto) ST.libertadoresCompleto.roundsUntilNextLeg=0; tickCopaDoBrasil(); tickSulamericana(); tickLibertadoresCompleto(); } finalizeBrasaSeason(); } // advances exactly one Brasileirão round per call — every AI-vs-AI game in the round is
 // simulated immediately, and if the user's own club has a fixture that round it's the only
 // thing that stops here (handed to the normal match screen); everything else plays through.
 function advanceBrasileiraoStep(){
@@ -644,7 +642,7 @@ function advanceBrasileiraoStep(){
     // campaign was still going, finishBrasaRound() already zeroed its countdown the moment the
     // league ended, so it would have fired above already; nothing firing means everything has
     // genuinely finished, and the season can truly end now.
-    if(allCupsFinished()) finalizeBrasaSeason();
+    checkForPostSeasonDeadEnd();
     return;
   }
   const round = b.rounds[b.currentRound];
@@ -678,7 +676,7 @@ function finishBrasaRound(){
   if(ST.copaDoBrasil && ST.copaDoBrasil.phase!=="copa_done") ST.copaDoBrasil.roundsUntilNextLeg = 0;
   if(ST.sulamericana && ST.sulamericana.phase!=="sula_done") ST.sulamericana.roundsUntilNextLeg = 0;
   if(ST.libertadoresCompleto && ST.libertadoresCompleto.phase!=="lib_done") ST.libertadoresCompleto.roundsUntilNextLeg = 0;
-  if(allCupsFinished()) finalizeBrasaSeason();
+  checkForPostSeasonDeadEnd();
 }
 // ============================================================
 // SEASON-END COMPETITION CARDS — one card per competition the club actually played this season
@@ -2499,7 +2497,7 @@ function applyShootoutResult(ctx, winner){
       }
     }
     progressCopaBracket();
-    if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw();
+    if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw(); checkForPostSeasonDeadEnd();
   } else if(ctx.type==="copaFinal"){
     const cb = ST.copaDoBrasil;
     cb.champion = winner;
@@ -2507,7 +2505,7 @@ function applyShootoutResult(ctx, winner){
     closeRatingRound("copa", "Copa do Brasil");
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) payCopaStagePrize("copa_final");
-    ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${winner} conquista a Copa do Brasil ${cb.year} nos pênaltis.`});
+    ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${winner} conquista a Copa do Brasil ${cb.year} nos pênaltis.`}); checkForPostSeasonDeadEnd();
   } else if(ctx.type==="sulaTie"){
     const round = currentSulaKORound();
     const tie = round.ties.find(t=>t.id===ctx.tieId);
@@ -2523,7 +2521,7 @@ function applyShootoutResult(ctx, winner){
         ST.newsLog.unshift({title:"Eliminado na Sul-Americana", text:`O ${ST.teamId} caiu na ${stageLabelFor(s.phase)} da Sul-Americana ${s.year} nos pênaltis. O torneio segue sem você.`});
       }
     }
-    progressSulaBracket();
+    progressSulaBracket(); checkForPostSeasonDeadEnd();
   } else if(ctx.type==="sulaFinal"){
     const s = ST.sulamericana;
     s.champion = winner;
@@ -2531,7 +2529,7 @@ function applyShootoutResult(ctx, winner){
     closeRatingRound("sula", "Sul-Americana");
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) paySulaStagePrize("sula_final");
-    ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${winner} conquista a Sul-Americana ${s.year} nos pênaltis.`});
+    ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${winner} conquista a Sul-Americana ${s.year} nos pênaltis.`}); checkForPostSeasonDeadEnd();
   } else if(ctx.type==="libTie"){
     const round = currentLibKORound();
     const tie = round.ties.find(t=>t.id===ctx.tieId);
@@ -2547,7 +2545,7 @@ function applyShootoutResult(ctx, winner){
         ST.newsLog.unshift({title:"Eliminado na Libertadores", text:`O ${ST.teamId} caiu na ${stageLabelFor(l.phase)} da Libertadores ${l.year} nos pênaltis. O torneio segue sem você.`});
       }
     }
-    progressLibBracket();
+    progressLibBracket(); checkForPostSeasonDeadEnd();
   } else if(ctx.type==="libFinal"){
     const l = ST.libertadoresCompleto;
     l.champion = winner;
@@ -2555,7 +2553,7 @@ function applyShootoutResult(ctx, winner){
     closeRatingRound("lib", "Libertadores");
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) payLibStagePrize("lib_final");
-    ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${winner} conquista a Libertadores ${l.year} nos pênaltis.`});
+    ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${winner} conquista a Libertadores ${l.year} nos pênaltis.`}); checkForPostSeasonDeadEnd();
   }
 }
 
@@ -2769,7 +2767,7 @@ function finishCopaLeg(){
     }
   }
   progressCopaBracket();
-  if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw();
+  if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw(); checkForPostSeasonDeadEnd();
 }
 function progressCopaBracket(){
   const cb = ST.copaDoBrasil;
@@ -3011,7 +3009,7 @@ function finishSulaGroupRound(){
   const ties = pairs.map((pair,i)=>makeTie(pair[0].team, pair[1].team, i<4?0:1, i%4));
   s.knockout.sula_r16 = { ties, legIndex:0 };
   s.phase = "sula_r16";
-  ST.newsLog.unshift({title:"Fase de grupos da Sul-Americana encerrada", text:"Classificados para as oitavas de final definidos."});
+  ST.newsLog.unshift({title:"Fase de grupos da Sul-Americana encerrada", text:"Classificados para as oitavas de final definidos."}); checkForPostSeasonDeadEnd();
 }
 function currentSulaKORound(){ return ST.sulamericana.knockout[ST.sulamericana.phase]; }
 function advanceSulaLeg(){
@@ -3063,7 +3061,7 @@ function finishSulaLeg(){
       ST.newsLog.unshift({title:"Eliminado na Sul-Americana", text:`O ${ST.teamId} caiu na ${stageLabelFor(s.phase)} da Sul-Americana ${s.year}. O torneio segue sem você.`});
     }
   }
-  progressSulaBracket();
+  progressSulaBracket(); checkForPostSeasonDeadEnd();
 }
 function progressSulaBracket(){
   const s = ST.sulamericana;
@@ -3304,7 +3302,7 @@ function finishLibGroupRound(){
   const ties = pairs.map((pair,i)=>makeTie(pair[0].team, pair[1].team, i<4?0:1, i%4));
   l.knockout.lib_r16 = { ties, legIndex:0 };
   l.phase = "lib_r16";
-  ST.newsLog.unshift({title:"Fase de grupos da Libertadores encerrada", text:"Classificados para as oitavas de final definidos."});
+  ST.newsLog.unshift({title:"Fase de grupos da Libertadores encerrada", text:"Classificados para as oitavas de final definidos."}); checkForPostSeasonDeadEnd();
 }
 function currentLibKORound(){ return ST.libertadoresCompleto.knockout[ST.libertadoresCompleto.phase]; }
 function advanceLibLeg(){
@@ -3356,7 +3354,7 @@ function finishLibLeg(){
       ST.newsLog.unshift({title:"Eliminado na Libertadores", text:`O ${ST.teamId} caiu na ${stageLabelFor(l.phase)} da Libertadores ${l.year}. O torneio segue sem você.`});
     }
   }
-  progressLibBracket();
+  progressLibBracket(); checkForPostSeasonDeadEnd();
 }
 function progressLibBracket(){
   const l = ST.libertadoresCompleto;
@@ -3668,7 +3666,7 @@ function finishPendingMatch(){
       cb.champion = f.hs>f.as ? f.home : f.away;
       cb.phase = "copa_done";
       closeRatingRound("copa", "Copa do Brasil");
-      if(cb.champion===ST.teamId) payCopaStagePrize("copa_final");
+      if(cb.champion===ST.teamId) payCopaStagePrize("copa_final"); checkForPostSeasonDeadEnd();
       ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${cb.champion} conquista a Copa do Brasil ${cb.year}.`});
     } else {
       finishCopaLeg();
@@ -3686,7 +3684,7 @@ function finishPendingMatch(){
       s.champion = f.hs>f.as ? f.home : f.away;
       s.phase = "sula_done";
       closeRatingRound("sula", "Sul-Americana");
-      if(s.champion===ST.teamId) paySulaStagePrize("sula_final");
+      if(s.champion===ST.teamId) paySulaStagePrize("sula_final"); checkForPostSeasonDeadEnd();
       ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${s.champion} conquista a Sul-Americana ${s.year}.`});
     } else {
       finishSulaLeg();
@@ -3704,7 +3702,7 @@ function finishPendingMatch(){
       l.champion = f.hs>f.as ? f.home : f.away;
       l.phase = "lib_done";
       closeRatingRound("lib", "Libertadores");
-      if(l.champion===ST.teamId) payLibStagePrize("lib_final");
+      if(l.champion===ST.teamId) payLibStagePrize("lib_final"); checkForPostSeasonDeadEnd();
       ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${l.champion} conquista a Libertadores ${l.year}.`});
     } else {
       finishLibLeg();
