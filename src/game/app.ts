@@ -601,7 +601,7 @@ function startBrasileiraoCareer(teamId, managerName){
 function brasaSortedStandings(){
   return E.sortedStandings(ST.brasileirao.standings, SERIE_A_2026);
 }
-// never let two cup/continental match days land back-to-back — the user's last actual match
+function brasaLeagueOver(){ const b = ST.brasileirao; return !!(b && b.currentRound>=b.rounds.length); } // never let two cup/continental match days land back-to-back — the user's last actual match
 // always has to have been a Brasileirão league game before another Copa/Sul-Americana/
 // Libertadores one is allowed to trigger. Read by BOTH advanceBrasileiraoStep() (to decide
 // whether a cup tick is even allowed to fire this round) AND every copa/sula/libPendingUserMatch()
@@ -614,7 +614,7 @@ function cupMatchesBlockedByInterleaving(){
   // day never looked like it was coming up next when a plain league round was actually next
   // (or vice versa). With the league over, any continental campaign still mid-run just plays
   // straight through to its conclusion — see finishBrasaRound()/advanceBrasileiraoStep().
-  if(b && b.currentRound>=b.rounds.length) return false;
+  if(brasaLeagueOver()) return false;
   return ST.lastUserMatchType==="copa" || ST.lastUserMatchType==="sula" || ST.lastUserMatchType==="lib";
 }
 function allCupsFinished(){
@@ -2821,8 +2821,8 @@ function advanceCopaFinalStep(){
 function tickCopaDoBrasil(){
   const cb = ST.copaDoBrasil;
   if(!cb || cb.phase==="copa_done") return false;
-  if(cb.roundsUntilNextLeg>0){ cb.roundsUntilNextLeg--; return false; }
-  cb.roundsUntilNextLeg = 3;
+  const leagueOver = brasaLeagueOver(); if(!leagueOver && cb.roundsUntilNextLeg>0){ cb.roundsUntilNextLeg--; return false; }
+  cb.roundsUntilNextLeg = leagueOver ? 0 : 3;
   if(cb.phase==="copa_final") return advanceCopaFinalStep();
   return advanceCopaLeg();
 }
@@ -3124,8 +3124,8 @@ function advanceSulaFinalStep(){
 function tickSulamericana(){
   const s = ST.sulamericana;
   if(!s || s.phase==="sula_done") return false;
-  if(s.roundsUntilNextLeg>0){ s.roundsUntilNextLeg--; return false; }
-  s.roundsUntilNextLeg = 2;
+  const leagueOver = brasaLeagueOver(); if(!leagueOver && s.roundsUntilNextLeg>0){ s.roundsUntilNextLeg--; return false; }
+  s.roundsUntilNextLeg = leagueOver ? 0 : 2;
   if(s.phase==="sula_groups") return advanceSulaGroupRound();
   if(s.phase==="sula_final") return advanceSulaFinalStep();
   return advanceSulaLeg();
@@ -3136,7 +3136,7 @@ function tickSulamericana(){
 // what match is actually coming up.
 function sulaPendingUserMatch(){
   const s = ST.sulamericana;
-  if(!s || s.userEliminated || s.phase==="sula_done" || s.roundsUntilNextLeg>0) return null;
+  if(!s || s.userEliminated || s.phase==="sula_done" || (s.roundsUntilNextLeg>0 && !brasaLeagueOver())) return null;
   if(cupMatchesBlockedByInterleaving()) return null; // same interleaving rule as copaPendingUserMatch()
   if(s.phase==="sula_groups"){
     const g = sulaUserGroup();
@@ -3418,8 +3418,8 @@ function advanceLibFinalStep(){
 function tickLibertadoresCompleto(){
   const l = ST.libertadoresCompleto;
   if(!l || l.phase==="lib_done") return false;
-  if(l.roundsUntilNextLeg>0){ l.roundsUntilNextLeg--; return false; }
-  l.roundsUntilNextLeg = 2;
+  const leagueOver = brasaLeagueOver(); if(!leagueOver && l.roundsUntilNextLeg>0){ l.roundsUntilNextLeg--; return false; }
+  l.roundsUntilNextLeg = leagueOver ? 0 : 2;
   if(l.phase==="lib_groups") return advanceLibGroupRound();
   if(l.phase==="lib_final") return advanceLibFinalStep();
   return advanceLibLeg();
@@ -3428,7 +3428,7 @@ function tickLibertadoresCompleto(){
 // one whenever it's the match actually coming up next on the calendar.
 function libPendingUserMatch(){
   const l = ST.libertadoresCompleto;
-  if(!l || l.userEliminated || l.phase==="lib_done" || l.roundsUntilNextLeg>0) return null;
+  if(!l || l.userEliminated || l.phase==="lib_done" || (l.roundsUntilNextLeg>0 && !brasaLeagueOver())) return null;
   if(cupMatchesBlockedByInterleaving()) return null; // same interleaving rule as copaPendingUserMatch()
   if(l.phase==="lib_groups"){
     const g = libUserGroup();
@@ -5180,7 +5180,7 @@ function getNextUserPrelibMatch(){
 // what actually plays out on match day, which is exactly what read as "bugged" before this.
 function copaPendingUserMatch(){
   const cb = ST.copaDoBrasil;
-  /* once you're out, the Copa keeps going without you — no calendar highlight, no bracket takeover — until it starts fresh next season and you're actually in it again. */ if(!cb || cb.userEliminated || cb.phase==="copa_done" || cb.roundsUntilNextLeg>0) return null;
+  /* once you're out, the Copa keeps going without you — no calendar highlight, no bracket takeover — until it starts fresh next season and you're actually in it again. */ if(!cb || cb.userEliminated || cb.phase==="copa_done" || (cb.roundsUntilNextLeg>0 && !brasaLeagueOver())) return null;
   if(cupMatchesBlockedByInterleaving()) return null; // the interleaving rule will skip this round's tick anyway — a Brasileirão match plays first, so don't preview the Copa one yet
   if(cb.phase==="copa_final"){
     const f = cb.knockout.copa_final;
@@ -5335,7 +5335,7 @@ function renderLevelUpCard(name, pos, fromOvr, toOvr, delayMs){
 // so the table still owns most of the row and the page fits without scrolling.
 function renderNextMatchCard(compact){
   const nm = getNextUserMatch();
-  if(!nm) return "";
+  if(!nm){ if(ST.mode==="brasileirao" && brasaLeagueOver() && ST.stage==="hub"){ return `<div class="panel" style="text-align:center;${compact?'padding:14px;':''}"><div class="faint tiny uc mb12">Temporada ${ST.seasonYear}</div><p class="dim small">Todos os seus compromissos da temporada terminaram.</p><div class="btn-row center ${compact?'mt8':'mt16'}"><button class="btn btn-gold ${compact?'':'btn-lg'}" onclick="Game.forceEndSeason()">IR PARA ${ST.seasonYear+1} →</button></div></div>`; } return ""; }
   ensureCalendarCountdown();
   const days = ST.calendarDaysLeft;
   const oppName = nm.home===ST.teamId ? nm.away : nm.home;
@@ -7597,7 +7597,7 @@ const Game = {
     scheduleSave();
     render();
   },
-  simulateTraining(){
+  forceEndSeason(){ autoFinishBackgroundCups(); scheduleSave(); render(); }, simulateTraining(){
     ST.trainingAnimating = true;
     render();
     setTimeout(()=>{
