@@ -388,7 +388,7 @@ const COMPETITION_TROPHIES = {
   brasileirao: {url:TROPHY_CDN+"LG_BRA1.png", alt:"Taça Brasileirão"},
   copa: {url:TROPHY_CDN+"DOM_BRA.png", alt:"Taça Copa do Brasil"},
   libertadores: {url:TROPHY_CDN+"LIB.png", alt:"Taça CONMEBOL Libertadores"},
-  sulamericana: {url:TROPHY_CDN+"SUD.png", alt:"Taça CONMEBOL Sul-Americana"},
+  sulamericana: {url:TROPHY_CDN+"SUD.png", alt:"Taça CONMEBOL Sul-Americana"}, intercontinental: {url:TROPHY_CDN+"ICC.png", alt:"Taça Intercontinental FIFA"},
 };
 function competitionTrophyImg(compType, height, opacity){
   const t = COMPETITION_TROPHIES[compType] || COMPETITION_TROPHIES.brasileirao;
@@ -588,7 +588,7 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.brasaStandingsHistory = {};
   ST.brasaZonesHistory = {};
   ST.sulamericana = null;
-  ST.libertadoresCompleto = null;
+  ST.libertadoresCompleto = null; ST.intercontinental = null;
   ST.lastUserMatchType = null;
   ST.desempenhoFilter = "brasileirao";
   ST.seasonPrizeTotals = {brasileirao:0, copa:0, sula:0, lib:0};
@@ -622,7 +622,7 @@ function allCupsFinished(){
     && (!ST.sulamericana || ST.sulamericana.phase==="sula_done")
     && (!ST.libertadoresCompleto || ST.libertadoresCompleto.phase==="lib_done");
 }
-function checkForPostSeasonDeadEnd(){ const b=ST.brasileirao; if(!b||b.currentRound<b.rounds.length) return; const copaClear=!ST.copaDoBrasil||ST.copaDoBrasil.phase==="copa_done"||ST.copaDoBrasil.userEliminated; const sulaClear=!ST.sulamericana||ST.sulamericana.phase==="sula_done"||ST.sulamericana.userEliminated; const libClear=!ST.libertadoresCompleto||ST.libertadoresCompleto.phase==="lib_done"||ST.libertadoresCompleto.userEliminated; if(!(copaClear&&sulaClear&&libClear)) return; if(allCupsFinished()){ finalizeBrasaSeason(); return; } autoFinishBackgroundCups(); } function autoFinishBackgroundCups(){ let guard=0; while(!allCupsFinished()&&guard<2000){ guard++; if(ST.copaDoBrasil) ST.copaDoBrasil.roundsUntilNextLeg=0; if(ST.sulamericana) ST.sulamericana.roundsUntilNextLeg=0; if(ST.libertadoresCompleto) ST.libertadoresCompleto.roundsUntilNextLeg=0; tickCopaDoBrasil(); tickSulamericana(); tickLibertadoresCompleto(); } finalizeBrasaSeason(); } // advances exactly one Brasileirão round per call — every AI-vs-AI game in the round is
+function checkForPostSeasonDeadEnd(){ const b=ST.brasileirao; if(!b||b.currentRound<b.rounds.length) return; const copaClear=!ST.copaDoBrasil||ST.copaDoBrasil.phase==="copa_done"||ST.copaDoBrasil.userEliminated; const sulaClear=!ST.sulamericana||ST.sulamericana.phase==="sula_done"||ST.sulamericana.userEliminated; const libClear=!ST.libertadoresCompleto||ST.libertadoresCompleto.phase==="lib_done"||ST.libertadoresCompleto.userEliminated; if(!(copaClear&&sulaClear&&libClear)) return; if(allCupsFinished()){ checkForIntercontinental(); return; } autoFinishBackgroundCups(); } function autoFinishBackgroundCups(){ let guard=0; while(!allCupsFinished()&&guard<2000){ guard++; if(ST.copaDoBrasil) ST.copaDoBrasil.roundsUntilNextLeg=0; if(ST.sulamericana) ST.sulamericana.roundsUntilNextLeg=0; if(ST.libertadoresCompleto) ST.libertadoresCompleto.roundsUntilNextLeg=0; tickCopaDoBrasil(); tickSulamericana(); tickLibertadoresCompleto(); } checkForIntercontinental(); } const IC_CONCACAF_CLUBS = ["Club América","Monterrey","Pachuca","León","Los Angeles FC","Santos Laguna","Toronto FC"]; const IC_ASIA_CLUBS = ["Al Hilal SFC","Al Nassr FC","Al Ittihad Club","Al Ahli Saudi FC","Al Sadd SC","Al Duhail SC","Kashima Antlers","Kawasaki Frontale","Yokohama F. Marinos","Vissel Kobe","Ulsan HD FC","Jeonbuk Hyundai Motors","Pohang Steelers","FC Seoul"]; const IC_TIER_OVR = {euro:87, concacaf:79, asia:81}; const IC_NAME_POOLS = { euro: [["Kevin","Erik","Marco","Julian","Antoine","Thiago","Pablo","Nico","Leon","Mathis","Diego","Sander","Bruno","Rafael"], ["Novak","Berg","Rossi","Keller","Dubois","Fischer","Moreau","Alonso","Weber","Lindqvist","Ferreira","Haas","Costa","Silveira"]], concacaf: [["Carlos","Jesús","Erick","Uriel","Alan","Roberto","Diego","Sebastián","Jordan","Tyler","Emerson","Julián"], ["Hernández","Domínguez","Aguirre","Antuna","Reyes","Gallardo","Vega","Chávez","Salcedo","Córdova","Araujo","Peralta"]], asia: [["Hiroshi","Minjae","Yusuke","Sung","Faisal","Takumi","Jae","Khalid","Ryo","Dae","Salman","Kenta"], ["Sato","Kim","Tanaka","Park","Al-Otaibi","Suzuki","Lee","Al-Dawsari","Watanabe","Choi","Nakamura","Yamamoto"]], }; function genConfederationSquad(tierOvr, natLabel, namePool, rng, idGen){ const positions = ["GK","GK","CB","CB","CB","LB","LB","RB","RB","DMF","DMF","CM","CM","CM","AM","LW","RW","ST","ST","LM"]; return positions.map(pos=>{ const nm = pick(rng,namePool[0])+" "+pick(rng,namePool[1]); const age = 22+Math.floor(rng()*10); const isGk = pos==="GK"; const ovr = E.clamp(tierOvr + Math.floor((rng()-0.5)*10), 50, 92); const pot = ovr; function j(spread){ return E.clamp(ovr+Math.floor((rng()-0.5)*spread),30,95); } return {id:idGen(), name:nm, nat:natLabel, age, pos, altPos:[pos], ovr, pot, pac:j(16), sho:isGk?Math.floor(rng()*20)+15:j(14), pas:j(12), dri:isGk?j(18):j(12), de:j(14), phy:j(12), gk:isGk?j(12):Math.floor(rng()*20)+15, value:E.calcValue(ovr,age,pot), foot:rng()<0.78?"Right foot":"Left foot", injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0}; }); } function ensureIcOpponentSquad(clubName, tier){ if(ST.world.teams[clubName]) return; const rng = E.makeRNG(nextSeed()); const natLabel = tier==="euro"?"Europa":tier==="concacaf"?"Concacaf":"Ásia"; const players = genConfederationSquad(IC_TIER_OVR[tier]||80, natLabel, IC_NAME_POOLS[tier]||IC_NAME_POOLS.euro, rng, nextId); ST.world.teams[clubName] = {name:clubName, country:"", flag:"", group:null, source:"ic_gen", players}; } function icMatchStrength(teamName, ic){ if(teamName===ic.euroChampion) return IC_TIER_OVR.euro; if(teamName===ic.concacafChampion) return IC_TIER_OVR.concacaf; if(teamName===ic.asiaChampion) return IC_TIER_OVR.asia; return (ST.world.teams[teamName] && teamAvgOvr(ST.world.teams[teamName])) || 75; } function resolveSimulatedIcMatch(match){ const rng = E.makeRNG(nextSeed()); const sA = icMatchStrength(match.home, ST.intercontinental); const sB = icMatchStrength(match.away, ST.intercontinental); const aWins = rng() < 1/(1+Math.pow(10,(sB-sA)/9)); const winnerGoals = 1+Math.floor(rng()*3); const loserGoals = Math.floor(rng()*winnerGoals); match.hs = aWins?winnerGoals:loserGoals; match.as = aWins?loserGoals:winnerGoals; match.played = true; match.winner = aWins?match.home:match.away; } function icPrizeForStage(stage){ return {ic_semi:8000000, ic_final:30000000}[stage] || 0; } function payIntercontinentalPrize(stage){ const prize = icPrizeForStage(stage); if(!prize) return; ST.budget += prize; addSeasonPrize("ic", prize); ST.newsLog.unshift({title:"Premiação do Mundial de Clubes", text:`Classificação rende ${fmtMoney(prize)} aos cofres do ${ST.teamId}.`}); } function startIntercontinental(){ const rng = E.makeRNG(nextSeed()); const libChampion = ST.libertadoresCompleto.champion; const euroChampion = pick(rng, REAL_EURO_CLUBS); const concacafChampion = pick(rng, IC_CONCACAF_CLUBS); const asiaChampion = pick(rng, IC_ASIA_CLUBS); const userInvolved = libChampion===ST.teamId; ST.intercontinental = { year: ST.seasonYear, phase: userInvolved?"ic_announce":"ic_semi", libChampion, euroChampion, concacafChampion, asiaChampion, semis: { sf1: {home:asiaChampion, away:libChampion, played:false, hs:null, as:null, winner:null}, sf2: {home:euroChampion, away:concacafChampion, played:false, hs:null, as:null, winner:null}, }, final: null, champion:null, placementReached:null, userInvolved, scorers:{}, assisters:{}, }; ST.newsLog.unshift({title:"Mundial de Clubes definido!", text:`${libChampion} representa a Libertadores no Mundial de Clubes ${ST.seasonYear}, ao lado de ${euroChampion} (Champions League), ${concacafChampion} (Concacaf) e ${asiaChampion} (Ásia). Semifinais: ${asiaChampion} x ${libChampion} — ${euroChampion} x ${concacafChampion}.`}); if(userInvolved){ ST.stage = "ic_announce"; return; } advanceIntercontinentalStep(); } function progressIntercontinentalBracket(){ const ic = ST.intercontinental; const sf1 = ic.semis.sf1, sf2 = ic.semis.sf2; if(!sf1.played || !sf2.played) return; const w1 = sf1.winner || (sf1.hs>sf1.as?sf1.home:sf1.away); const w2 = sf2.winner || (sf2.hs>sf2.as?sf2.home:sf2.away); ic.final = {home:w1, away:w2, played:false, hs:null, as:null, winner:null}; ic.phase = "ic_final"; ST.newsLog.unshift({title:"Final do Mundial de Clubes definida!", text:`${w1} e ${w2} disputam o título do Mundial de Clubes ${ic.year}.`}); } function finishIntercontinental(champion){ const ic = ST.intercontinental; ic.champion = champion; ic.phase = "ic_done"; if(ic.userInvolved){ if(champion===ST.teamId) payIntercontinentalPrize("ic_final"); else ic.placementReached = ic.semis.sf1.winner===ST.teamId ? "Vice-campeão" : "Semifinal"; } ST.newsLog.unshift({title:"Campeão do Mundo!", text:`${champion} conquista o Mundial de Clubes ${ic.year}.`}); checkForPostSeasonDeadEnd(); } function advanceIntercontinentalStep(){ const ic = ST.intercontinental; if(ic.phase==="ic_semi"){ if(!ic.semis.sf2.played) resolveSimulatedIcMatch(ic.semis.sf2); const sf1 = ic.semis.sf1; if(!sf1.played){ if(sf1.away===ST.teamId){ ensureIcOpponentSquad(sf1.home, "asia"); startRatingRound(); goToMatchDay(sf1, {type:"ic_semi"}); return true; } resolveSimulatedIcMatch(sf1); } progressIntercontinentalBracket(); return advanceIntercontinentalStep(); } if(ic.phase==="ic_final"){ const f = ic.final; if(!f.played){ if(f.home===ST.teamId || f.away===ST.teamId){ const oppName = f.home===ST.teamId ? f.away : f.home; const tier = oppName===ic.euroChampion?"euro":oppName===ic.concacafChampion?"concacaf":"asia"; ensureIcOpponentSquad(oppName, tier); startRatingRound(); goToMatchDay(f, {type:"ic_final"}); return true; } resolveSimulatedIcMatch(f); } finishIntercontinental(f.winner || (f.hs>f.as?f.home:f.away)); } return false; } function icSeasonResult(){ const ic = ST.intercontinental; if(!ic || !ic.userInvolved || ic.year!==ST.seasonYear) return null; if(ic.champion===ST.teamId) return "Campeão"; return ic.placementReached || "Em andamento"; } function icRepReward(resultLabel){ return {"Campeão":12, "Vice-campeão":5, "Semifinal":2}[resultLabel] || 0; } function checkForIntercontinental(){ const ic = ST.intercontinental; if(ic && ic.year===ST.seasonYear){ if(ic.phase==="ic_done") finalizeBrasaSeason(); return; } if(!ST.libertadoresCompleto || ST.libertadoresCompleto.phase!=="lib_done"){ finalizeBrasaSeason(); return; } startIntercontinental(); } // advances exactly one Brasileirão round per call — every AI-vs-AI game in the round is
 // simulated immediately, and if the user's own club has a fixture that round it's the only
 // thing that stops here (handed to the normal match screen); everything else plays through.
 function advanceBrasileiraoStep(){
@@ -749,18 +749,18 @@ function finalizeBrasaSeason(){
   const brasaRep = pos===1 ? 6 : pos<=6 ? 3 : pos<=13 ? 0 : -3;
   const copaResult = copaSeasonResult();
   const sulaResult = sulaSeasonResult();
-  const libResult = libSeasonResult();
+  const libResult = libSeasonResult(); const icResult = icSeasonResult();
   const copaRep = cupRepReward(copaResult);
   const sulaRep = cupRepReward(sulaResult);
-  const libRep = cupRepReward(libResult);
+  const libRep = cupRepReward(libResult); const icRep = icRepReward(icResult);
   const prizeTotals = ST.seasonPrizeTotals || {brasileirao:0, copa:0, sula:0, lib:0};
   const compCards = [
     {key:"brasileirao", label:"Brasileirão", trophyKey:"brasileirao", result: pos===1?"Campeão":`${pos}º lugar`, repChange:brasaRep, prize:prizeTotals.brasileirao||0, won: pos===1},
   ];
   if(copaResult) compCards.push({key:"copa", label:"Copa do Brasil", trophyKey:"copa", result:copaResult, repChange:copaRep, prize:prizeTotals.copa||0, won:copaResult==="Campeão"});
   if(sulaResult) compCards.push({key:"sula", label:"Sul-Americana", trophyKey:"sulamericana", result:sulaResult, repChange:sulaRep, prize:prizeTotals.sula||0, won:sulaResult==="Campeão"});
-  if(libResult) compCards.push({key:"lib", label:"Libertadores", trophyKey:"libertadores", result:libResult, repChange:libRep, prize:prizeTotals.lib||0, won:libResult==="Campeão"});
-  const totalRepChange = brasaRep + copaRep + sulaRep + libRep;
+  if(libResult) compCards.push({key:"lib", label:"Libertadores", trophyKey:"libertadores", result:libResult, repChange:libRep, prize:prizeTotals.lib||0, won:libResult==="Campeão"}); if(icResult) compCards.push({key:"ic", label:"Mundial de Clubes", trophyKey:"intercontinental", result:icResult, repChange:icRep, prize:prizeTotals.ic||0, won:icResult==="Campeão"});
+  const totalRepChange = brasaRep + copaRep + sulaRep + libRep + icRep;
   ST.lastSeasonSummary = {
     year: ST.seasonYear,
     placement: pos===1 ? "Campeão" : `${pos}º lugar`,
@@ -1352,7 +1352,7 @@ function startCareer(teamId, managerName){
   ST.brasileirao = null;
   ST.copaDoBrasil = null;
   ST.sulamericana = null; // Modo Completo's Sul-Americana campaign is unrelated to this classic mode
-  ST.libertadoresCompleto = null; // ...same for Modo Completo's own Libertadores campaign
+  ST.libertadoresCompleto = null; ST.intercontinental = null; // ...same for Modo Completo's own Libertadores campaign
   ST.careerStats = {goals:{}, assists:{}, signings:[]};
   ST.world = freshWorld();
   ensureGlobalMarket();
@@ -1479,7 +1479,7 @@ function setupSeasonCompetition(){
 function competitionStatsStore(compKey){
   if(compKey==="copa") return ST.copaDoBrasil;
   if(compKey==="sula") return ST.sulamericana;
-  if(compKey==="lib") return ST.libertadoresCompleto;
+  if(compKey==="lib") return ST.libertadoresCompleto; if(compKey==="ic") return ST.intercontinental;
   return ST.mode==="brasileirao" ? ST.brasileirao : ST.competition;
 }
 // derives that same compKey from a match's own context object (ST.pendingMatch.context) —
@@ -1489,7 +1489,7 @@ function compKeyForContext(ctx){
   if(!ctx) return undefined;
   if(ctx.type==="copa") return "copa";
   if(ctx.type==="sula") return "sula";
-  if(ctx.type==="lib") return "lib";
+  if(ctx.type==="lib") return "lib"; if(ctx.type==="ic_semi"||ctx.type==="ic_final") return "ic";
   return undefined;
 }
 // records one goal for the season-wide top-scorers table.
@@ -1674,7 +1674,7 @@ function stageLabelFor(type){
     sula_groups:"Sul-Americana — Fase de Grupos", sula_r16:"Sul-Americana — Oitavas de Final", sula_qf:"Sul-Americana — Quartas de Final",
     sula_sf:"Sul-Americana — Semifinal", sula_final:"Sul-Americana — Final", sula_done:"Sul-Americana — Encerrada",
     lib_groups:"Libertadores — Fase de Grupos", lib_r16:"Libertadores — Oitavas de Final", lib_qf:"Libertadores — Quartas de Final",
-    lib_sf:"Libertadores — Semifinal", lib_final:"Libertadores — Final", lib_done:"Libertadores — Encerrada",
+    lib_sf:"Libertadores — Semifinal", lib_final:"Libertadores — Final", lib_done:"Libertadores — Encerrada", ic_semi:"Mundial de Clubes — Semifinal", ic_final:"Mundial de Clubes — Final", ic_done:"Mundial de Clubes — Encerrado",
     brasileirao:"Brasileirão"}[type] || type;
 }
 
@@ -3707,7 +3707,7 @@ function finishPendingMatch(){
     } else {
       finishLibLeg();
     }
-  } else if(ctx.type==="group"){
+  } else if(ctx.type==="ic_semi"){ const ic = ST.intercontinental; const f = ic.semis.sf1; if(f.hs===f.as){ startShootout(f.home, f.away, {type:"icSemi"}); return; } f.winner = f.hs>f.as ? f.home : f.away; closeRatingRound("ic", "Mundial de Clubes"); if(f.winner===ST.teamId) payIntercontinentalPrize("ic_semi"); ST.newsLog.unshift(f.winner===ST.teamId ? {title:"Classificado para a final do Mundial de Clubes!", text:`O ${ST.teamId} vence e vai à final do Mundial de Clubes ${ic.year}.`} : {title:"Eliminado no Mundial de Clubes", text:`O ${ST.teamId} cai na semifinal do Mundial de Clubes ${ic.year} diante do ${f.home}.`}); progressIntercontinentalBracket(); advanceIntercontinentalStep(); } else if(ctx.type==="ic_final"){ const ic = ST.intercontinental; const f = ic.final; if(f.hs===f.as){ startShootout(f.home, f.away, {type:"icFinal"}); return; } f.winner = f.hs>f.as ? f.home : f.away; closeRatingRound("ic", "Mundial de Clubes"); finishIntercontinental(f.winner); } else if(ctx.type==="group"){
     finishGroupRound();
   } else if(ctx.type==="final"){
     const f = ST.competition.knockout.final;
@@ -4690,7 +4690,7 @@ function render(){
     else if(ST.stage==="season_end") html = renderSeasonEndScreen();
     else if(ST.stage==="group_draw") html = renderGroupDraw();
     else if(ST.stage==="copa_draw") html = renderCopaDraw();
-    else if(ST.stage==="copa_qf_draw") html = renderCopaQfDraw();
+    else if(ST.stage==="copa_qf_draw") html = renderCopaQfDraw(); else if(ST.stage==="ic_announce") html = renderIcAnnounce();
     else if(ST.stage==="job_offers") html = renderJobOffers();
     else if(ST.stage==="career_over") html = renderCareerOver();
     else if(ST.stage==="penaltyShootout") html = renderPenaltyShootoutScreen();
@@ -7297,7 +7297,7 @@ function renderReiDaAmericaPanel(r){
 // slots pot-by-pot, group-by-group (TIME 1 grupo A, TIME 1 grupo B, ... TIME 2 grupo A, ...),
 // each one unrolling like a paper slip pulled from the draw pot. ST.drawRevealed (ticked by
 // startGroupDrawAnimation's timer, or jumped straight to 32 by SKIP) drives how many show.
-function renderCopaDraw(){
+function renderIcAnnounce(){ const ic = ST.intercontinental; const slot = (teamName)=>{ const isUser = teamName===ST.teamId; return `<div class="draw-slot draw-slot-reveal${isUser?" draw-slot-user":""}"> <span class="draw-slot-crest">${clubCrestImg(teamName,20,null)}</span> <span class="draw-slot-name">${esc(teamName)}</span> </div>`; }; const boxes = `<div class="draw-group"> <div class="draw-group-title">Semifinal 1 — Ásia x Libertadores</div> ${slot(ic.asiaChampion)}${slot(ic.libChampion)} </div> <div class="draw-group"> <div class="draw-group-title">Semifinal 2 — Champions League x Concacaf</div> ${slot(ic.euroChampion)}${slot(ic.concacafChampion)} </div>`; return `${cornerWatermarks()}<div class="draw-screen"> <div class="draw-header"> <div class="draw-trophy">${competitionTrophyImg("intercontinental",90,1)}</div> <div class="draw-title-badge">FIFA</div> <h1 class="draw-title">Mundial de Clubes</h1> <div class="draw-year">${esc(ic.libChampion)} — CAMPEÃO DA LIBERTADORES ${ic.year}</div> </div> <div class="draw-grid">${boxes}</div> <div class="btn-row center mt24"> <button class="btn btn-gold btn-lg" onclick="Game.continueIntercontinental()">Encarar o mundo →</button> </div> </div>`; } function renderCopaDraw(){
   const cb = ST.copaDoBrasil;
   const ties = cb.knockout.copa_r16.ties;
   const revealed = cb.drawRevealed||0;
@@ -7874,7 +7874,7 @@ const Game = {
     ST.copaDoBrasil.qfDrawRevealed = 8;
     render();
   },
-  finishCopaQfDraw(){
+  continueIntercontinental(){ ST.intercontinental.phase = "ic_semi"; advanceIntercontinentalStep(); scheduleSave(); render(); }, finishCopaQfDraw(){
     ST.stage = "hub"; ST.hubTab = "competicao";
     scheduleSave();
     render();
