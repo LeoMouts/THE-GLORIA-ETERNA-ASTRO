@@ -374,7 +374,7 @@ function jerseyIconSVG(teamName, size){
 // ---------- Libertadores trophy render (real artwork, cut out to a transparent PNG) ----------
 const TROPHY_IMG = "/images/awards/trophy.png";
 const TRAINING_ICON = "/images/training-icon.png"; // dumbbell + shaker + cone illustration
-const SOFASCORE_LOGO = "/images/press/sofascore.png"; // "Seleção da Semana" e-mails are sent under this brand — see closeRatingRound()/renderTotwMailBody()
+const SOFASCORE_LOGO = "/images/press/sofascore_logo_transparent.png"; // "Seleção da Semana" e-mails are sent under this brand — see closeRatingRound()/renderTotwMailBody()
 const TROPHY_ASPECT = 250/609; // width/height of the source cutout
 function trophyImg(height, opacity){
   height = height || 120;
