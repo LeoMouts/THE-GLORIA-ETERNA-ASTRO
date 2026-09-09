@@ -427,6 +427,7 @@ input,select{font-family:inherit;}
    lineup where that's a given. */
 .totw-club{display:flex;align-items:center;gap:3px;margin-top:3px;font-size:8.5px;color:var(--text-faint);white-space:nowrap;max-width:86px;overflow:hidden;text-overflow:ellipsis;}
 .totw-club img,.totw-club svg{width:11px;height:11px;flex:0 0 auto;}
+.totw-brand-logo{display:block;width:130px;height:auto;margin-bottom:10px;}
 
 /* ---------------- Competição: two-column layout ---------------- */
 .competicao-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;}
