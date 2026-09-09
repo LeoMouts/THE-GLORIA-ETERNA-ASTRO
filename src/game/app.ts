@@ -5087,7 +5087,7 @@ function renderNextMatchCard(compact){
   const days = ST.calendarDaysLeft;
   const oppName = nm.home===ST.teamId ? nm.away : nm.home;
   const crestSize = compact ? 40 : 64;
-  const timeConfigBtn = compact ? "" : `<div class="btn-row center mt8">
+  const timeConfigBtn = `<div class="btn-row center mt8">
          <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
        </div>`;
   // match day itself drops the calendar entirely and goes back to exactly how this card
@@ -5097,7 +5097,7 @@ function renderNextMatchCard(compact){
     : days<=0
     ? `<div class="gold bold uc tac ${compact?'mt8 tiny':'mt16'}" style="letter-spacing:.06em;">⚽ Dia do jogo!</div>
        <div class="btn-row center ${compact?'mt8':'mt16'}">
-         <button class="btn btn-gold ${compact?'btn-sm':''}" onclick="Game.advanceSlow()">▶ ${compact?'Lenta':'Simulação Lenta'}</button>
+         <button class="btn btn-gold ${compact?'btn-sm':''}" onclick="Game.advanceSlow()">▶ Partida Completa</button>
          <button class="btn ${compact?'btn-sm':''}" onclick="Game.advanceFast()">⏭ ${compact?'Resultado':'Ir para o Resultado'}</button>
        </div>
        ${timeConfigBtn}`
@@ -5322,12 +5322,12 @@ function renderBrasileiraoCompeticaoTab(){
   const l = ST.libertadoresCompleto;
   const showLibPanel = !!l && !l.userEliminated && (libUp || l.phase==="lib_final" || l.phase==="lib_done");
   if(showCopaBracket || showSulaPanel || showLibPanel){
-    /* avançar keeps its usual compact top-left spot; each competition panel needs real width to lay out without scrolling sideways, so each gets its own full-width row right below avançar (grid auto-placement just leaves row 1's other half blank) — stacked one after another if more than one campaign is live at once (Copa always can be; at most one of Sul-Americana/Libertadores ever is, since a club never qualifies for both in the same season); e-mails/contratações close out the page in one more row. */
+    /* the compact avançar only ever needed the left half of this row when the right half held the Série A table — with a cup panel taking over instead (full-width, pushed to row 2 by the grid), that right half just sat empty. Spanning avançar across both columns here fills it, so it gets the same full (non-compact) size the rest of the app uses for it, not the small square variant. Each competition panel still gets its own full-width row right below — stacked one after another if more than one campaign is live at once (Copa always can be; at most one of Sul-Americana/Libertadores ever is, since a club never qualifies for both in the same season); e-mails/contratações close out the page in one more row. */
     const panels = [];
     if(showCopaBracket) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>`);
     if(showSulaPanel) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(s.phase))} ${s.year}</div>${renderSulaCompetitionPanel()}</div>`);
     if(showLibPanel) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(l.phase))} ${l.year}</div>${renderLibCompletoCompetitionPanel()}</div>`);
-    const cells = `<div class="competicao-cell">${renderNextMatchCard(true)}</div>`
+    const cells = `<div class="competicao-cell" style="grid-column:1 / -1;">${renderNextMatchCard(false)}</div>`
       + panels.map(p=>`<div class="competicao-cell" style="grid-column:1 / -1;">${p}</div>`).join("")
       + `<div class="competicao-cell">${renderLatestEmailCard()}</div>` + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`;
     return `<div class="competicao-grid">${cells}</div>`;
