@@ -422,6 +422,11 @@ input,select{font-family:inherit;}
 .pslot.empty .jersey-card .jersey-shirt{opacity:.35;}
 .pslot.empty .jersey-ovr{color:var(--text-faint);font-size:14px;}
 .pslot .pname{font-size:10px;margin-top:4px;background:rgba(0,0,0,.6);padding:1px 5px;border-radius:2px;white-space:nowrap;max-width:86px;overflow:hidden;text-overflow:ellipsis;}
+/* Time da Semana / Time da Temporada — a mixed-club pitch (renderMixedXIPitch()) needs each
+   slot to also say WHICH club that player belongs to, unlike the Elenco tab's own single-team
+   lineup where that's a given. */
+.totw-club{display:flex;align-items:center;gap:3px;margin-top:3px;font-size:8.5px;color:var(--text-faint);white-space:nowrap;max-width:86px;overflow:hidden;text-overflow:ellipsis;}
+.totw-club img,.totw-club svg{width:11px;height:11px;flex:0 0 auto;}
 
 /* ---------------- Competição: two-column layout ---------------- */
 .competicao-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;}
