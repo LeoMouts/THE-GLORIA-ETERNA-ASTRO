@@ -590,6 +590,7 @@ function advanceBrasileiraoStep(){
     if(tickLibertadoresCompleto()) return; // ...and for the real Libertadores, when the user's club is in it instead
   }
   const round = b.rounds[b.currentRound];
+  startRatingRound();
   let pendingUser = null;
   round.forEach(m=>{
     if(m.played) return;
@@ -609,6 +610,7 @@ function advanceBrasileiraoStep(){
 }
 function finishBrasaRound(){
   const b = ST.brasileirao;
+  closeRatingRound("brasileirao", "Brasileirão");
   b.currentRound++;
   if(b.currentRound>=b.rounds.length){
     finalizeBrasaSeason();
@@ -633,12 +635,15 @@ function finalizeBrasaSeason(){
   const zones = computeNextSeasonZones(table, copaChampion, sulaChampion);
   if(!ST.brasaZonesHistory) ST.brasaZonesHistory = {};
   ST.brasaZonesHistory[ST.seasonYear] = zones; // feeds next year's Sul-Americana (and, eventually, Libertadores) qualification
+  // minApps:10 keeps a single-cameo outlier (a youth-team debutant who happened to score once)
+  // out of the season XI — by round 38 every real regular has cleared that bar many times over.
+  const teamOfSeason = pickBestXIFromPool(ST.brasileirao.seasonRatings||{}, 10);
   ST.lastSeasonSummary = {
     year: ST.seasonYear,
     placement: pos===1 ? "Campeão" : `${pos}º lugar`,
     repChange: pos<=6 ? 3 : pos<=13 ? 0 : -3,
     isBrasileirao: true,
-    champion, relegated, position: pos, zones,
+    champion, relegated, position: pos, zones, teamOfSeason,
   };
   ST.reputation = E.clamp(ST.reputation + ST.lastSeasonSummary.repChange, 5, 99);
   ST.newsLog.unshift({title:"Fim de temporada — Brasileirão", text:`${champion} é o campeão. Você terminou em ${pos}º lugar e recebeu ${fmtMoney(prize)} em premiação.`});
@@ -1396,7 +1401,80 @@ function simFast(homeTeamName, awayTeamName, compKey){
   (res.scorersAway||[]).forEach(id=>addScorerGoal(awayTeamName, id, compKey));
   (res.assistsHome||[]).forEach(id=>{ if(id!=null) addAssistPoint(homeTeamName, id, compKey); });
   (res.assistsAway||[]).forEach(id=>{ if(id!=null) addAssistPoint(awayTeamName, id, compKey); });
+  collectFastRatings(res, homeTeamName, awayTeamName);
   return res;
+}
+
+// ============================================================
+// TIME DA SEMANA / TIME DA TEMPORADA — a real, ratings-based best 4-3-3 XI, picked from every
+// club across whichever round of matches just finished. Ratings come from BOTH the user's own
+// detailed matches AND the fast (AI-vs-AI) sim, which now produces an approximate per-player
+// rating too (buildFastRatings() in engine.ts) — without that, only the user's own XI would ever
+// carry a rating, and a league-wide "team of the week" wouldn't mean anything.
+// startRatingRound()/closeRatingRound() bracket a single round/leg's worth of matches (called
+// from wherever that round starts being simulated and wherever it's considered finished — the
+// same points that already exist for advancing each competition's own state).
+// ============================================================
+let roundRatingPool = null; // {playerId: {id,name,team,pos,ratingSum,ratingCount}} — the round/leg currently being collected
+function startRatingRound(){
+  roundRatingPool = {}; // starting fresh silently discards anything left from a round whose close() was missed — never crashes, that round's reveal is just lost
+}
+function collectRating(playerId, name, teamName, pos, rating){
+  if(!roundRatingPool) return;
+  if(!roundRatingPool[playerId]) roundRatingPool[playerId] = {id:playerId, name, team:teamName, pos, ratingSum:0, ratingCount:0};
+  const rec = roundRatingPool[playerId];
+  rec.ratingSum += rating; rec.ratingCount++;
+}
+function collectFastRatings(res, homeTeamName, awayTeamName){
+  (res.ratingsHome||[]).forEach(r=>collectRating(r.id, r.name, homeTeamName, r.pos, r.rating));
+  (res.ratingsAway||[]).forEach(r=>collectRating(r.id, r.name, awayTeamName, r.pos, r.rating));
+}
+// picks the best 4-3-3 XI (E.FORMATIONS["4-3-3"]'s 11 slots) from a {playerId:{ratingSum,
+// ratingCount,...}} pool — one player per slot, preferring an exact natural-position match and
+// falling back to the same broad position group (E.POS_GROUP) if a slot has no exact candidate
+// left. minApps gates a season-long pool against a one-cameo outlier; a single round's pool
+// never needs it (everyone in it only has 1 appearance that round anyway).
+function pickBestXIFromPool(pool, minApps){
+  const slots = E.FORMATIONS["4-3-3"];
+  const candidates = Object.values(pool).filter(r=>r.ratingCount>=(minApps||1)).map(r=>({...r, avgRating: r.ratingSum/r.ratingCount}));
+  const used = new Set();
+  return slots.map(slot=>{
+    let pool1 = candidates.filter(c=>!used.has(c.id) && c.pos===slot);
+    if(!pool1.length) pool1 = candidates.filter(c=>!used.has(c.id) && E.POS_GROUP[c.pos]===E.POS_GROUP[slot]);
+    if(!pool1.length) return null;
+    const best = pool1.sort((a,b)=>b.avgRating-a.avgRating)[0];
+    used.add(best.id);
+    return best;
+  });
+}
+// closes out whichever round/leg was being collected: folds it into the Brasileirão's own
+// season-long pool (feeds "Seleção da Temporada" at year's end — Brasileirão only, that's how
+// this was asked for), picks that round's own Time da Semana, and — only when the user's own
+// club actually has someone in it — drops a mail with the full XI. compLabel is how the e-mail
+// names the competition ("Brasileirão", "Copa do Brasil", "Sul-Americana", "Libertadores").
+function closeRatingRound(compKey, compLabel){
+  const pool = roundRatingPool;
+  roundRatingPool = null;
+  if(!pool || !Object.keys(pool).length) return;
+  if(compKey==="brasileirao" && ST.brasileirao){
+    const season = ST.brasileirao.seasonRatings || (ST.brasileirao.seasonRatings = {});
+    Object.values(pool).forEach(r=>{
+      if(!season[r.id]) season[r.id] = {id:r.id, name:r.name, team:r.team, pos:r.pos, ratingSum:0, ratingCount:0};
+      const rec = season[r.id];
+      rec.name = r.name; rec.team = r.team; rec.pos = r.pos; // keep fresh in case of a mid-season transfer
+      rec.ratingSum += r.ratingSum; rec.ratingCount += r.ratingCount;
+    });
+  }
+  const xi = pickBestXIFromPool(pool, 1);
+  if(xi.some(p=>p && p.team===ST.teamId)){
+    addMail({
+      type:"totw",
+      subject:"Seleção da Semana",
+      from:"Imprensa Esportiva",
+      preview:`Você tem jogador(es) na Seleção da Semana da ${compLabel}!`,
+      payload:{compLabel, xi},
+    });
+  }
 }
 
 function userGroup(){
@@ -1951,6 +2029,11 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
     const rating = result.ratings[p.id];
     if(rating!=null) p.form = Math.round((rating-6.5)*10)/10;
   });
+  // feeds the same Time da Semana/Temporada pool the fast sim does (see collectFastRatings()) —
+  // this is the ONE detailed (event-by-event) match in an otherwise fast-simulated round, so it
+  // needs its own explicit hookup rather than going through simFast().
+  homeLineup.forEach(p=>{ if(p && result.ratings[p.id]!=null) collectRating(p.id, p.name, homeTeamName, p.pos, result.ratings[p.id]); });
+  awayLineup.forEach(p=>{ if(p && result.ratings[p.id]!=null) collectRating(p.id, p.name, awayTeamName, p.pos, result.ratings[p.id]); });
   const userIsHome = homeTeamName===ST.teamId;
   const userIsAway = awayTeamName===ST.teamId;
   const myLineup = userIsHome ? homeLineup : awayLineup;
@@ -2274,6 +2357,7 @@ function applyShootoutResult(ctx, winner){
     const cb = ST.copaDoBrasil;
     cb.champion = winner;
     cb.phase = "copa_done";
+    closeRatingRound("copa", "Copa do Brasil");
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) payCopaStagePrize("copa_final");
     ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${winner} conquista a Copa do Brasil ${cb.year} nos pênaltis.`});
@@ -2297,6 +2381,7 @@ function applyShootoutResult(ctx, winner){
     const s = ST.sulamericana;
     s.champion = winner;
     s.phase = "sula_done";
+    closeRatingRound("sula", "Sul-Americana");
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) paySulaStagePrize("sula_final");
     ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${winner} conquista a Sul-Americana ${s.year} nos pênaltis.`});
@@ -2320,6 +2405,7 @@ function applyShootoutResult(ctx, winner){
     const l = ST.libertadoresCompleto;
     l.champion = winner;
     l.phase = "lib_done";
+    closeRatingRound("lib", "Libertadores");
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) payLibStagePrize("lib_final");
     ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${winner} conquista a Libertadores ${l.year} nos pênaltis.`});
@@ -2477,6 +2563,7 @@ function currentCopaRound(){
 function advanceCopaLeg(){
   const round = currentCopaRound();
   const legIndex = round.legIndex;
+  startRatingRound();
   let pendingUser = null;
   round.ties.forEach(tie=>{
     const leg = tie.legs[legIndex];
@@ -2497,6 +2584,7 @@ function advanceCopaLeg(){
 }
 function finishCopaLeg(){
   const round = currentCopaRound();
+  closeRatingRound("copa", "Copa do Brasil"); // closes the ida round here, or the volta round below — both paths land at this same top-of-function point
   if(round.legIndex===0){
     round.legIndex = 1;
     return;
@@ -2566,6 +2654,7 @@ function progressCopaBracket(){
 function advanceCopaFinalStep(){
   const cb = ST.copaDoBrasil;
   const f = cb.knockout.copa_final;
+  startRatingRound();
   if(f.home===ST.teamId || f.away===ST.teamId){
     goToMatchDay(f, {type:"copa", phase:"copa_final"});
     return true;
@@ -2576,6 +2665,7 @@ function advanceCopaFinalStep(){
   f.hs=hs; f.as=as; f.played=true;
   cb.champion = hs>as ? f.home : f.away;
   cb.phase = "copa_done";
+  closeRatingRound("copa", "Copa do Brasil");
   ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${cb.champion} conquista a Copa do Brasil ${cb.year}.`});
   return false;
 }
@@ -2720,6 +2810,7 @@ function paySulaStagePrize(stage){
 }
 function advanceSulaGroupRound(){
   const s = ST.sulamericana;
+  startRatingRound();
   let pendingUser = null;
   Object.keys(s.groupFixtures).forEach(g=>{
     const round = s.groupFixtures[g][s.currentRound];
@@ -2739,6 +2830,7 @@ function advanceSulaGroupRound(){
 }
 function finishSulaGroupRound(){
   const s = ST.sulamericana;
+  closeRatingRound("sula", "Sul-Americana");
   s.currentRound++;
   if(s.currentRound<6) return;
   const winners=[], runnersUp=[];
@@ -2776,6 +2868,7 @@ function currentSulaKORound(){ return ST.sulamericana.knockout[ST.sulamericana.p
 function advanceSulaLeg(){
   const round = currentSulaKORound();
   const legIndex = round.legIndex;
+  startRatingRound();
   let pendingUser = null;
   round.ties.forEach(tie=>{
     const leg = tie.legs[legIndex];
@@ -2792,6 +2885,7 @@ function advanceSulaLeg(){
 }
 function finishSulaLeg(){
   const round = currentSulaKORound();
+  closeRatingRound("sula", "Sul-Americana"); // closes the ida round here, or the volta round below — both paths land at this same top-of-function point
   if(round.legIndex===0){ round.legIndex = 1; return; }
   const rng = E.makeRNG(nextSeed());
   let drawnUserTie = null;
@@ -2861,6 +2955,7 @@ function progressSulaBracket(){
 function advanceSulaFinalStep(){
   const s = ST.sulamericana;
   const f = s.knockout.sula_final;
+  startRatingRound();
   if(f.home===ST.teamId || f.away===ST.teamId){
     goToMatchDay(f, {type:"sula", phase:"sula_final"});
     return true;
@@ -2871,6 +2966,7 @@ function advanceSulaFinalStep(){
   f.hs=hs; f.as=as; f.played=true;
   s.champion = hs>as ? f.home : f.away;
   s.phase = "sula_done";
+  closeRatingRound("sula", "Sul-Americana");
   if(s.champion===ST.teamId) paySulaStagePrize("sula_final");
   ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${s.champion} conquista a Sul-Americana ${s.year}.`});
   return false;
@@ -3006,6 +3102,7 @@ function payLibStagePrize(stage){
 }
 function advanceLibGroupRound(){
   const l = ST.libertadoresCompleto;
+  startRatingRound();
   let pendingUser = null;
   Object.keys(l.groupFixtures).forEach(g=>{
     const round = l.groupFixtures[g][l.currentRound];
@@ -3025,6 +3122,7 @@ function advanceLibGroupRound(){
 }
 function finishLibGroupRound(){
   const l = ST.libertadoresCompleto;
+  closeRatingRound("lib", "Libertadores");
   l.currentRound++;
   if(l.currentRound<6) return;
   const winners=[], runnersUp=[];
@@ -3062,6 +3160,7 @@ function currentLibKORound(){ return ST.libertadoresCompleto.knockout[ST.liberta
 function advanceLibLeg(){
   const round = currentLibKORound();
   const legIndex = round.legIndex;
+  startRatingRound();
   let pendingUser = null;
   round.ties.forEach(tie=>{
     const leg = tie.legs[legIndex];
@@ -3078,6 +3177,7 @@ function advanceLibLeg(){
 }
 function finishLibLeg(){
   const round = currentLibKORound();
+  closeRatingRound("lib", "Libertadores"); // closes the ida round here, or the volta round below — both paths land at this same top-of-function point
   if(round.legIndex===0){ round.legIndex = 1; return; }
   const rng = E.makeRNG(nextSeed());
   let drawnUserTie = null;
@@ -3147,6 +3247,7 @@ function progressLibBracket(){
 function advanceLibFinalStep(){
   const l = ST.libertadoresCompleto;
   const f = l.knockout.lib_final;
+  startRatingRound();
   if(f.home===ST.teamId || f.away===ST.teamId){
     goToMatchDay(f, {type:"lib", phase:"lib_final"});
     return true;
@@ -3157,6 +3258,7 @@ function advanceLibFinalStep(){
   f.hs=hs; f.as=as; f.played=true;
   l.champion = hs>as ? f.home : f.away;
   l.phase = "lib_done";
+  closeRatingRound("lib", "Libertadores");
   if(l.champion===ST.teamId) payLibStagePrize("lib_final");
   ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${l.champion} conquista a Libertadores ${l.year}.`});
   return false;
@@ -3415,6 +3517,7 @@ function finishPendingMatch(){
       const cb = ST.copaDoBrasil;
       cb.champion = f.hs>f.as ? f.home : f.away;
       cb.phase = "copa_done";
+      closeRatingRound("copa", "Copa do Brasil");
       if(cb.champion===ST.teamId) payCopaStagePrize("copa_final");
       ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${cb.champion} conquista a Copa do Brasil ${cb.year}.`});
     } else {
@@ -3432,6 +3535,7 @@ function finishPendingMatch(){
       const s = ST.sulamericana;
       s.champion = f.hs>f.as ? f.home : f.away;
       s.phase = "sula_done";
+      closeRatingRound("sula", "Sul-Americana");
       if(s.champion===ST.teamId) paySulaStagePrize("sula_final");
       ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${s.champion} conquista a Sul-Americana ${s.year}.`});
     } else {
@@ -3449,6 +3553,7 @@ function finishPendingMatch(){
       const l = ST.libertadoresCompleto;
       l.champion = f.hs>f.as ? f.home : f.away;
       l.phase = "lib_done";
+      closeRatingRound("lib", "Libertadores");
       if(l.champion===ST.teamId) payLibStagePrize("lib_final");
       ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${l.champion} conquista a Libertadores ${l.year}.`});
     } else {
@@ -6264,7 +6369,46 @@ function renderMailDetail(m){
     </div>
   </div>`;
   if(m.type==="offer") return header + renderOfferMailBody(m);
+  if(m.type==="totw") return header + renderTotwMailBody(m.payload);
   return `${header}<div class="panel mt16">${m.body}</div>`;
+}
+// "Time da Semana" e-mail body — the same mixed-club 4-3-3 pitch used for "Seleção da
+// Temporada" (see renderMixedXIPitch()), just for one round/leg instead of a whole season.
+function renderTotwMailBody(payload){
+  return `<div class="panel mt16">
+    <div class="panel-title">Seleção da Semana — ${esc(payload.compLabel)}</div>
+    <p class="dim small mt8">A imprensa esportiva escolheu os destaques da rodada. Você tem representante(s) nessa seleção!</p>
+    <div class="mt16">${renderMixedXIPitch(payload.xi)}</div>
+  </div>`;
+}
+// generic "pitch of 11 players, possibly from different clubs" renderer — reused for Time da
+// Semana (the e-mail above) and Time da Temporada (season-end modal). xi is an array of 11
+// entries aligned with E.FORMATIONS["4-3-3"]/FORMATION_COORDS["4-3-3"], each either null or
+// {id,name,team,pos,rating|avgRating} — same jersey/pitch look as the Elenco tab's own lineup,
+// just with each slot wearing ITS player's own club shirt instead of one team's kit throughout.
+function renderMixedXIPitch(xi){
+  const slots = E.FORMATIONS["4-3-3"];
+  const coords = FORMATION_COORDS["4-3-3"];
+  return `<div class="pitch">
+    <div class="pitch-center"></div>
+    ${slots.map((slot,i)=>{
+      const p = xi[i];
+      const c = coords[i];
+      const shirt = p ? jerseyImage(p.team, slot==="GK", 30) : "";
+      const rating = p ? (p.avgRating!=null ? p.avgRating : p.rating) : null;
+      return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;cursor:default;">
+        <div class="jersey-card">
+          <div class="jersey-shirt">${shirt}</div>
+          <div class="jersey-stats">
+            <span class="jersey-pos">${slot}</span>
+            <span class="jersey-ovr">${rating!=null?rating.toFixed(1):'—'}</span>
+          </div>
+        </div>
+        <div class="pname">${p?esc(p.name.split(' ').slice(-1)[0]):'Vazio ('+slot+')'}</div>
+        ${p?`<div class="totw-club">${clubCrestImg(p.team,12,null)}<span>${esc(p.team)}</span></div>`:''}
+      </div>`;
+    }).join("")}
+  </div>`;
 }
 // the "risco de melar" gauge — a half-circle speedometer (styled after an oxygen-tank
 // pressure gauge) with a needle that sweeps from green up through amber into red as
@@ -6700,6 +6844,7 @@ function renderModal(){
   if(m.type==="penaltyPicker") return renderPenaltyPickerModal(m);
   if(m.type==="penaltyKick") return renderPenaltyKickModal(m);
   if(m.type==="timeConfig") return renderTimeConfigModal();
+  if(m.type==="seasonTOTY") return renderSeasonTOTYModal();
   return "";
 }
 function renderTimeConfigModal(){
@@ -6716,6 +6861,22 @@ function renderTimeConfigModal(){
       </div>
       <div class="btn-row mt16">
         <button class="btn grow" onclick="Game.closeModal()">Fechar</button>
+      </div>
+    </div>
+  </div>`;
+}
+// "Seleção da Temporada" — the Brasileirão's own best 4-3-3 XI across the WHOLE season just
+// finished (ST.lastSeasonSummary.teamOfSeason, computed in finalizeBrasaSeason() from
+// ST.brasileirao.seasonRatings), same mixed-club pitch as the weekly e-mail.
+function renderSeasonTOTYModal(){
+  const s = ST.lastSeasonSummary;
+  return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
+    <div class="modal" style="max-width:640px;">
+      <div class="panel-title">🏆 Seleção da Temporada — Brasileirão ${s.year}</div>
+      <p class="small dim mt8">Os 11 que mais se destacaram na média de nota ao longo da temporada inteira, um por posição.</p>
+      <div class="mt16">${renderMixedXIPitch(s.teamOfSeason)}</div>
+      <div class="btn-row mt16">
+        <button class="btn btn-gold grow" onclick="Game.closeModal()">Fechar</button>
       </div>
     </div>
   </div>`;
@@ -6922,6 +7083,7 @@ function renderSeasonEndScreen(){
     </div>` : ""}
     ${renderDevelopmentReportPanel(s.development)}
     ${s.reiDaAmerica ? renderReiDaAmericaPanel(s.reiDaAmerica) : ""}
+    ${s.teamOfSeason && s.teamOfSeason.some(Boolean) ? `<button class="btn btn-lg mt16" onclick="Game.openSeasonTOTY()">🏆 SELEÇÃO DA TEMPORADA</button>` : ""}
     <button class="btn btn-gold btn-lg mt24" onclick="Game.continueSeason()">Ir para ${ST.seasonYear} →</button>
   </div>`;
 }
@@ -7403,6 +7565,7 @@ const Game = {
 
   simulateMatch(){ simulatePendingMatch(); render(); },
   openTimeConfig(){ ST.uiModal = {type:"timeConfig"}; render(); },
+  openSeasonTOTY(){ ST.uiModal = {type:"seasonTOTY"}; render(); },
   setMatchSpeed(speed){
     ST.matchSpeed = speed;
     if(ST.uiModal && ST.uiModal.type==="timeConfig") ST.uiModal = null;

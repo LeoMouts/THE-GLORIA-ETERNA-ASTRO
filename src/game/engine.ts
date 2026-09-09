@@ -432,6 +432,43 @@ function pickFastAssists(scorerIds, xi, rng) {
   });
 }
 
+// approximate per-player match ratings for a FAST (AI-vs-AI) match — there's no shot-by-shot
+// event log here to derive a real rating from, so this builds one the same way the detailed
+// sim's rating ends up shaped: a baseline everyone gets, goal/assist bumps, a clean-sheet bump
+// for the back line, and a small tilt for actually being on the winning/losing side. Good enough
+// to feed a real, league-wide "Time da Semana"/"Time da Temporada" — the whole point of this —
+// without needing every AI-vs-AI match to run the full detailed simulator.
+function buildFastRatings(xiA, xiB, golsA, golsB, scorersA, scorersB, assistsA, assistsB, rng) {
+  const rows = {}; // playerId -> {id,name,pos,rating}
+  function seed(xi) {
+    xi.lineup.forEach(p => { if (p) rows[p.id] = { id: p.id, name: p.name, pos: p.pos, rating: 6.3 + rng() * 0.6 }; });
+  }
+  seed(xiA); seed(xiB);
+  function bump(id, v) { if (rows[id]) rows[id].rating += v; }
+  scorersA.forEach(id => bump(id, 2.4));
+  scorersB.forEach(id => bump(id, 2.4));
+  assistsA.forEach(id => { if (id != null) bump(id, 1.1); });
+  assistsB.forEach(id => { if (id != null) bump(id, 1.1); });
+  function cleanSheetBump(xi) {
+    xi.lineup.forEach((p, i) => { if (p && (POS_GROUP[xi.slots[i]] === "DEF" || POS_GROUP[xi.slots[i]] === "GK")) bump(p.id, 0.5); });
+  }
+  if (golsB === 0) cleanSheetBump(xiA);
+  if (golsA === 0) cleanSheetBump(xiB);
+  function resultTilt(xi, delta) {
+    xi.lineup.forEach(p => { if (p) bump(p.id, delta); });
+  }
+  if (golsA > golsB) { resultTilt(xiA, 0.3); resultTilt(xiB, -0.15); }
+  else if (golsB > golsA) { resultTilt(xiB, 0.3); resultTilt(xiA, -0.15); }
+  function toArray(xi) {
+    return xi.lineup.filter(Boolean).map(p => {
+      const r = rows[p.id];
+      r.rating = clamp(Math.round(r.rating * 10) / 10, 3.5, 10);
+      return r;
+    });
+  }
+  return { home: toArray(xiA), away: toArray(xiB) };
+}
+
 function simulateFastMatch(teamA, teamB, rngSeedNum) {
   const rng = makeRNG(rngSeedNum);
   const bestXIA = bestAvailableXI(teamA);
@@ -451,7 +488,8 @@ function simulateFastMatch(teamA, teamB, rngSeedNum) {
   const scorersAway = pickFastScorers(bestXIB, golsB, rng);
   const assistsHome = pickFastAssists(scorersHome, bestXIA, rng);
   const assistsAway = pickFastAssists(scorersAway, bestXIB, rng);
-  return { homeScore: golsA, awayScore: golsB, scorersHome, scorersAway, assistsHome, assistsAway };
+  const ratings = buildFastRatings(bestXIA, bestXIB, golsA, golsB, scorersHome, scorersAway, assistsHome, assistsAway, rng);
+  return { homeScore: golsA, awayScore: golsB, scorersHome, scorersAway, assistsHome, assistsAway, ratingsHome: ratings.home, ratingsAway: ratings.away };
 }
 
 function poisson(rng, lambda) {
