@@ -302,6 +302,7 @@ input,select{font-family:inherit;}
 @media (max-width:480px){ .draw-grid{grid-template-columns:1fr;} }
 
 /* ---------------- E-mail inbox ---------------- */
+.mail-toolbar{margin-bottom:12px;}
 .mail-list{display:flex;flex-direction:column;gap:2px;}
 .mail-row{display:flex;align-items:center;gap:12px;padding:12px 10px;border-bottom:1px solid var(--line);cursor:pointer;position:relative;}
 .mail-row:hover{background:var(--panel);}
