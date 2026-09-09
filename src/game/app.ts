@@ -564,6 +564,15 @@ function startBrasileiraoCareer(teamId, managerName){
 function brasaSortedStandings(){
   return E.sortedStandings(ST.brasileirao.standings, SERIE_A_2026);
 }
+// never let two cup/continental match days land back-to-back — the user's last actual match
+// always has to have been a Brasileirão league game before another Copa/Sul-Americana/
+// Libertadores one is allowed to trigger. Read by BOTH advanceBrasileiraoStep() (to decide
+// whether a cup tick is even allowed to fire this round) AND every copa/sula/libPendingUserMatch()
+// preview (so the calendar/"próximo jogo" card never shows a cup match that's actually about to
+// be skipped this round) — the two have to agree, or the preview lies about what plays next.
+function cupMatchesBlockedByInterleaving(){
+  return ST.lastUserMatchType==="copa" || ST.lastUserMatchType==="sula" || ST.lastUserMatchType==="lib";
+}
 // advances exactly one Brasileirão round per call — every AI-vs-AI game in the round is
 // simulated immediately, and if the user's own club has a fixture that round it's the only
 // thing that stops here (handed to the normal match screen); everything else plays through.
@@ -571,13 +580,10 @@ function advanceBrasileiraoStep(){
   const b = ST.brasileirao;
   if(!b || b.currentRound>=b.rounds.length){ return; }
   decrementAvailability();
-  // never let two cup/continental match days land back-to-back — the user's last actual match
-  // always has to have been a Brasileirão league game before another Copa/Sul-Americana/
-  // Libertadores one is allowed to trigger. Skipping the tick calls entirely (rather than just
-  // not acting on them) leaves every counter exactly where it was, so nothing is lost — the same
-  // competition simply gets its turn one Brasileirão round later than it otherwise would have.
-  const lastWasCup = ST.lastUserMatchType==="copa" || ST.lastUserMatchType==="sula" || ST.lastUserMatchType==="lib";
-  if(!lastWasCup){
+  // skipping the tick calls entirely (rather than just not acting on them) leaves every counter
+  // exactly where it was, so nothing is lost — the same competition simply gets its turn one
+  // Brasileirão round later than it otherwise would have.
+  if(!cupMatchesBlockedByInterleaving()){
     if(tickCopaDoBrasil()) return; // a Copa do Brasil match day was triggered this turn — wait for it
     if(tickSulamericana()) return; // same idea for the Sul-Americana campaign, when the user's club is in it
     if(tickLibertadoresCompleto()) return; // ...and for the real Libertadores, when the user's club is in it instead
@@ -2863,6 +2869,7 @@ function tickSulamericana(){
 function sulaPendingUserMatch(){
   const s = ST.sulamericana;
   if(!s || s.userEliminated || s.phase==="sula_done" || s.roundsUntilNextLeg>0) return null;
+  if(cupMatchesBlockedByInterleaving()) return null; // same interleaving rule as copaPendingUserMatch()
   if(s.phase==="sula_groups"){
     const g = sulaUserGroup();
     const round = s.groupFixtures[g][s.currentRound];
@@ -3147,6 +3154,7 @@ function tickLibertadoresCompleto(){
 function libPendingUserMatch(){
   const l = ST.libertadoresCompleto;
   if(!l || l.userEliminated || l.phase==="lib_done" || l.roundsUntilNextLeg>0) return null;
+  if(cupMatchesBlockedByInterleaving()) return null; // same interleaving rule as copaPendingUserMatch()
   if(l.phase==="lib_groups"){
     const g = libUserGroup();
     const round = l.groupFixtures[g][l.currentRound];
@@ -4895,6 +4903,7 @@ function getNextUserPrelibMatch(){
 function copaPendingUserMatch(){
   const cb = ST.copaDoBrasil;
   /* once you're out, the Copa keeps going without you — no calendar highlight, no bracket takeover — until it starts fresh next season and you're actually in it again. */ if(!cb || cb.userEliminated || cb.phase==="copa_done" || cb.roundsUntilNextLeg>0) return null;
+  if(cupMatchesBlockedByInterleaving()) return null; // the interleaving rule will skip this round's tick anyway — a Brasileirão match plays first, so don't preview the Copa one yet
   if(cb.phase==="copa_final"){
     const f = cb.knockout.copa_final;
     if(f.played || (f.home!==ST.teamId && f.away!==ST.teamId)) return null;
