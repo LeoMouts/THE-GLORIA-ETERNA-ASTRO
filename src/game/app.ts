@@ -574,7 +574,7 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.daysSinceTraining = 0;
   ST.trainingPending = false;
   ST.trainingResult = null;
-  ST.transferFeed = [];
+  ST.transferFeed = []; ST.dayCounter = 0;
   ST.xferFilter = {pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null, mode:"buy", sort:"ovr", page:1};
   const order = shuffled(E.makeRNG(nextSeed()), SERIE_A_2026);
   ST.brasileirao = {
@@ -1230,7 +1230,7 @@ function newCareerState(){
     matchAnimIdx:0,
     matchPlaying:false,
     careerStats:{goals:{}, assists:{}, signings:[]},
-    transferFeed:[], // league-wide transfer news (AI signings + the user's own) — see runAITransferWindow()
+    transferFeed:[], dayCounter:0, // league-wide transfer news (AI signings + the user's own) — see runAITransferWindow() — dayCounter ticks once per calendar day, stamped on every transferFeed entry for FABRIZIO ROMANO's relative "hoje"/"ontem"/"há N dias" labels
     romanoFlip:false, // FABRIZIO ROMANO widget: false = top 5 most expensive, true = 5 most recent
     romanoFlipping:false, // true for the brief squeeze-frame beat while the card is turning
     matchSpeed:"normal", // "slow" | "normal" | "fast" — how quickly live events tick across the screen
@@ -3971,10 +3971,10 @@ function eligibleGlobalCandidates(world, pos, tier){
 }
 function recordTransferFeed(entry){
   if(!Array.isArray(ST.transferFeed)) ST.transferFeed = [];
-  ST.transferFeed.push(Object.assign({}, entry, {year: ST.seasonYear}));
+  ST.transferFeed.push(Object.assign({}, entry, {year: ST.seasonYear, day: ST.dayCounter||0}));
   if(ST.transferFeed.length>300) ST.transferFeed = ST.transferFeed.slice(-300);
 }
-// the core CONMEBOL recruitment pass: each AI club checks its starting XI slot by slot, and where
+function romanoDayLabel(entryDay){ const diff = Math.max(0, (ST.dayCounter||0) - (entryDay||0)); if(diff===0) return "Hoje"; if(diff===1) return "Ontem"; if(diff<7) return `há ${diff} dias`; if(diff<60) return `há ${Math.floor(diff/7)} sem.`; return "há muito tempo"; } // the core CONMEBOL recruitment pass: each AI club checks its starting XI slot by slot, and where
 // its best option falls under what a club of its tier should field, tries to fix it — first by
 // shopping the global market pool (weighted toward nationality fit and a realistic price band),
 // then, failing that, by poaching a genuine surplus player from a lower-tier AI club (never the
@@ -4164,7 +4164,7 @@ function runSingleGlobalReshuffle(rng){
 function dailyTransferTick(){
   if(!ST.world || !ST.world.teams) return;
   const rng = E.makeRNG(nextSeed());
-  if(rng() > 0.24) return;
+  ST.dayCounter = (ST.dayCounter||0)+1; if(rng() > 0.32) return;
   const roll = rng();
   if(roll < 0.45) runSingleAISigning(rng);
   else if(roll < 0.85) runEuropeanPoaching(rng);
@@ -5418,7 +5418,7 @@ function romanoRow(t){
       <div class="bold">${esc(t.name)}</div>
       <div class="tiny dim">${esc(t.fromClub)} <span class="romano-arrow-inline">→</span> <span class="bold">${esc(t.toClub)}</span></div>
     </div>
-    <div class="romano-row-fee gold bold mono">${fmtMoney(t.price)}</div>
+    <div class="romano-row-side"> <div class="romano-row-fee gold bold mono">${fmtMoney(t.price)}</div> <div class="tiny faint">${esc(romanoDayLabel(t.day))}</div> </div>
   </div>`;
 }
 function renderFabrizioRomanoCard(){
@@ -5426,20 +5426,20 @@ function renderFabrizioRomanoCard(){
   if(!feed.length){
     return `<div class="panel romano-panel">
       <div class="panel-title">🗞️ FABRIZIO ROMANO</div>
-      <div class="faint tiny">Mercado ainda calmo — os primeiros rumores chegam no fim da temporada. Here we go... eventually!</div>
+      <div class="faint tiny">Mercado ainda calmo — os primeiros rumores chegam nos próximos dias. Here we go... eventually!</div>
     </div>`;
   }
   const flipped = !!ST.romanoFlip;
   const list = flipped
-    ? feed.slice(-5).reverse()
+    ? feed.slice().reverse()
     : feed.slice().sort((a,b)=>b.price-a.price).slice(0,5);
   const squeeze = ST.romanoFlipping ? "transform:scaleX(0.04);" : "transform:scaleX(1);";
   return `<div class="panel romano-panel" onclick="Game.toggleRomanoFlip()" title="Clique para virar a página" style="cursor:pointer;">
     <div class="row" style="justify-content:space-between;">
       <div class="panel-title" style="margin:0;">🗞️ FABRIZIO ROMANO</div>
-      <div class="tiny faint uc">${flipped?"Mais recentes":"Mais caras"} · clique p/ virar</div>
+      <div class="tiny faint uc">${flipped?`Mais recentes (${list.length})`:"Mais caras"} · clique p/ virar</div>
     </div>
-    <div class="romano-flip-inner" style="${squeeze}">
+    <div class="romano-flip-inner${flipped?' romano-flip-scroll':''}" style="${squeeze}" onclick="event.stopPropagation();">
       ${list.map(romanoRow).join("")}
     </div>
   </div>`;
@@ -7582,7 +7582,7 @@ const Game = {
     ensureCalendarCountdown();
     if(ST.calendarDaysLeft>0) ST.calendarDaysLeft--;
     ST.calendarWeekdayIdx = (ST.calendarWeekdayIdx+1)%7;
-    generateDailyMail();
+    generateDailyMail(); dailyTransferTick();
     // calendarDaysLeft hitting 0 just flips the card over to "DIA DO JOGO" — the actual
     // advanceTournament() call happens when the player clicks one of those buttons, exactly
     // like it always did before AVANÇAR DIA existed. A training day never interrupts match
