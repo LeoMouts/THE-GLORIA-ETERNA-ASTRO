@@ -5314,13 +5314,13 @@ function renderBrasileiraoCompeticaoTab(){
   // way to that competition's own panel instead, so it's front-and-center right when it matters.
   const copaUp = !!copaPendingUserMatch();
   const cb = ST.copaDoBrasil;
-  /* an eliminated user stops seeing the Copa altogether — it plays out in the background (other clubs' semis/final still update ST.copaDoBrasil) but never takes over this tab again until startCopaDoBrasil() resets userEliminated for next season's real run. */ const showCopaBracket = !!cb && !cb.userEliminated && (copaUp || cb.phase==="copa_final" || cb.phase==="copa_done");
+  /* an eliminated user stops seeing the Copa altogether — it plays out in the background (other clubs' semis/final still update ST.copaDoBrasil) but never takes over this tab again until startCopaDoBrasil() resets userEliminated for next season's real run. Only "copaUp" (the actual next match is a Copa one) triggers the takeover now — the old "|| phase is final/done" clause used to keep the bracket pinned here for the rest of the season even on rounds where a plain Brasileirão match was what's actually up next (worse once the interleaving rule could delay that final by a round or more), which is exactly the "chaveamento aparecendo em vez da tabela" bug this replaced. The champion, once decided, still shows on the season-end screen and the Desempenho tab's own filter. */ const showCopaBracket = !!cb && !cb.userEliminated && copaUp;
   const sulaUp = !!sulaPendingUserMatch();
   const s = ST.sulamericana;
-  const showSulaPanel = !!s && !s.userEliminated && (sulaUp || s.phase==="sula_final" || s.phase==="sula_done");
+  const showSulaPanel = !!s && !s.userEliminated && sulaUp;
   const libUp = !!libPendingUserMatch();
   const l = ST.libertadoresCompleto;
-  const showLibPanel = !!l && !l.userEliminated && (libUp || l.phase==="lib_final" || l.phase==="lib_done");
+  const showLibPanel = !!l && !l.userEliminated && libUp;
   if(showCopaBracket || showSulaPanel || showLibPanel){
     /* the compact avançar only ever needed the left half of this row when the right half held the Série A table — with a cup panel taking over instead (full-width, pushed to row 2 by the grid), that right half just sat empty. Spanning avançar across both columns here fills it, so it gets the same full (non-compact) size the rest of the app uses for it, not the small square variant. Each competition panel still gets its own full-width row right below — stacked one after another if more than one campaign is live at once (Copa always can be; at most one of Sul-Americana/Libertadores ever is, since a club never qualifies for both in the same season); e-mails/contratações close out the page in one more row. */
     const panels = [];
