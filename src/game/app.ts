@@ -556,6 +556,7 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.libertadoresCompleto = null;
   ST.lastUserMatchType = null;
   ST.desempenhoFilter = "brasileirao";
+  ST.seasonPrizeTotals = {brasileirao:0, copa:0, sula:0, lib:0};
   startCopaDoBrasil();
   startSulamericanaIfEligible(); // the 7 real 2026 Sul-Americana entrants play it from season 1 — everyone else only reaches it via a future season's own table position
   startLibertadoresCompletoIfEligible(); // same idea for the 6 real 2026 Libertadores entrants
@@ -572,14 +573,26 @@ function brasaSortedStandings(){
 // preview (so the calendar/"próximo jogo" card never shows a cup match that's actually about to
 // be skipped this round) — the two have to agree, or the preview lies about what plays next.
 function cupMatchesBlockedByInterleaving(){
+  const b = ST.brasileirao;
+  // once the league itself has no rounds left, there's no more Brasileirão calendar left to
+  // protect a cup preview against — the whole point of this rule was making sure a cup match
+  // day never looked like it was coming up next when a plain league round was actually next
+  // (or vice versa). With the league over, any continental campaign still mid-run just plays
+  // straight through to its conclusion — see finishBrasaRound()/advanceBrasileiraoStep().
+  if(b && b.currentRound>=b.rounds.length) return false;
   return ST.lastUserMatchType==="copa" || ST.lastUserMatchType==="sula" || ST.lastUserMatchType==="lib";
+}
+function allCupsFinished(){
+  return (!ST.copaDoBrasil || ST.copaDoBrasil.phase==="copa_done")
+    && (!ST.sulamericana || ST.sulamericana.phase==="sula_done")
+    && (!ST.libertadoresCompleto || ST.libertadoresCompleto.phase==="lib_done");
 }
 // advances exactly one Brasileirão round per call — every AI-vs-AI game in the round is
 // simulated immediately, and if the user's own club has a fixture that round it's the only
 // thing that stops here (handed to the normal match screen); everything else plays through.
 function advanceBrasileiraoStep(){
   const b = ST.brasileirao;
-  if(!b || b.currentRound>=b.rounds.length){ return; }
+  if(!b) return;
   decrementAvailability();
   // skipping the tick calls entirely (rather than just not acting on them) leaves every counter
   // exactly where it was, so nothing is lost — the same competition simply gets its turn one
@@ -588,6 +601,14 @@ function advanceBrasileiraoStep(){
     if(tickCopaDoBrasil()) return; // a Copa do Brasil match day was triggered this turn — wait for it
     if(tickSulamericana()) return; // same idea for the Sul-Americana campaign, when the user's club is in it
     if(tickLibertadoresCompleto()) return; // ...and for the real Libertadores, when the user's club is in it instead
+  }
+  if(b.currentRound>=b.rounds.length){
+    // the league is done and every cup tick above came up empty this call — if a continental
+    // campaign was still going, finishBrasaRound() already zeroed its countdown the moment the
+    // league ended, so it would have fired above already; nothing firing means everything has
+    // genuinely finished, and the season can truly end now.
+    if(allCupsFinished()) finalizeBrasaSeason();
+    return;
   }
   const round = b.rounds[b.currentRound];
   startRatingRound();
@@ -612,9 +633,57 @@ function finishBrasaRound(){
   const b = ST.brasileirao;
   closeRatingRound("brasileirao", "Brasileirão");
   b.currentRound++;
-  if(b.currentRound>=b.rounds.length){
-    finalizeBrasaSeason();
-  }
+  if(b.currentRound<b.rounds.length) return;
+  // the league itself is done — zero any still-unfinished continental campaign's own countdown
+  // right now, so the calendar/"próximo jogo" card picks it up on the very next render instead
+  // of waiting out its normal multi-round spacing (which might otherwise never get the chance
+  // to elapse once there are no more Brasileirão rounds left to drive it down tick by tick).
+  if(ST.copaDoBrasil && ST.copaDoBrasil.phase!=="copa_done") ST.copaDoBrasil.roundsUntilNextLeg = 0;
+  if(ST.sulamericana && ST.sulamericana.phase!=="sula_done") ST.sulamericana.roundsUntilNextLeg = 0;
+  if(ST.libertadoresCompleto && ST.libertadoresCompleto.phase!=="lib_done") ST.libertadoresCompleto.roundsUntilNextLeg = 0;
+  if(allCupsFinished()) finalizeBrasaSeason();
+}
+// ============================================================
+// SEASON-END COMPETITION CARDS — one card per competition the club actually played this season
+// (Brasileirão always; Copa do Brasil unless one of the handful of excluded clubs; Sul-Americana/
+// Libertadores only when ST.sulamericana/ST.libertadoresCompleto exist, i.e. the club qualified),
+// each with its own trophy, final result, reputation swing and prize money earned — instead of
+// one generic trophy and a single pooled reputation number that never said which competition it
+// actually came from.
+// ============================================================
+// how far the club got in a knockout-with-a-final competition, from ST.teamId's point of view:
+// "Campeão"/"Vice-campeão" once the final is decided one way or the other, cb.placementReached
+// for an earlier elimination, "Em andamento" if the season somehow ended before it finished
+// (the pacing keeps this from happening in practice), or null if the club was never in the
+// bracket at all this year (so no card gets shown for it).
+function knockoutSeasonResult(comp, doneVal, finalKey, championKey){
+  if(!comp) return null;
+  if(comp[championKey]===ST.teamId) return "Campeão";
+  const f = comp.knockout && comp.knockout[finalKey];
+  if(comp.phase===doneVal && f && (f.home===ST.teamId||f.away===ST.teamId)) return "Vice-campeão";
+  // comp.placementReached comes from stageLabelFor(), which prefixes it with the competition's
+  // own name ("Copa do Brasil — Oitavas de Final") — redundant on a card already titled with
+  // that same name, and it wouldn't match cupRepReward()'s plain-stage lookup table below either.
+  if(comp.placementReached) return comp.placementReached.replace(/^.*? — /, "");
+  if(comp.phase!==doneVal) return "Em andamento";
+  return null;
+}
+function copaSeasonResult(){
+  if(!ST.copaDoBrasil) return null;
+  if(!copaSeedTeams().includes(ST.teamId)) return null; // one of the few clubs excluded from this year's Copa — no card for it
+  return knockoutSeasonResult(ST.copaDoBrasil, "copa_done", "copa_final", "champion");
+}
+function sulaSeasonResult(){ return knockoutSeasonResult(ST.sulamericana, "sula_done", "sula_final", "champion"); }
+function libSeasonResult(){ return knockoutSeasonResult(ST.libertadoresCompleto, "lib_done", "lib_final", "champion"); }
+// reputation swing for how far a cup run went — same increasing-with-the-stage idea as the
+// Brasileirão's own position-based reward below, just for a knockout shape instead of a table.
+function cupRepReward(resultLabel){
+  return {"Campeão":5, "Vice-campeão":2, "Semifinal":1, "Quartas de Final":0, "Oitavas de Final":-1, "Fase de Grupos":-2}[resultLabel] || 0; // "Em andamento" (or no campaign at all) swings nothing — there's no final result yet to judge
+}
+function addSeasonPrize(compKey, amount){
+  if(!amount) return;
+  if(!ST.seasonPrizeTotals) ST.seasonPrizeTotals = {brasileirao:0, copa:0, sula:0, lib:0};
+  ST.seasonPrizeTotals[compKey] = (ST.seasonPrizeTotals[compKey]||0) + amount;
 }
 // season wrap-up: prize money by final position, a news item, and — for now — a simplified,
 // narrative-only relegation/promotion note (the real Série B doesn't have squads in this game
@@ -624,6 +693,7 @@ function finalizeBrasaSeason(){
   const pos = table.findIndex(r=>r.team===ST.teamId)+1;
   const prize = brasaPrizeForPosition(pos);
   ST.budget += prize;
+  addSeasonPrize("brasileirao", prize);
   const champion = table[0].team;
   const relegated = table.slice(16).map(r=>r.team);
   if(!ST.brasaStandingsHistory) ST.brasaStandingsHistory = {};
@@ -638,14 +708,32 @@ function finalizeBrasaSeason(){
   // minApps:10 keeps a single-cameo outlier (a youth-team debutant who happened to score once)
   // out of the season XI — by round 38 every real regular has cleared that bar many times over.
   const teamOfSeason = pickBestXIFromPool(ST.brasileirao.seasonRatings||{}, 10);
+  // one card per competition actually played this season — each with its own trophy, result,
+  // reputation swing and prize money, instead of one pooled reputation number that never said
+  // which competition it actually came from (see the SEASON-END COMPETITION CARDS block above).
+  const brasaRep = pos===1 ? 6 : pos<=6 ? 3 : pos<=13 ? 0 : -3;
+  const copaResult = copaSeasonResult();
+  const sulaResult = sulaSeasonResult();
+  const libResult = libSeasonResult();
+  const copaRep = cupRepReward(copaResult);
+  const sulaRep = cupRepReward(sulaResult);
+  const libRep = cupRepReward(libResult);
+  const prizeTotals = ST.seasonPrizeTotals || {brasileirao:0, copa:0, sula:0, lib:0};
+  const compCards = [
+    {key:"brasileirao", label:"Brasileirão", trophyKey:"brasileirao", result: pos===1?"Campeão":`${pos}º lugar`, repChange:brasaRep, prize:prizeTotals.brasileirao||0, won: pos===1},
+  ];
+  if(copaResult) compCards.push({key:"copa", label:"Copa do Brasil", trophyKey:"copa", result:copaResult, repChange:copaRep, prize:prizeTotals.copa||0, won:copaResult==="Campeão"});
+  if(sulaResult) compCards.push({key:"sula", label:"Sul-Americana", trophyKey:"sulamericana", result:sulaResult, repChange:sulaRep, prize:prizeTotals.sula||0, won:sulaResult==="Campeão"});
+  if(libResult) compCards.push({key:"lib", label:"Libertadores", trophyKey:"libertadores", result:libResult, repChange:libRep, prize:prizeTotals.lib||0, won:libResult==="Campeão"});
+  const totalRepChange = brasaRep + copaRep + sulaRep + libRep;
   ST.lastSeasonSummary = {
     year: ST.seasonYear,
     placement: pos===1 ? "Campeão" : `${pos}º lugar`,
-    repChange: pos<=6 ? 3 : pos<=13 ? 0 : -3,
+    repChange: totalRepChange,
     isBrasileirao: true,
-    champion, relegated, position: pos, zones, teamOfSeason,
+    champion, relegated, position: pos, zones, teamOfSeason, compCards,
   };
-  ST.reputation = E.clamp(ST.reputation + ST.lastSeasonSummary.repChange, 5, 99);
+  ST.reputation = E.clamp(ST.reputation + totalRepChange, 5, 99);
   ST.newsLog.unshift({title:"Fim de temporada — Brasileirão", text:`${champion} é o campeão. Você terminou em ${pos}º lugar e recebeu ${fmtMoney(prize)} em premiação.`});
   applyDynamicPotentialGrowth(wonAnyTrophy);
   ageWorld();
@@ -663,6 +751,7 @@ function finalizeBrasaSeason(){
 function startNewBrasaSeason(){
   const order = shuffled(E.makeRNG(nextSeed()), SERIE_A_2026);
   ST.brasileirao = { year: ST.seasonYear, rounds: E.doubleRoundRobin(order), currentRound: 0, standings: {}, scorers: {}, assisters: {} };
+  ST.seasonPrizeTotals = {brasileirao:0, copa:0, sula:0, lib:0}; // reset now that last season's totals have already been folded into its season-end cards
   ST.stage = "hub";
   ST.hubTab = "competicao";
   startCopaDoBrasil(); // may override ST.stage to "copa_draw" (2027+) for the round-of-16 reveal
@@ -2491,6 +2580,7 @@ function payCopaStagePrize(stageJustWon){
   const prize = copaPrizeForStage(stageJustWon);
   if(!prize) return;
   ST.budget += prize;
+  addSeasonPrize("copa", prize);
   ST.newsLog.unshift({title:"Premiação da Copa do Brasil", text:`Classificação na ${stageLabelFor(stageJustWon)} rende ${fmtMoney(prize)} aos cofres do ${ST.teamId}.`});
 }
 function startCopaDoBrasil(){
@@ -2806,6 +2896,7 @@ function paySulaStagePrize(stage){
   const prize = sulaPrizeForStage(stage);
   if(!prize) return;
   ST.budget += prize;
+  addSeasonPrize("sula", prize);
   ST.newsLog.unshift({title:"Premiação da Sul-Americana", text:`Classificação rende ${fmtMoney(prize)} aos cofres do ${ST.teamId}.`});
 }
 function advanceSulaGroupRound(){
@@ -3098,6 +3189,7 @@ function payLibStagePrize(stage){
   const prize = libPrizeForStage(stage);
   if(!prize) return;
   ST.budget += prize;
+  addSeasonPrize("lib", prize);
   ST.newsLog.unshift({title:"Premiação da Libertadores", text:`Classificação rende ${fmtMoney(prize)} aos cofres do ${ST.teamId}.`});
 }
 function advanceLibGroupRound(){
@@ -7052,13 +7144,28 @@ function renderNewsModal(){
 }
 
 // ---------------- SEASON END / JOB OFFERS / CAREER OVER ----------------
+// one card per competition actually played this season (see the compCards built in
+// finalizeBrasaSeason()) — each with its OWN trophy on top (dimmed unless actually won, same
+// convention as the Competição tab's bracket panels), its own result, reputation swing and
+// prize money, laid out in a row instead of the old single generic trophy + one pooled number.
+function renderSeasonCompCards(cards){
+  if(!cards || !cards.length) return "";
+  return `<div class="season-comp-cards">${cards.map(c=>`<div class="season-comp-card">
+    ${competitionTrophyImg(c.trophyKey, 60, c.won?1:0.45)}
+    <div class="season-comp-card-label">${esc(c.label)}</div>
+    <div class="season-comp-card-result ${c.won?'gold bold':'bold'}">${esc(c.result)}</div>
+    <div class="season-comp-card-row"><span>Reputação</span><span class="${c.repChange>=0?'green':'red'} bold">${c.repChange>=0?'+':''}${c.repChange}</span></div>
+    <div class="season-comp-card-row"><span>Premiação</span><span class="gold bold">${fmtMoney(c.prize)}</span></div>
+  </div>`).join("")}</div>`;
+}
 function renderSeasonEndScreen(){
   const s = ST.lastSeasonSummary;
   const isChampion = s.placement === "Campeão";
   return `${cornerWatermarks()}<div class="hero" style="min-height:80vh;position:relative;z-index:1;">
-    ${isChampion ? `<div class="mb16">${trophyImg(150,1)}</div>` : ""}
+    ${!s.compCards ? (isChampion ? `<div class="mb16">${trophyImg(150,1)}</div>` : "") : ""}
     <div class="hero-badge">TEMPORADA ${s.year} ENCERRADA</div>
     <h1 class="hero-title" style="font-size:clamp(30px,6vw,54px);">${esc(s.placement.toUpperCase())}</h1>
+    ${renderSeasonCompCards(s.compCards)}
     <div class="panel mt24" style="max-width:420px;">
       <div class="kv"><span>Reputação</span><span class="${s.repChange>=0?'green':'red'} bold">${s.repChange>=0?'+':''}${s.repChange} (agora ${ST.reputation})</span></div>
       <div class="kv"><span>Novo orçamento de transferências</span><span class="gold bold">${fmtMoney(ST.budget)}</span></div>
