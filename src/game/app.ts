@@ -374,6 +374,7 @@ function jerseyIconSVG(teamName, size){
 // ---------- Libertadores trophy render (real artwork, cut out to a transparent PNG) ----------
 const TROPHY_IMG = "/images/awards/trophy.png";
 const TRAINING_ICON = "/images/training-icon.png"; // dumbbell + shaker + cone illustration
+const SOFASCORE_LOGO = "/images/press/sofascore.png"; // "Seleção da Semana" e-mails are sent under this brand — see closeRatingRound()/renderTotwMailBody()
 const TROPHY_ASPECT = 250/609; // width/height of the source cutout
 function trophyImg(height, opacity){
   height = height || 120;
@@ -1595,7 +1596,7 @@ function closeRatingRound(compKey, compLabel){
     addMail({
       type:"totw",
       subject:"Seleção da Semana",
-      from:"Imprensa Esportiva",
+      from:"Sofascore",
       preview:`Você tem jogador(es) na Seleção da Semana da ${compLabel}!`,
       payload:{compLabel, xi},
     });
@@ -6504,8 +6505,9 @@ function renderMailDetail(m){
 // Temporada" (see renderMixedXIPitch()), just for one round/leg instead of a whole season.
 function renderTotwMailBody(payload){
   return `<div class="panel mt16">
+    <img src="${SOFASCORE_LOGO}" alt="Sofascore" class="totw-brand-logo"/>
     <div class="panel-title">Seleção da Semana — ${esc(payload.compLabel)}</div>
-    <p class="dim small mt8">A imprensa esportiva escolheu os destaques da rodada. Você tem representante(s) nessa seleção!</p>
+    <p class="dim small mt8">O Sofascore escolheu os destaques da rodada. Você tem representante(s) nessa seleção!</p>
     <div class="mt16">${renderMixedXIPitch(payload.xi)}</div>
   </div>`;
 }
