@@ -266,6 +266,24 @@ const TEAM_KIT_OUTFIELD = {
   "Grêmio": "/images/kits/outfield/outfield/gremio.png", "Santos": "/images/kits/outfield/outfield/santos.png",
   "River Plate": "/images/kits/outfield/outfield/river-plate.png", "Botafogo": "/images/kits/outfield/outfield/botafogo.png",
   "Atlético Mineiro": "/images/kits/outfield/outfield/atletico-mineiro.png", "Racing": "/images/kits/outfield/outfield/racing.png",
+  // Brasileirão clubs that never had a real kit render before (the 8 with no Libertadores/Pré-Lib squad)
+  "Red Bull Bragantino": "/images/kits/outfield/outfield/red-bull-bragantino.png", "Internacional": "/images/kits/outfield/outfield/internacional.png",
+  "Bahia": "/images/kits/outfield/outfield/bahia.png", "Vitória": "/images/kits/outfield/outfield/vitoria.png",
+  "Athletico Paranaense": "/images/kits/outfield/outfield/athletico-paranaense.png", "Coritiba": "/images/kits/outfield/outfield/coritiba.png",
+  "Chapecoense": "/images/kits/outfield/outfield/chapecoense.png", "Remo": "/images/kits/outfield/outfield/remo.png",
+  // Sul-Americana 2026 field — the 23 non-Brasileirão clubs that aren't already Libertadores/transfer-market sides
+  "América de Cali": "/images/kits/outfield/outfield/america-de-cali.png", "Tigre": "/images/kits/outfield/outfield/tigre.png",
+  "Macará": "/images/kits/outfield/outfield/macara.png", "Alianza Atlético": "/images/kits/outfield/outfield/alianza-atletico.png",
+  "Cienciano": "/images/kits/outfield/outfield/cienciano.png", "Puerto Cabello": "/images/kits/outfield/outfield/puerto-cabello.png",
+  "Juventud": "/images/kits/outfield/outfield/juventud.png", "Millonarios": "/images/kits/outfield/outfield/millonarios.png",
+  "Boston River": "/images/kits/outfield/outfield/boston-river.png", "O'Higgins": "/images/kits/outfield/outfield/ohiggins.png",
+  "San Lorenzo": "/images/kits/outfield/outfield/san-lorenzo.png", "Deportivo Cuenca": "/images/kits/outfield/outfield/deportivo-cuenca.png",
+  "Recoleta": "/images/kits/outfield/outfield/recoleta.png", "Caracas": "/images/kits/outfield/outfield/caracas.png",
+  "Independiente Petrolero": "/images/kits/outfield/outfield/independiente-petrolero.png", "Palestino": "/images/kits/outfield/outfield/palestino.png",
+  "Montevideo City Torque": "/images/kits/outfield/outfield/montevideo-city-torque.png", "Deportivo Riestra": "/images/kits/outfield/outfield/deportivo-riestra.png",
+  "Olimpia": "/images/kits/outfield/outfield/olimpia.png", "Audax Italiano": "/images/kits/outfield/outfield/audax-italiano.png",
+  "Barracas Central": "/images/kits/outfield/outfield/barracas-central.png", "Blooming": "/images/kits/outfield/outfield/blooming.png",
+  "Carabobo": "/images/kits/outfield/outfield/carabobo.png",
 };
 const TEAM_KIT_GK = {
   "Flamengo": "/images/kits/gk/gk/flamengo.png",
@@ -305,6 +323,24 @@ const TEAM_KIT_GK = {
   "Grêmio": "/images/kits/gk/gk/gremio.png", "Santos": "/images/kits/gk/gk/santos.png",
   "River Plate": "/images/kits/gk/gk/river-plate.png", "Botafogo": "/images/kits/gk/gk/botafogo.png",
   "Atlético Mineiro": "/images/kits/gk/gk/atletico-mineiro.png", "Racing": "/images/kits/gk/gk/racing.png",
+  // Brasileirão clubs that never had a real kit render before (the 8 with no Libertadores/Pré-Lib squad)
+  "Red Bull Bragantino": "/images/kits/gk/gk/red-bull-bragantino.png", "Internacional": "/images/kits/gk/gk/internacional.png",
+  "Bahia": "/images/kits/gk/gk/bahia.png", "Vitória": "/images/kits/gk/gk/vitoria.png",
+  "Athletico Paranaense": "/images/kits/gk/gk/athletico-paranaense.png", "Coritiba": "/images/kits/gk/gk/coritiba.png",
+  "Chapecoense": "/images/kits/gk/gk/chapecoense.png", "Remo": "/images/kits/gk/gk/remo.png",
+  // Sul-Americana 2026 field — the 23 non-Brasileirão clubs that aren't already Libertadores/transfer-market sides
+  "América de Cali": "/images/kits/gk/gk/america-de-cali.png", "Tigre": "/images/kits/gk/gk/tigre.png",
+  "Macará": "/images/kits/gk/gk/macara.png", "Alianza Atlético": "/images/kits/gk/gk/alianza-atletico.png",
+  "Cienciano": "/images/kits/gk/gk/cienciano.png", "Puerto Cabello": "/images/kits/gk/gk/puerto-cabello.png",
+  "Juventud": "/images/kits/gk/gk/juventud.png", "Millonarios": "/images/kits/gk/gk/millonarios.png",
+  "Boston River": "/images/kits/gk/gk/boston-river.png", "O'Higgins": "/images/kits/gk/gk/ohiggins.png",
+  "San Lorenzo": "/images/kits/gk/gk/san-lorenzo.png", "Deportivo Cuenca": "/images/kits/gk/gk/deportivo-cuenca.png",
+  "Recoleta": "/images/kits/gk/gk/recoleta.png", "Caracas": "/images/kits/gk/gk/caracas.png",
+  "Independiente Petrolero": "/images/kits/gk/gk/independiente-petrolero.png", "Palestino": "/images/kits/gk/gk/palestino.png",
+  "Montevideo City Torque": "/images/kits/gk/gk/montevideo-city-torque.png", "Deportivo Riestra": "/images/kits/gk/gk/deportivo-riestra.png",
+  "Olimpia": "/images/kits/gk/gk/olimpia.png", "Audax Italiano": "/images/kits/gk/gk/audax-italiano.png",
+  "Barracas Central": "/images/kits/gk/gk/barracas-central.png", "Blooming": "/images/kits/gk/gk/blooming.png",
+  "Carabobo": "/images/kits/gk/gk/carabobo.png",
 };
 // Elenco pitch jersey: real camisa 1 render when we have one for the club (outfield vs. goalkeeper
 // kit chosen by slot), falling back to the generic tinted SVG for anything missing.
