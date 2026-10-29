@@ -399,9 +399,14 @@ const TEAM_KIT_GK = {
 };
 // Elenco pitch jersey: real camisa 1 render when we have one for the club (outfield vs. goalkeeper
 // kit chosen by slot), falling back to the generic tinted SVG for anything missing.
+/* shirts from the SMF kit repo for every club that has no local kit of its own: only the transparent cutouts (the repo also holds photos with a person wearing the shirt, which would look wrong in a jersey slot), keyed by the same slug the crest uses */
+const FENOMENO_KIT_CDN = "https://cdn.jsdelivr.net/gh/TheSMF-Group/thefenomeno-assets@main/kits/";
+const KIT_CUTOUT_SLUGS = new Set(["aberdeen","ac-milan","ajax","al-ahli-sa","alaves","aldosivi","alianza-fc","america","america-cali","anderlecht","angers","antwerp","argentinos-jrs","arouca","arsenal","aston-villa","atalanta","athletic","athletico-pr","atlanta-utd","atlas","atletico","audax-italiano","auxerre","avispa-fukuoka","az-alkmaar","bahia","barcelona","basaksehir","basel","bayern","belgrano","benfica","besiktas","betis","blackburn","boca","bologna","bournemouth","braga","bragantino","brentford","brest","brighton","bristol-city","brondby","brugge","bucaramanga","burnley","cagliari","ceara","cercle-brugge","chapecoense","charleroi","chelsea","chicago-fire","colorado-rapids","columbus","como","coritiba","coventry","crystal-palace","dc-united","defensa-justicia","deportivo-pereira","dinamo-zagreb","dortmund","empoli","espanyol","estoril","everton","fc-cincinnati","fc-seoul","fenerbahce","feyenoord","fiorentina","fortaleza","frankfurt","freiburg","fulham","galatasaray","gangwon-fc","genk","genoa","gent","getafe","gil-vicente","gladbach","heerenveen","heracles","hoffenheim","houston-dynamo","hull","huracan","independiente","inter","internacional","ipswich","jeju-united","jeonbuk-hyundai-motors","juventus","kasimpasa","konyaspor","la-galaxy","lafc","las-palmas","lazio","le-havre","lecce","leeds","legia-warsaw","leicester","leipzig","lens","leon","leverkusen","lille","liverpool","lyon","mainz","mallorca","man-city","man-utd","marseille","mechelen","melbourne-city","middlesbrough","midtjylland","millwall","minnesota-utd","monaco","monterrey","montpellier","monza","moreirense","nantes","napoli","new-england","newcastle","nice","nordsjaelland","nottm-forest","ny-red-bulls","orlando-city","osasuna","pachuca","panathinaikos","paok","pec-zwolle","philadelphia","pohang-steelers","portland-timbers","porto","preston","psg","psv","pumas","qpr","racing","randers","rayo-vallecano","real-madrid","real-salt-lake","red-star-belgrade","reims","rennes","rio-ave","river","roma","san-jose","san-lorenzo","santos","sao-paulo","sarmiento","sevilla","shakhtar","sheff-utd","sheff-wed","silkeborg","sint-truiden","sociedad","southampton","sport-recife","sporting","sporting-kc","st-pauli","standard","stoke","strasbourg","stuttgart","sunderland","swansea","tigre","torino","toronto-fc","tottenham","toulouse","trabzonspor","twente","udinese","utrecht","valencia","valladolid","vancouver","vasco","velez","venezia","verona","villarreal","vitoria-ba","vitoria-sc","watford","werder","west-brom","west-ham","westerlo","wolfsburg"]);
 function jerseyImage(teamName, isGK, size){
   size = size || 40;
   const src = isGK ? TEAM_KIT_GK[teamName] : TEAM_KIT_OUTFIELD[teamName];
+  const cdnSlug = !isGK && !src ? GLOBAL_TEAM_CRESTS[teamName] : null;
+  if(cdnSlug && KIT_CUTOUT_SLUGS.has(cdnSlug)) return `<img src="${FENOMENO_KIT_CDN}${cdnSlug}.png" alt="${esc(teamName)} linha" loading="lazy" style="display:block;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));"/>`;
   if(!src) return jerseyIconSVG(teamName, size);
   return `<img src="${src}" alt="${esc(teamName)} ${isGK?'goleiro':'linha'}" loading="lazy" style="display:block;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));"/>`;
 }
@@ -5988,42 +5993,15 @@ function renderCopaDoBrasilPanel(){
 // what's actually happening, contratações and the latest e-mails, sized to fit in one view.
 // Artilheiros/assistências (top 25 each) and the full 20-team table moved to DESEMPENHO.
 function renderBrasileiraoCompeticaoTab(){
-  const table = brasaSortedStandings();
-  // when it's Copa (or Sul-Americana) time — a match in one of them is what's actually coming
-  // up next, same condition that paints the calendar square green — the Série A table gives
-  // way to that competition's own panel instead, so it's front-and-center right when it matters.
-  const copaUp = !!copaPendingUserMatch();
-  const cb = ST.copaDoBrasil;
-  /* an eliminated user stops seeing the Copa altogether — it plays out in the background (other clubs' semis/final still update ST.copaDoBrasil) but never takes over this tab again until startCopaDoBrasil() resets userEliminated for next season's real run. Only "copaUp" (the actual next match is a Copa one) triggers the takeover now — the old "|| phase is final/done" clause used to keep the bracket pinned here for the rest of the season even on rounds where a plain Brasileirão match was what's actually up next (worse once the interleaving rule could delay that final by a round or more), which is exactly the "chaveamento aparecendo em vez da tabela" bug this replaced. The champion, once decided, still shows on the season-end screen and the Desempenho tab's own filter. */ const showCopaBracket = !!cb && !cb.userEliminated && copaUp;
-  const sulaUp = !!sulaPendingUserMatch();
-  const s = ST.sulamericana;
-  const showSulaPanel = !!s && !s.userEliminated && sulaUp;
-  const libUp = !!libPendingUserMatch();
-  const l = ST.libertadoresCompleto;
-  const showLibPanel = !!l && !l.userEliminated && libUp;
-  if(showCopaBracket || showSulaPanel || showLibPanel){
-    /* the compact avançar only ever needed the left half of this row when the right half held the Série A table — with a cup panel taking over instead (full-width, pushed to row 2 by the grid), that right half just sat empty. Spanning avançar across both columns here fills it, so it gets the same full (non-compact) size the rest of the app uses for it, not the small square variant. Each competition panel still gets its own full-width row right below — stacked one after another if more than one campaign is live at once (Copa always can be; at most one of Sul-Americana/Libertadores ever is, since a club never qualifies for both in the same season); e-mails/contratações close out the page in one more row. */
-    const panels = [];
-    if(showCopaBracket) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(cb.phase))} ${cb.year}</div>${renderCopaBracket()}</div>`);
-    if(showSulaPanel) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(s.phase))} ${s.year}</div>${renderSulaCompetitionPanel()}</div>`);
-    if(showLibPanel) panels.push(`<div class="panel"><div class="panel-title">${esc(stageLabelFor(l.phase))} ${l.year}</div>${renderLibCompletoCompetitionPanel()}</div>`);
-    const cells = `<div class="competicao-cell" style="grid-column:1 / -1;">${renderNextMatchCard(false)}</div>`
-      + panels.map(p=>`<div class="competicao-cell" style="grid-column:1 / -1;">${p}</div>`).join("")
-      + `<div class="competicao-cell">${renderLatestEmailCard()}</div>` + `<div class="competicao-cell">${renderFabrizioRomanoCard()}</div>`;
-    return `<div class="competicao-grid">${cells}</div>`;
-  }
-  // avançar (compact) top-left, e-mails + contratações below it; the Série A table (top 10)
-  // fills the whole right column. Artilheiros/assistências moved to the Desempenho tab (top 25
-  // each) so this page — the one you land on — never needs to scroll to show everything.
-  const leftCol = `<div class="competicao-col">
-    <div class="competicao-cell">${renderNextMatchCard(true)}</div>
-    <div class="competicao-cell">${renderLatestEmailCard()}</div>
-    <div class="competicao-cell">${renderFabrizioRomanoCard()}</div>
+  /* the home screen is deliberately static: the same three boxes (next match, last e-mail, Fabrizio Romano) in the same place and at the same size whatever competition is being played - only the text inside changes. No tables or brackets here; those all live in the Desempenho tab. */
+  const card = renderNextMatchCard(false) || `<div class="panel" style="text-align:center;"><div class="faint tiny uc mb12">Temporada ${ST.seasonYear}</div><p class="dim small">Nenhuma partida marcada no momento.</p></div>`;
+  return `<div class="competicao-grid comp-home">
+    <div class="competicao-col">
+      <div class="comp-home-match">${card}</div>
+      <div class="comp-home-mail">${renderLatestEmailCard()}</div>
+    </div>
+    <div class="comp-home-news">${renderFabrizioRomanoCard()}</div>
   </div>`;
-  const rightCol = `<div class="competicao-col">
-    <div class="competicao-cell">${renderBrasaTable(table, {cap:10})}</div>
-  </div>`;
-  return `<div class="competicao-grid">${leftCol}${rightCol}</div>`;
 }
 // last N rounds' results for a club, most recent first — read straight off the fixed
 // double round-robin schedule (ST.brasileirao.rounds), no separate history log needed.
@@ -6050,6 +6028,7 @@ function desempenhoAvailableComps(){
   if(ST.copaDoBrasil) opts.push({key:"copa", label:"Copa do Brasil"});
   if(ST.sulamericana) opts.push({key:"sula", label:"Sul-Americana"});
   if(ST.libertadoresCompleto) opts.push({key:"lib", label:"Libertadores"});
+  if(ST.intercontinental && ST.intercontinental.year===ST.seasonYear && ST.intercontinental.phase!=="ic_announce") opts.push({key:"ic", label:"Mundial de Clubes"});
   return opts;
 }
 function renderDesempenhoFilterBar(opts, active){
@@ -6092,7 +6071,25 @@ function renderDesempenhoBrasileiraoBlock(){
 // chaveamento/group-table panel already shown in the Competição tab (renderCopaBracket() etc.),
 // plus that competition's OWN top-scorers/assists — separate from the Brasileirão-wide ones,
 // via the compKey routing simFast()/applyDetailedResultToWorld() already do at match time.
+function renderIcDesempenhoBlock(){
+  const ic = ST.intercontinental;
+  const row = (f, label) => {
+    if(!f) return `<div class="fixture-mini-row"><span class="fixture-mini-team"><span class="faint tiny">${esc(label)} - a definir</span></span></div>`;
+    const score = f.played ? `${f.hs} x ${f.as}${f.pens?` (${f.pens})`:""}` : "x";
+    return `<div class="fixture-mini-row ${f.home===ST.teamId||f.away===ST.teamId?'is-user':''}">
+      <span class="fixture-mini-team">${crestMini(f.home)}<span>${esc(f.home)}</span></span>
+      <span class="fixture-mini-x">${score}</span>
+      <span class="fixture-mini-team right"><span>${esc(f.away)}</span>${crestMini(f.away)}</span>
+      <span class="fixture-mini-round">${esc(label)}</span>
+    </div>`;
+  };
+  return `<div class="panel"><div class="panel-title">Mundial de Clubes ${ic.year}</div>
+    <div class="fixture-mini-list">${row(ic.semis.sf1,"Semifinal 1")}${row(ic.semis.sf2,"Semifinal 2")}${row(ic.final,"Final")}</div>
+    ${ic.champion?`<div class="tac gold bold mt16">Campeão: ${esc(ic.champion)}</div>`:""}
+  </div>`;
+}
 function renderDesempenhoCompBlock(key){
+  if(key==="ic") return renderIcDesempenhoBlock();
   const store = key==="copa" ? ST.copaDoBrasil : key==="sula" ? ST.sulamericana : ST.libertadoresCompleto;
   const title = key==="copa" ? `Copa do Brasil ${store.year}` : key==="sula" ? `Sul-Americana ${store.year}` : `Libertadores ${store.year}`;
   const panelHtml = key==="copa" ? renderCopaBracket() : key==="sula" ? renderSulaCompetitionPanel() : renderLibCompletoCompetitionPanel();
