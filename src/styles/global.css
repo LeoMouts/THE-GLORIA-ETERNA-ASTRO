@@ -1123,3 +1123,4 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 @media (max-width:900px){
   .comp-home-news{height:440px;}
 }
+.badge-pos2{opacity:.62;margin-left:3px;font-size:.88em;}
