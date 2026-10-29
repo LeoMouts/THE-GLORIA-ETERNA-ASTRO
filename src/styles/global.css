@@ -1112,3 +1112,14 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .pface-anon{display:inline-flex;align-items:flex-end;justify-content:center;overflow:hidden;background:#c9c6bd;border-color:var(--line-strong);}
 .pface-anon svg{display:block;flex:0 0 auto;}
 .jersey-shirt .pface-anon.pface-over{align-items:flex-end;}
+
+/* static Competição home: three fixed boxes that never change size or position whichever competition is on */
+.comp-home{align-items:stretch;}
+.comp-home-match > .panel{height:480px;box-sizing:border-box;overflow:auto;display:flex;flex-direction:column;justify-content:center;margin:0;}
+.comp-home-mail > .panel{height:108px;box-sizing:border-box;overflow:hidden;margin:0;}
+.comp-home-news{position:relative;min-width:0;}
+.comp-home-news > .panel{position:absolute;inset:0;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;margin:0;}
+.comp-home-news .romano-flip-inner{flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto;}
+@media (max-width:900px){
+  .comp-home-news{height:440px;}
+}
