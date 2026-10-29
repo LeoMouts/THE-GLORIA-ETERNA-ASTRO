@@ -278,7 +278,11 @@ function anonFaceTag(size: number, cls?: string){
 }
 function playerFaceImg(p: any, size: number, cls?: string){ return faceImgTag(faceTmFor(p), size, size, "pface-round " + (cls||"")) || anonFaceTag(size, cls); }
 function playerFaceByName(name: string, size: number, cls?: string, pos?: string){ return faceImgTag(faceTmByName(name, pos), size, size, "pface-round " + (cls||"")) || anonFaceTag(size, cls); }
-function playerFolderPhoto(p: any){ return faceImgTag(faceTmFor(p), 78, 101, "pface-folder"); }
+function playerFolderPhoto(p: any){
+  const img = faceImgTag(faceTmFor(p), 78, 101, "pface-folder");
+  if(img) return img;
+  return `<span class="pface pface-folder pface-anon" style="width:78px;height:101px;"><svg viewBox="0 0 24 24" width="62" height="62" aria-hidden="true"><circle cx="12" cy="8.6" r="4.3" fill="#111"/><path d="M3.6 23c0-5 3.7-8.4 8.4-8.4s8.4 3.4 8.4 8.4z" fill="#111"/></svg></span>`;
+}
 const TEAM_KIT_OUTFIELD = {
   "Flamengo": "/images/kits/outfield/outfield/flamengo.png",
   "Estudiantes": "/images/kits/outfield/outfield/estudiantes.png",
@@ -6973,8 +6977,8 @@ function renderMixedXIPitch(xi){
       const shirt = p ? jerseyImage(p.team, slot==="GK", 30) : "";
       const rating = p ? (p.avgRating!=null ? p.avgRating : p.rating) : null;
       return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;cursor:default;">
-        <div class="jersey-card">
-          <div class="jersey-shirt">${shirt}</div>
+        <div class="jersey-card${p?' has-face':''}">
+          <div class="jersey-shirt">${shirt}${p?playerFaceImg(p,40,"pface-over"):""}</div>
           <div class="jersey-stats">
             <span class="jersey-pos">${slot}</span>
             <span class="jersey-ovr">${rating!=null?rating.toFixed(1):'—'}</span>
