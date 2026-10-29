@@ -1,9 +1,11 @@
 // ============================================================
-/* LIBERTADORES MANAGER — APP (state, storage, screens) — build marker: force-fresh-deploy-2026-09-04 */
+// LIBERTADORES MANAGER — APP (state, storage, screens)
+// build marker: force-fresh-deploy-2026-09-04
+// ============================================================
 import * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
-import { PRELIB_DATA } from "./prelib";
+import { PRELIB_DATA } from "./prelib"; import FACE_RAW from "./data/faces.json";
 import { SERIE_A_EXTRA_TEAMS, SERIE_A_2026 } from "./serieA"; import { SULAMERICANA_EXTRA_TEAMS, SULAMERICANA_2026 } from "./sulamericana";
 
 const GOAT_MASCOT_URI = "/images/image-1787868287812.webp";
@@ -226,6 +228,53 @@ function clubCrestImg(clubName, size, playerName){
   </span>`;
 }
 // ---------- real kit renders (Elenco tab only) — camisa 1 of each Libertadores club, line + goalkeeper ----------
+/* ---------- player portraits: Transfermarkt retratos from TheSMF-Group/assets (faces/<tm_id>.png), matched to game players by data/faces.json ({gameId: tm_id}). A player without a portrait renders nothing here, so every caller just falls back to its old name-and-crest look. ---------- */
+const FACE_CDN = "https://cdn.jsdelivr.net/gh/TheSMF-Group/assets@main/faces/";
+const FACE_BY_ID = FACE_RAW as unknown as Record<string, number>;
+let _faceNameTm: Record<string, number> | null = null;
+let _faceNamePosTm: Record<string, number> | null = null;
+let _faceIdName: Record<string, string> | null = null;
+function buildFaceIndex(){
+  const nameTm: Record<string, number> = {};
+  const namePosTm: Record<string, number> = {};
+  const idName: Record<string, string> = {};
+  const eat = (p: any) => {
+    if(!p || p.id==null || !p.name) return;
+    const tm = FACE_BY_ID[p.id] || 0;
+    if(tm) idName[p.id] = p.name;
+    const prev = nameTm[p.name];
+    nameTm[p.name] = (prev===undefined || prev===tm) ? tm : -1;
+    const k2 = p.name + "|" + p.pos;
+    const prev2 = namePosTm[k2];
+    namePosTm[k2] = (prev2===undefined || prev2===tm) ? tm : -1;
+  };
+  const eatTeams = (obj: any) => { for(const k in obj){ const pl = obj[k] && obj[k].players; if(pl) pl.forEach(eat); } };
+  GLOBAL_MARKET_SRC.forEach(eat);
+  eatTeams((DATA as any).teams); eatTeams(SERIE_A_EXTRA_TEAMS); eatTeams(SULAMERICANA_EXTRA_TEAMS); eatTeams((PRELIB_DATA as any).teams);
+  _faceNameTm = nameTm; _faceNamePosTm = namePosTm; _faceIdName = idName;
+}
+/* by id, but only when the stored name still matches - a runtime-generated player that happens to reuse an id never borrows someone else's face */
+function faceTmFor(p: any){
+  if(!p || p.id==null) return 0;
+  if(!_faceNameTm) buildFaceIndex();
+  const tm = FACE_BY_ID[p.id] || 0;
+  return (tm && (_faceIdName as any)[p.id]===p.name) ? tm : 0;
+}
+/* by name only (the Fabrizio Romano feed has no ids) - names shared by two different game players with different faces are skipped */
+function faceTmByName(name: string, pos?: string){
+  if(!_faceNameTm) buildFaceIndex();
+  const tm = (_faceNameTm as any)[name];
+  if(tm>0) return tm;
+  const tm2 = pos ? (_faceNamePosTm as any)[name + "|" + pos] : 0;
+  return tm2>0 ? tm2 : 0;
+}
+function faceImgTag(tm: number, w: number, h: number, cls?: string){
+  if(!tm) return "";
+  return `<img class="pface ${cls||''}" src="${FACE_CDN}${tm}.png" alt="" width="${w}" height="${h}" loading="lazy" style="width:${w}px;height:${h}px;" onerror="this.remove()"/>`;
+}
+function playerFaceImg(p: any, size: number, cls?: string){ return faceImgTag(faceTmFor(p), size, size, "pface-round " + (cls||"")); }
+function playerFaceByName(name: string, size: number, cls?: string, pos?: string){ return faceImgTag(faceTmByName(name, pos), size, size, "pface-round " + (cls||"")); }
+function playerFolderPhoto(p: any){ return faceImgTag(faceTmFor(p), 78, 101, "pface-folder"); }
 const TEAM_KIT_OUTFIELD = {
   "Flamengo": "/images/kits/outfield/outfield/flamengo.png",
   "Estudiantes": "/images/kits/outfield/outfield/estudiantes.png",
@@ -388,7 +437,8 @@ const COMPETITION_TROPHIES = {
   brasileirao: {url:TROPHY_CDN+"LG_BRA1.png", alt:"Taça Brasileirão"},
   copa: {url:TROPHY_CDN+"DOM_BRA.png", alt:"Taça Copa do Brasil"},
   libertadores: {url:TROPHY_CDN+"LIB.png", alt:"Taça CONMEBOL Libertadores"},
-  sulamericana: {url:TROPHY_CDN+"SUD.png", alt:"Taça CONMEBOL Sul-Americana"}, intercontinental: {url:TROPHY_CDN+"ICC.png", alt:"Taça Intercontinental FIFA"},
+  sulamericana: {url:TROPHY_CDN+"SUD.png", alt:"Taça CONMEBOL Sul-Americana"},
+  intercontinental: {url:TROPHY_CDN+"ICC.png", alt:"Taça Intercontinental FIFA"},
 };
 function competitionTrophyImg(compType, height, opacity){
   const t = COMPETITION_TROPHIES[compType] || COMPETITION_TROPHIES.brasileirao;
@@ -574,7 +624,8 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.daysSinceTraining = 0;
   ST.trainingPending = false;
   ST.trainingResult = null;
-  ST.transferFeed = []; ST.dayCounter = 0;
+  ST.transferFeed = [];
+  ST.dayCounter = 0;
   ST.xferFilter = {pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null, mode:"buy", sort:"ovr", page:1};
   const order = shuffled(E.makeRNG(nextSeed()), SERIE_A_2026);
   ST.brasileirao = {
@@ -588,7 +639,8 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.brasaStandingsHistory = {};
   ST.brasaZonesHistory = {};
   ST.sulamericana = null;
-  ST.libertadoresCompleto = null; ST.intercontinental = null;
+  ST.libertadoresCompleto = null;
+  ST.intercontinental = null;
   ST.lastUserMatchType = null;
   ST.desempenhoFilter = "brasileirao";
   ST.seasonPrizeTotals = {brasileirao:0, copa:0, sula:0, lib:0};
@@ -601,14 +653,28 @@ function startBrasileiraoCareer(teamId, managerName){
 function brasaSortedStandings(){
   return E.sortedStandings(ST.brasileirao.standings, SERIE_A_2026);
 }
-function brasaLeagueOver(){ const b = ST.brasileirao; return !!(b && b.currentRound>=b.rounds.length); } // never let two cup/continental match days land back-to-back — the user's last actual match
+// true once the Brasileirão itself has no rounds left to play — the point past which a cup's
+// own "roundsUntilNextLeg" pacing (spaced out across Brasileirão rounds so legs don't all land
+// on the same day) has nothing left to count down against. Without accounting for this, a leg
+// finishing post-season re-arms that same multi-round delay for the NEXT leg (see tickCopaDoBrasil()
+// et al.) with no more Brasileirão rounds ever coming to tick it back down to 0 — the "próximo
+// jogo" card then has nothing to preview (copa/sula/libPendingUserMatch() all gate on that same
+// counter) and goes permanently blank, with no button left to click at all: the exact softlock
+// checkForPostSeasonDeadEnd() was built to prevent, just reached through the pacing counter
+// instead of through elimination/completion. Every place that counter is read or re-armed treats
+// "league's over" as "the counter is already 0", so a live cup always plays straight through to
+// its actual conclusion once there's no more Brasileirão calendar left to pace it against.
+function brasaLeagueOver(){
+  const b = ST.brasileirao;
+  return !!(b && b.currentRound>=b.rounds.length);
+}
+// never let two cup/continental match days land back-to-back — the user's last actual match
 // always has to have been a Brasileirão league game before another Copa/Sul-Americana/
 // Libertadores one is allowed to trigger. Read by BOTH advanceBrasileiraoStep() (to decide
 // whether a cup tick is even allowed to fire this round) AND every copa/sula/libPendingUserMatch()
 // preview (so the calendar/"próximo jogo" card never shows a cup match that's actually about to
 // be skipped this round) — the two have to agree, or the preview lies about what plays next.
 function cupMatchesBlockedByInterleaving(){
-  const b = ST.brasileirao;
   // once the league itself has no rounds left, there's no more Brasileirão calendar left to
   // protect a cup preview against — the whole point of this rule was making sure a cup match
   // day never looked like it was coming up next when a plain league round was actually next
@@ -622,7 +688,253 @@ function allCupsFinished(){
     && (!ST.sulamericana || ST.sulamericana.phase==="sula_done")
     && (!ST.libertadoresCompleto || ST.libertadoresCompleto.phase==="lib_done");
 }
-function checkForPostSeasonDeadEnd(){ const b=ST.brasileirao; if(!b||b.currentRound<b.rounds.length) return; const copaClear=!ST.copaDoBrasil||ST.copaDoBrasil.phase==="copa_done"||ST.copaDoBrasil.userEliminated; const sulaClear=!ST.sulamericana||ST.sulamericana.phase==="sula_done"||ST.sulamericana.userEliminated; const libClear=!ST.libertadoresCompleto||ST.libertadoresCompleto.phase==="lib_done"||ST.libertadoresCompleto.userEliminated; if(!(copaClear&&sulaClear&&libClear)) return; if(allCupsFinished()){ checkForIntercontinental(); return; } autoFinishBackgroundCups(); } function autoFinishBackgroundCups(){ let guard=0; while(!allCupsFinished()&&guard<2000){ guard++; if(ST.copaDoBrasil) ST.copaDoBrasil.roundsUntilNextLeg=0; if(ST.sulamericana) ST.sulamericana.roundsUntilNextLeg=0; if(ST.libertadoresCompleto) ST.libertadoresCompleto.roundsUntilNextLeg=0; tickCopaDoBrasil(); tickSulamericana(); tickLibertadoresCompleto(); } checkForIntercontinental(); } const IC_CONCACAF_CLUBS = ["Club América","Monterrey","Pachuca","León","Los Angeles FC","Santos Laguna","Toronto FC"]; const IC_ASIA_CLUBS = ["Al Hilal SFC","Al Nassr FC","Al Ittihad Club","Al Ahli Saudi FC","Al Sadd SC","Al Duhail SC","Kashima Antlers","Kawasaki Frontale","Yokohama F. Marinos","Vissel Kobe","Ulsan HD FC","Jeonbuk Hyundai Motors","Pohang Steelers","FC Seoul"]; const IC_TIER_OVR = {euro:87, concacaf:79, asia:81}; const IC_NAME_POOLS = { euro: [["Kevin","Erik","Marco","Julian","Antoine","Thiago","Pablo","Nico","Leon","Mathis","Diego","Sander","Bruno","Rafael"], ["Novak","Berg","Rossi","Keller","Dubois","Fischer","Moreau","Alonso","Weber","Lindqvist","Ferreira","Haas","Costa","Silveira"]], concacaf: [["Carlos","Jesús","Erick","Uriel","Alan","Roberto","Diego","Sebastián","Jordan","Tyler","Emerson","Julián"], ["Hernández","Domínguez","Aguirre","Antuna","Reyes","Gallardo","Vega","Chávez","Salcedo","Córdova","Araujo","Peralta"]], asia: [["Hiroshi","Minjae","Yusuke","Sung","Faisal","Takumi","Jae","Khalid","Ryo","Dae","Salman","Kenta"], ["Sato","Kim","Tanaka","Park","Al-Otaibi","Suzuki","Lee","Al-Dawsari","Watanabe","Choi","Nakamura","Yamamoto"]], }; function genConfederationSquad(tierOvr, natLabel, namePool, rng, idGen){ const positions = ["GK","GK","CB","CB","CB","LB","LB","RB","RB","DMF","DMF","CM","CM","CM","AM","LW","RW","ST","ST","LM"]; return positions.map(pos=>{ const nm = pick(rng,namePool[0])+" "+pick(rng,namePool[1]); const age = 22+Math.floor(rng()*10); const isGk = pos==="GK"; const ovr = E.clamp(tierOvr + Math.floor((rng()-0.5)*10), 50, 92); const pot = ovr; function j(spread){ return E.clamp(ovr+Math.floor((rng()-0.5)*spread),30,95); } return {id:idGen(), name:nm, nat:natLabel, age, pos, altPos:[pos], ovr, pot, pac:j(16), sho:isGk?Math.floor(rng()*20)+15:j(14), pas:j(12), dri:isGk?j(18):j(12), de:j(14), phy:j(12), gk:isGk?j(12):Math.floor(rng()*20)+15, value:E.calcValue(ovr,age,pot), foot:rng()<0.78?"Right foot":"Left foot", injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0}; }); } function ensureIcOpponentSquad(clubName, tier){ if(ST.world.teams[clubName]) return; const rng = E.makeRNG(nextSeed()); const natLabel = tier==="euro"?"Europa":tier==="concacaf"?"Concacaf":"Ásia"; const players = genConfederationSquad(IC_TIER_OVR[tier]||80, natLabel, IC_NAME_POOLS[tier]||IC_NAME_POOLS.euro, rng, nextId); ST.world.teams[clubName] = {name:clubName, country:"", flag:"", group:null, source:"ic_gen", players}; } function icMatchStrength(teamName, ic){ if(teamName===ic.euroChampion) return IC_TIER_OVR.euro; if(teamName===ic.concacafChampion) return IC_TIER_OVR.concacaf; if(teamName===ic.asiaChampion) return IC_TIER_OVR.asia; return (ST.world.teams[teamName] && teamAvgOvr(ST.world.teams[teamName])) || 75; } function resolveSimulatedIcMatch(match){ const rng = E.makeRNG(nextSeed()); const sA = icMatchStrength(match.home, ST.intercontinental); const sB = icMatchStrength(match.away, ST.intercontinental); const aWins = rng() < 1/(1+Math.pow(10,(sB-sA)/9)); const winnerGoals = 1+Math.floor(rng()*3); const loserGoals = Math.floor(rng()*winnerGoals); match.hs = aWins?winnerGoals:loserGoals; match.as = aWins?loserGoals:winnerGoals; match.played = true; match.winner = aWins?match.home:match.away; } function icPrizeForStage(stage){ return {ic_semi:8000000, ic_final:30000000}[stage] || 0; } function payIntercontinentalPrize(stage){ const prize = icPrizeForStage(stage); if(!prize) return; ST.budget += prize; addSeasonPrize("ic", prize); ST.newsLog.unshift({title:"Premiação do Mundial de Clubes", text:`Classificação rende ${fmtMoney(prize)} aos cofres do ${ST.teamId}.`}); } function startIntercontinental(){ const rng = E.makeRNG(nextSeed()); const libChampion = ST.libertadoresCompleto.champion; const euroChampion = pick(rng, REAL_EURO_CLUBS); const concacafChampion = pick(rng, IC_CONCACAF_CLUBS); const asiaChampion = pick(rng, IC_ASIA_CLUBS); const userInvolved = libChampion===ST.teamId; ST.intercontinental = { year: ST.seasonYear, phase: userInvolved?"ic_announce":"ic_semi", libChampion, euroChampion, concacafChampion, asiaChampion, semis: { sf1: {home:asiaChampion, away:libChampion, played:false, hs:null, as:null, winner:null}, sf2: {home:euroChampion, away:concacafChampion, played:false, hs:null, as:null, winner:null}, }, final: null, champion:null, placementReached:null, userInvolved, scorers:{}, assisters:{}, }; ST.newsLog.unshift({title:"Mundial de Clubes definido!", text:`${libChampion} representa a Libertadores no Mundial de Clubes ${ST.seasonYear}, ao lado de ${euroChampion} (Champions League), ${concacafChampion} (Concacaf) e ${asiaChampion} (Ásia). Semifinais: ${asiaChampion} x ${libChampion} — ${euroChampion} x ${concacafChampion}.`}); if(userInvolved){ ST.stage = "ic_announce"; return; } advanceIntercontinentalStep(); } function progressIntercontinentalBracket(){ const ic = ST.intercontinental; const sf1 = ic.semis.sf1, sf2 = ic.semis.sf2; if(!sf1.played || !sf2.played) return; const w1 = sf1.winner || (sf1.hs>sf1.as?sf1.home:sf1.away); const w2 = sf2.winner || (sf2.hs>sf2.as?sf2.home:sf2.away); ic.final = {home:w1, away:w2, played:false, hs:null, as:null, winner:null}; ic.phase = "ic_final"; ST.newsLog.unshift({title:"Final do Mundial de Clubes definida!", text:`${w1} e ${w2} disputam o título do Mundial de Clubes ${ic.year}.`}); } function finishIntercontinental(champion){ const ic = ST.intercontinental; ic.champion = champion; ic.phase = "ic_done"; if(ic.userInvolved){ if(champion===ST.teamId) payIntercontinentalPrize("ic_final"); else ic.placementReached = ic.semis.sf1.winner===ST.teamId ? "Vice-campeão" : "Semifinal"; } ST.newsLog.unshift({title:"Campeão do Mundo!", text:`${champion} conquista o Mundial de Clubes ${ic.year}.`}); checkForPostSeasonDeadEnd(); } function advanceIntercontinentalStep(){ const ic = ST.intercontinental; if(ic.phase==="ic_semi"){ if(!ic.semis.sf2.played) resolveSimulatedIcMatch(ic.semis.sf2); const sf1 = ic.semis.sf1; if(!sf1.played){ if(sf1.away===ST.teamId){ ensureIcOpponentSquad(sf1.home, "asia"); startRatingRound(); goToMatchDay(sf1, {type:"ic_semi"}); return true; } resolveSimulatedIcMatch(sf1); } progressIntercontinentalBracket(); return advanceIntercontinentalStep(); } if(ic.phase==="ic_final"){ const f = ic.final; if(!f.played){ if(f.home===ST.teamId || f.away===ST.teamId){ const oppName = f.home===ST.teamId ? f.away : f.home; const tier = oppName===ic.euroChampion?"euro":oppName===ic.concacafChampion?"concacaf":"asia"; ensureIcOpponentSquad(oppName, tier); startRatingRound(); goToMatchDay(f, {type:"ic_final"}); return true; } resolveSimulatedIcMatch(f); } finishIntercontinental(f.winner || (f.hs>f.as?f.home:f.away)); } return false; } function icSeasonResult(){ const ic = ST.intercontinental; if(!ic || !ic.userInvolved || ic.year!==ST.seasonYear) return null; if(ic.champion===ST.teamId) return "Campeão"; return ic.placementReached || "Em andamento"; } function icRepReward(resultLabel){ return {"Campeão":12, "Vice-campeão":5, "Semifinal":2}[resultLabel] || 0; } function checkForIntercontinental(){ const ic = ST.intercontinental; if(ic && ic.year===ST.seasonYear){ if(ic.phase==="ic_done") finalizeBrasaSeason(); return; } if(!ST.libertadoresCompleto || ST.libertadoresCompleto.phase!=="lib_done"){ finalizeBrasaSeason(); return; } startIntercontinental(); } // advances exactly one Brasileirão round per call — every AI-vs-AI game in the round is
+// the hard-softlock bug: once the Brasileirão itself is over, getNextUserMatch() only ever
+// shows something when the user has a personal match still ahead in Copa/Sul-Americana/
+// Libertadores — the instant they're eliminated from every one of those (or were never in
+// them), that card goes permanently blank, with no "avançar dia" button left to click. But the
+// AI side of whichever competition(s) still haven't crowned a champion carries on regardless —
+// so without this, the game just sits there forever with nothing left for the user to do.
+// Called from every spot a user can either run out of Brasileirão rounds or get eliminated from
+// a competition (finishBrasaRound() and every finishXLeg()/finishXGroupRound()/applyShootoutResult()
+// elimination branch) — the moment NONE of the three could ever hand the user another personal
+// match again, this either finalizes the season right away (everything's actually already
+// wrapped up) or fast-forwards whatever's left of the AI side first.
+function checkForPostSeasonDeadEnd(){
+  const b = ST.brasileirao;
+  if(!b || b.currentRound<b.rounds.length) return; // the league itself still has personal matches ahead — nothing to do yet
+  const copaClear = !ST.copaDoBrasil || ST.copaDoBrasil.phase==="copa_done" || ST.copaDoBrasil.userEliminated;
+  const sulaClear = !ST.sulamericana || ST.sulamericana.phase==="sula_done" || ST.sulamericana.userEliminated;
+  const libClear = !ST.libertadoresCompleto || ST.libertadoresCompleto.phase==="lib_done" || ST.libertadoresCompleto.userEliminated;
+  if(!(copaClear && sulaClear && libClear)) return; // could still hand the user a personal match somewhere — let the normal calendar keep driving it
+  if(allCupsFinished()){ checkForIntercontinental(); return; }
+  autoFinishBackgroundCups();
+}
+// fast-forwards whatever's left of Copa/Sul-Americana/Libertadores straight to a real
+// conclusion — only ever reached once checkForPostSeasonDeadEnd() has confirmed the user has
+// no personal match left in any of them, so goToMatchDay() can never fire during this loop.
+function autoFinishBackgroundCups(){
+  let guard = 0;
+  while(!allCupsFinished() && guard<2000){
+    guard++;
+    if(ST.copaDoBrasil) ST.copaDoBrasil.roundsUntilNextLeg = 0;
+    if(ST.sulamericana) ST.sulamericana.roundsUntilNextLeg = 0;
+    if(ST.libertadoresCompleto) ST.libertadoresCompleto.roundsUntilNextLeg = 0;
+    tickCopaDoBrasil();
+    tickSulamericana();
+    tickLibertadoresCompleto();
+  }
+  checkForIntercontinental();
+}
+
+// ============================================================
+// MUNDIAL DE CLUBES (INTERCONTINENTAL) — the last competition of the year, only reachable when
+// this club actually won the Libertadores. Semifinal 1 pits the Libertadores champion against a
+// simplified stand-in for the AFC Champions League winner; semifinal 2 (never involving this
+// club) is a UEFA Champions League stand-in against a CONCACAF Champions Cup stand-in, resolved
+// silently by strength comparison alone — those three foreign competitions are simulated in the
+// background, never shown to the user. The final pits the two semifinal winners. Every match this
+// club actually plays is a real match day, same as any other cup — including against a foreign
+// opponent, which needs a one-off generated squad since foreign clubs otherwise only exist as
+// flavor names (see REAL_EURO_CLUBS) with no roster of their own.
+// ============================================================
+const IC_CONCACAF_CLUBS = ["Club América","Monterrey","Pachuca","León","Los Angeles FC","Santos Laguna","Toronto FC"];
+const IC_ASIA_CLUBS = ["Al Hilal SFC","Al Nassr FC","Al Ittihad Club","Al Ahli Saudi FC","Al Sadd SC","Al Duhail SC","Kashima Antlers","Kawasaki Frontale","Yokohama F. Marinos","Vissel Kobe","Ulsan HD FC","Jeonbuk Hyundai Motors","Pohang Steelers","FC Seoul"];
+const IC_TIER_OVR = {euro:87, concacaf:79, asia:81};
+const IC_NAME_POOLS = {
+  euro: [["Kevin","Erik","Marco","Julian","Antoine","Thiago","Pablo","Nico","Leon","Mathis","Diego","Sander","Bruno","Rafael"], ["Novak","Berg","Rossi","Keller","Dubois","Fischer","Moreau","Alonso","Weber","Lindqvist","Ferreira","Haas","Costa","Silveira"]],
+  concacaf: [["Carlos","Jesús","Erick","Uriel","Alan","Roberto","Diego","Sebastián","Jordan","Tyler","Emerson","Julián"], ["Hernández","Domínguez","Aguirre","Antuna","Reyes","Gallardo","Vega","Chávez","Salcedo","Córdova","Araujo","Peralta"]],
+  asia: [["Hiroshi","Minjae","Yusuke","Sung","Faisal","Takumi","Jae","Khalid","Ryo","Dae","Salman","Kenta"], ["Sato","Kim","Tanaka","Park","Al-Otaibi","Suzuki","Lee","Al-Dawsari","Watanabe","Choi","Nakamura","Yamamoto"]],
+};
+// one-off ~20-man squad for whichever foreign club this club actually has to play — generated,
+// not authored, since these clubs are otherwise just names (see REAL_EURO_CLUBS et al.); good
+// enough for a single cup run, never touched again once the season ends.
+function genConfederationSquad(tierOvr, natLabel, namePool, rng, idGen){
+  const positions = ["GK","GK","CB","CB","CB","LB","LB","RB","RB","DMF","DMF","CM","CM","CM","AM","LW","RW","ST","ST","LM"];
+  return positions.map(pos=>{
+    const nm = pick(rng,namePool[0])+" "+pick(rng,namePool[1]);
+    const age = 22+Math.floor(rng()*10);
+    const isGk = pos==="GK";
+    const ovr = E.clamp(tierOvr + Math.floor((rng()-0.5)*10), 50, 92);
+    const pot = ovr;
+    function j(spread){ return E.clamp(ovr+Math.floor((rng()-0.5)*spread),30,95); }
+    return {id:idGen(), name:nm, nat:natLabel, age, pos, altPos:[pos], ovr, pot, pac:j(16), sho:isGk?Math.floor(rng()*20)+15:j(14), pas:j(12), dri:isGk?j(18):j(12), de:j(14), phy:j(12), gk:isGk?j(12):Math.floor(rng()*20)+15, value:E.calcValue(ovr,age,pot), foot:rng()<0.78?"Right foot":"Left foot", injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0};
+  });
+}
+function ensureIcOpponentSquad(clubName, tier){
+  if(ST.world.teams[clubName]) return;
+  const rng = E.makeRNG(nextSeed());
+  const natLabel = tier==="euro"?"Europa":tier==="concacaf"?"Concacaf":"Ásia";
+  const players = genConfederationSquad(IC_TIER_OVR[tier]||80, natLabel, IC_NAME_POOLS[tier]||IC_NAME_POOLS.euro, rng, nextId);
+  ST.world.teams[clubName] = {name:clubName, country:"", flag:"", group:null, source:"ic_gen", players};
+}
+// abstract strength used ONLY for the two matches this club never plays (sf2 always, and sf1
+// when some other club won the Libertadores) — a real match day would need a real squad for
+// both sides, which foreign clubs don't have; a plain strength comparison is the "forma
+// simplificada" the background continental cups were always meant to get.
+function icMatchStrength(teamName, ic){
+  if(teamName===ic.euroChampion) return IC_TIER_OVR.euro;
+  if(teamName===ic.concacafChampion) return IC_TIER_OVR.concacaf;
+  if(teamName===ic.asiaChampion) return IC_TIER_OVR.asia;
+  return (ST.world.teams[teamName] && teamAvgOvr(ST.world.teams[teamName])) || 75;
+}
+function resolveSimulatedIcMatch(match){
+  const rng = E.makeRNG(nextSeed());
+  const sA = icMatchStrength(match.home, ST.intercontinental);
+  const sB = icMatchStrength(match.away, ST.intercontinental);
+  const aWins = rng() < 1/(1+Math.pow(10,(sB-sA)/9));
+  const winnerGoals = 1+Math.floor(rng()*3);
+  const loserGoals = Math.floor(rng()*winnerGoals);
+  match.hs = aWins?winnerGoals:loserGoals;
+  match.as = aWins?loserGoals:winnerGoals;
+  match.played = true;
+  match.winner = aWins?match.home:match.away;
+}
+function icPrizeForStage(stage){ return {ic_semi:8000000, ic_final:30000000}[stage] || 0; }
+function payIntercontinentalPrize(stage){
+  const prize = icPrizeForStage(stage);
+  if(!prize) return;
+  ST.budget += prize;
+  addSeasonPrize("ic", prize);
+  ST.newsLog.unshift({title:"Premiação do Mundial de Clubes", text:`Classificação rende ${fmtMoney(prize)} aos cofres do ${ST.teamId}.`});
+}
+function startIntercontinental(){
+  const rng = E.makeRNG(nextSeed());
+  const libChampion = ST.libertadoresCompleto.champion;
+  const euroChampion = pick(rng, REAL_EURO_CLUBS);
+  const concacafChampion = pick(rng, IC_CONCACAF_CLUBS);
+  const asiaChampion = pick(rng, IC_ASIA_CLUBS);
+  const userInvolved = libChampion===ST.teamId;
+  ST.intercontinental = {
+    year: ST.seasonYear, phase: userInvolved?"ic_announce":"ic_semi",
+    libChampion, euroChampion, concacafChampion, asiaChampion,
+    semis: {
+      sf1: {home:asiaChampion, away:libChampion, played:false, hs:null, as:null, winner:null},
+      sf2: {home:euroChampion, away:concacafChampion, played:false, hs:null, as:null, winner:null},
+    },
+    final: null, champion:null, placementReached:null, userInvolved, scorers:{}, assisters:{},
+  };
+  ST.newsLog.unshift({title:"Mundial de Clubes definido!", text:`${libChampion} representa a Libertadores no Mundial de Clubes ${ST.seasonYear}, ao lado de ${euroChampion} (Champions League), ${concacafChampion} (Concacaf) e ${asiaChampion} (Ásia). Semifinais: ${asiaChampion} x ${libChampion} — ${euroChampion} x ${concacafChampion}.`});
+  if(userInvolved){ ST.stage = "ic_announce"; return; }
+  advanceIntercontinentalStep();
+}
+function progressIntercontinentalBracket(){
+  const ic = ST.intercontinental;
+  const sf1 = ic.semis.sf1, sf2 = ic.semis.sf2;
+  if(!sf1.played || !sf2.played) return;
+  const w1 = sf1.winner || (sf1.hs>sf1.as?sf1.home:sf1.away);
+  const w2 = sf2.winner || (sf2.hs>sf2.as?sf2.home:sf2.away);
+  ic.final = {home:w1, away:w2, played:false, hs:null, as:null, winner:null};
+  ic.phase = "ic_final";
+  ST.newsLog.unshift({title:"Final do Mundial de Clubes definida!", text:`${w1} e ${w2} disputam o título do Mundial de Clubes ${ic.year}.`});
+}
+function finishIntercontinental(champion){
+  const ic = ST.intercontinental;
+  ic.champion = champion;
+  ic.phase = "ic_done";
+  if(ic.userInvolved){
+    if(champion===ST.teamId) payIntercontinentalPrize("ic_final");
+    else ic.placementReached = ic.semis.sf1.winner===ST.teamId ? "Vice-campeão" : "Semifinal";
+  }
+  ST.newsLog.unshift({title:"Campeão do Mundo!", text:`${champion} conquista o Mundial de Clubes ${ic.year}.`});
+  checkForPostSeasonDeadEnd();
+}
+// drives the whole thing to completion in one go — sf2 never involves this club, so it always
+// resolves instantly; sf1 and the final each either hand the user a real match day (returning
+// true so the caller stops and waits for it) or resolve instantly too, exactly like every other
+// cup final's advanceXFinalStep().
+function advanceIntercontinentalStep(){
+  const ic = ST.intercontinental;
+  if(ic.phase==="ic_semi"){
+    if(!ic.semis.sf2.played) resolveSimulatedIcMatch(ic.semis.sf2);
+    const sf1 = ic.semis.sf1;
+    if(!sf1.played){
+      if(sf1.away===ST.teamId){
+        ensureIcOpponentSquad(sf1.home, "asia");
+        startRatingRound();
+        goToMatchDay(sf1, {type:"ic_semi"});
+        return true;
+      }
+      resolveSimulatedIcMatch(sf1);
+    }
+    progressIntercontinentalBracket();
+    return advanceIntercontinentalStep();
+  }
+  if(ic.phase==="ic_final"){
+    const f = ic.final;
+    if(!f.played){
+      if(f.home===ST.teamId || f.away===ST.teamId){
+        const oppName = f.home===ST.teamId ? f.away : f.home;
+        const tier = oppName===ic.euroChampion?"euro":oppName===ic.concacafChampion?"concacaf":"asia";
+        ensureIcOpponentSquad(oppName, tier);
+        startRatingRound();
+        goToMatchDay(f, {type:"ic_final"});
+        return true;
+      }
+      resolveSimulatedIcMatch(f);
+    }
+    finishIntercontinental(f.winner || (f.hs>f.as?f.home:f.away));
+  }
+  return false;
+}
+// called from advanceBrasileiraoStep() every round, same as tickCopaDoBrasil() et al. — needed
+// for a real "AVANÇAR DIA" case advanceIntercontinentalStep()'s own single kickoff call (from
+// Game.continueIntercontinental()) can't cover on its own: the player reaches the match-confirm
+// screen for their semi/final, then navigates away from it (e.g. "✏️ Editar escalação" back to
+// Elenco) before actually simulating it. ST.pendingMatch is still sitting there unresolved, but
+// nothing was left to bring the player back to it — the "próximo jogo" card had no idea an
+// Intercontinental match could ever be pending (see icPendingUserMatch()), and advancing the
+// calendar never re-drove the Mundial forward either. Re-entering advanceIntercontinentalStep()
+// here re-issues the exact same goToMatchDay() call for that still-unplayed match — same
+// self-healing idea tickCopaDoBrasil()'s own leg search already relies on.
+function tickIntercontinental(){
+  const ic = ST.intercontinental;
+  if(!ic || ic.year!==ST.seasonYear || ic.phase==="ic_done" || ic.phase==="ic_announce") return false;
+  return advanceIntercontinentalStep();
+}
+// mirrors copa/sula/libPendingUserMatch() — previews the Mundial de Clubes semifinal/final
+// instead of the Brasileirão fixture whenever one is actually pending for this club, so the
+// "próximo jogo" card never goes blank just because the player stepped away from the match-confirm
+// screen (see tickIntercontinental() above) or checked another hub tab in between.
+function icPendingUserMatch(){
+  const ic = ST.intercontinental;
+  if(!ic || ic.year!==ST.seasonYear || !ic.userInvolved || ic.phase==="ic_done" || ic.phase==="ic_announce") return null;
+  if(ic.phase==="ic_semi"){
+    const f = ic.semis.sf1;
+    if(f.played || f.away!==ST.teamId) return null;
+    return {home:f.home, away:f.away, label:`Mundial de Clubes ${ic.year} · Semifinal · Jogo único`, compType:"intercontinental"};
+  }
+  if(ic.phase==="ic_final"){
+    const f = ic.final;
+    if(!f || f.played || (f.home!==ST.teamId && f.away!==ST.teamId)) return null;
+    return {home:f.home, away:f.away, label:`Mundial de Clubes ${ic.year} · Final · Jogo único`, compType:"intercontinental"};
+  }
+  return null;
+}
+function icSeasonResult(){
+  const ic = ST.intercontinental;
+  if(!ic || !ic.userInvolved || ic.year!==ST.seasonYear) return null;
+  if(ic.champion===ST.teamId) return "Campeão";
+  return ic.placementReached || "Em andamento";
+}
+function icRepReward(resultLabel){ return {"Campeão":12, "Vice-campeão":5, "Semifinal":2}[resultLabel] || 0; }
+// the actual gate reached once every domestic/continental cup is fully resolved — either starts
+// the Mundial de Clubes (only when this club just won that year's Libertadores) or, if it's
+// already running, either advances it or — once it's genuinely done — finally lets the season
+// end. checkForPostSeasonDeadEnd()/autoFinishBackgroundCups() both route here now instead of
+// calling finalizeBrasaSeason() directly.
+function checkForIntercontinental(){
+  const ic = ST.intercontinental;
+  if(ic && ic.year===ST.seasonYear){
+    if(ic.phase==="ic_done") finalizeBrasaSeason();
+    return;
+  }
+  if(!ST.libertadoresCompleto || ST.libertadoresCompleto.phase!=="lib_done"){
+    finalizeBrasaSeason();
+    return;
+  }
+  startIntercontinental();
+}
+// advances exactly one Brasileirão round per call — every AI-vs-AI game in the round is
 // simulated immediately, and if the user's own club has a fixture that round it's the only
 // thing that stops here (handed to the normal match screen); everything else plays through.
 function advanceBrasileiraoStep(){
@@ -636,12 +948,14 @@ function advanceBrasileiraoStep(){
     if(tickCopaDoBrasil()) return; // a Copa do Brasil match day was triggered this turn — wait for it
     if(tickSulamericana()) return; // same idea for the Sul-Americana campaign, when the user's club is in it
     if(tickLibertadoresCompleto()) return; // ...and for the real Libertadores, when the user's club is in it instead
+    if(tickIntercontinental()) return; // ...and for the Mundial de Clubes, once this club actually reached it — see tickIntercontinental()
   }
   if(b.currentRound>=b.rounds.length){
     // the league is done and every cup tick above came up empty this call — if a continental
     // campaign was still going, finishBrasaRound() already zeroed its countdown the moment the
     // league ended, so it would have fired above already; nothing firing means everything has
-    // genuinely finished, and the season can truly end now.
+    // genuinely finished (or the user is out of all of them), so re-check whether the season
+    // can truly end now.
     checkForPostSeasonDeadEnd();
     return;
   }
@@ -749,17 +1063,20 @@ function finalizeBrasaSeason(){
   const brasaRep = pos===1 ? 6 : pos<=6 ? 3 : pos<=13 ? 0 : -3;
   const copaResult = copaSeasonResult();
   const sulaResult = sulaSeasonResult();
-  const libResult = libSeasonResult(); const icResult = icSeasonResult();
+  const libResult = libSeasonResult();
+  const icResult = icSeasonResult();
   const copaRep = cupRepReward(copaResult);
   const sulaRep = cupRepReward(sulaResult);
-  const libRep = cupRepReward(libResult); const icRep = icRepReward(icResult);
+  const libRep = cupRepReward(libResult);
+  const icRep = icRepReward(icResult);
   const prizeTotals = ST.seasonPrizeTotals || {brasileirao:0, copa:0, sula:0, lib:0};
   const compCards = [
     {key:"brasileirao", label:"Brasileirão", trophyKey:"brasileirao", result: pos===1?"Campeão":`${pos}º lugar`, repChange:brasaRep, prize:prizeTotals.brasileirao||0, won: pos===1},
   ];
   if(copaResult) compCards.push({key:"copa", label:"Copa do Brasil", trophyKey:"copa", result:copaResult, repChange:copaRep, prize:prizeTotals.copa||0, won:copaResult==="Campeão"});
   if(sulaResult) compCards.push({key:"sula", label:"Sul-Americana", trophyKey:"sulamericana", result:sulaResult, repChange:sulaRep, prize:prizeTotals.sula||0, won:sulaResult==="Campeão"});
-  if(libResult) compCards.push({key:"lib", label:"Libertadores", trophyKey:"libertadores", result:libResult, repChange:libRep, prize:prizeTotals.lib||0, won:libResult==="Campeão"}); if(icResult) compCards.push({key:"ic", label:"Mundial de Clubes", trophyKey:"intercontinental", result:icResult, repChange:icRep, prize:prizeTotals.ic||0, won:icResult==="Campeão"});
+  if(libResult) compCards.push({key:"lib", label:"Libertadores", trophyKey:"libertadores", result:libResult, repChange:libRep, prize:prizeTotals.lib||0, won:libResult==="Campeão"});
+  if(icResult) compCards.push({key:"ic", label:"Mundial de Clubes", trophyKey:"intercontinental", result:icResult, repChange:icRep, prize:prizeTotals.ic||0, won:icResult==="Campeão"});
   const totalRepChange = brasaRep + copaRep + sulaRep + libRep + icRep;
   ST.lastSeasonSummary = {
     year: ST.seasonYear,
@@ -1230,7 +1547,8 @@ function newCareerState(){
     matchAnimIdx:0,
     matchPlaying:false,
     careerStats:{goals:{}, assists:{}, signings:[]},
-    transferFeed:[], dayCounter:0, // league-wide transfer news (AI signings + the user's own) — see runAITransferWindow() — dayCounter ticks once per calendar day, stamped on every transferFeed entry for FABRIZIO ROMANO's relative "hoje"/"ontem"/"há N dias" labels
+    transferFeed:[], // league-wide transfer news (AI signings + the user's own) — see runAITransferWindow()
+    dayCounter:0, // ticks once per calendar day (see dailyTransferTick()) — stamped on every transferFeed entry so FABRIZIO ROMANO can show "hoje"/"ontem"/"há N dias"
     romanoFlip:false, // FABRIZIO ROMANO widget: false = top 5 most expensive, true = 5 most recent
     romanoFlipping:false, // true for the brief squeeze-frame beat while the card is turning
     matchSpeed:"normal", // "slow" | "normal" | "fast" — how quickly live events tick across the screen
@@ -1352,7 +1670,8 @@ function startCareer(teamId, managerName){
   ST.brasileirao = null;
   ST.copaDoBrasil = null;
   ST.sulamericana = null; // Modo Completo's Sul-Americana campaign is unrelated to this classic mode
-  ST.libertadoresCompleto = null; ST.intercontinental = null; // ...same for Modo Completo's own Libertadores campaign
+  ST.libertadoresCompleto = null; // ...same for Modo Completo's own Libertadores campaign
+  ST.intercontinental = null; // ...and this season-finale competition too
   ST.careerStats = {goals:{}, assists:{}, signings:[]};
   ST.world = freshWorld();
   ensureGlobalMarket();
@@ -1479,7 +1798,8 @@ function setupSeasonCompetition(){
 function competitionStatsStore(compKey){
   if(compKey==="copa") return ST.copaDoBrasil;
   if(compKey==="sula") return ST.sulamericana;
-  if(compKey==="lib") return ST.libertadoresCompleto; if(compKey==="ic") return ST.intercontinental;
+  if(compKey==="lib") return ST.libertadoresCompleto;
+  if(compKey==="ic") return ST.intercontinental;
   return ST.mode==="brasileirao" ? ST.brasileirao : ST.competition;
 }
 // derives that same compKey from a match's own context object (ST.pendingMatch.context) —
@@ -1489,7 +1809,8 @@ function compKeyForContext(ctx){
   if(!ctx) return undefined;
   if(ctx.type==="copa") return "copa";
   if(ctx.type==="sula") return "sula";
-  if(ctx.type==="lib") return "lib"; if(ctx.type==="ic_semi"||ctx.type==="ic_final") return "ic";
+  if(ctx.type==="lib") return "lib";
+  if(ctx.type==="ic_semi"||ctx.type==="ic_final") return "ic";
   return undefined;
 }
 // records one goal for the season-wide top-scorers table.
@@ -1674,7 +1995,8 @@ function stageLabelFor(type){
     sula_groups:"Sul-Americana — Fase de Grupos", sula_r16:"Sul-Americana — Oitavas de Final", sula_qf:"Sul-Americana — Quartas de Final",
     sula_sf:"Sul-Americana — Semifinal", sula_final:"Sul-Americana — Final", sula_done:"Sul-Americana — Encerrada",
     lib_groups:"Libertadores — Fase de Grupos", lib_r16:"Libertadores — Oitavas de Final", lib_qf:"Libertadores — Quartas de Final",
-    lib_sf:"Libertadores — Semifinal", lib_final:"Libertadores — Final", lib_done:"Libertadores — Encerrada", ic_semi:"Mundial de Clubes — Semifinal", ic_final:"Mundial de Clubes — Final", ic_done:"Mundial de Clubes — Encerrado",
+    lib_sf:"Libertadores — Semifinal", lib_final:"Libertadores — Final", lib_done:"Libertadores — Encerrada",
+    ic_semi:"Mundial de Clubes — Semifinal", ic_final:"Mundial de Clubes — Final", ic_done:"Mundial de Clubes — Encerrado",
     brasileirao:"Brasileirão"}[type] || type;
 }
 
@@ -2497,7 +2819,8 @@ function applyShootoutResult(ctx, winner){
       }
     }
     progressCopaBracket();
-    if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw(); checkForPostSeasonDeadEnd();
+    if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw();
+    checkForPostSeasonDeadEnd(); // in case that elimination just now was the last personal match the user could ever get in any competition this season
   } else if(ctx.type==="copaFinal"){
     const cb = ST.copaDoBrasil;
     cb.champion = winner;
@@ -2505,7 +2828,8 @@ function applyShootoutResult(ctx, winner){
     closeRatingRound("copa", "Copa do Brasil");
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) payCopaStagePrize("copa_final");
-    ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${winner} conquista a Copa do Brasil ${cb.year} nos pênaltis.`}); checkForPostSeasonDeadEnd();
+    ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${winner} conquista a Copa do Brasil ${cb.year} nos pênaltis.`});
+    checkForPostSeasonDeadEnd(); // the Copa final itself may have been the last thing keeping the season open
   } else if(ctx.type==="sulaTie"){
     const round = currentSulaKORound();
     const tie = round.ties.find(t=>t.id===ctx.tieId);
@@ -2521,7 +2845,8 @@ function applyShootoutResult(ctx, winner){
         ST.newsLog.unshift({title:"Eliminado na Sul-Americana", text:`O ${ST.teamId} caiu na ${stageLabelFor(s.phase)} da Sul-Americana ${s.year} nos pênaltis. O torneio segue sem você.`});
       }
     }
-    progressSulaBracket(); checkForPostSeasonDeadEnd();
+    progressSulaBracket();
+    checkForPostSeasonDeadEnd(); // in case that elimination just now was the last personal match the user could ever get in any competition this season
   } else if(ctx.type==="sulaFinal"){
     const s = ST.sulamericana;
     s.champion = winner;
@@ -2529,7 +2854,8 @@ function applyShootoutResult(ctx, winner){
     closeRatingRound("sula", "Sul-Americana");
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) paySulaStagePrize("sula_final");
-    ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${winner} conquista a Sul-Americana ${s.year} nos pênaltis.`}); checkForPostSeasonDeadEnd();
+    ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${winner} conquista a Sul-Americana ${s.year} nos pênaltis.`});
+    checkForPostSeasonDeadEnd(); // the Sul-Americana final itself may have been the last thing keeping the season open
   } else if(ctx.type==="libTie"){
     const round = currentLibKORound();
     const tie = round.ties.find(t=>t.id===ctx.tieId);
@@ -2545,7 +2871,8 @@ function applyShootoutResult(ctx, winner){
         ST.newsLog.unshift({title:"Eliminado na Libertadores", text:`O ${ST.teamId} caiu na ${stageLabelFor(l.phase)} da Libertadores ${l.year} nos pênaltis. O torneio segue sem você.`});
       }
     }
-    progressLibBracket(); checkForPostSeasonDeadEnd();
+    progressLibBracket();
+    checkForPostSeasonDeadEnd(); // in case that elimination just now was the last personal match the user could ever get in any competition this season
   } else if(ctx.type==="libFinal"){
     const l = ST.libertadoresCompleto;
     l.champion = winner;
@@ -2553,7 +2880,25 @@ function applyShootoutResult(ctx, winner){
     closeRatingRound("lib", "Libertadores");
     ST.stage = "hub"; ST.hubTab = "competicao";
     if(winner===ST.teamId) payLibStagePrize("lib_final");
-    ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${winner} conquista a Libertadores ${l.year} nos pênaltis.`}); checkForPostSeasonDeadEnd();
+    ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${winner} conquista a Libertadores ${l.year} nos pênaltis.`});
+    checkForPostSeasonDeadEnd(); // the Libertadores final itself may have been the last thing keeping the season open
+  } else if(ctx.type==="icSemi"){
+    const ic = ST.intercontinental;
+    ic.semis.sf1.winner = winner;
+    closeRatingRound("ic", "Mundial de Clubes");
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    if(winner===ST.teamId) payIntercontinentalPrize("ic_semi");
+    ST.newsLog.unshift(winner===ST.teamId
+      ? {title:"Classificado para a final do Mundial de Clubes!", text:`O ${ST.teamId} vence nos pênaltis e vai à final do Mundial de Clubes ${ic.year}.`}
+      : {title:"Eliminado no Mundial de Clubes", text:`O ${ST.teamId} cai nos pênaltis na semifinal do Mundial de Clubes ${ic.year}.`});
+    progressIntercontinentalBracket();
+    advanceIntercontinentalStep();
+  } else if(ctx.type==="icFinal"){
+    const ic = ST.intercontinental;
+    ic.final.winner = winner;
+    closeRatingRound("ic", "Mundial de Clubes");
+    ST.stage = "hub"; ST.hubTab = "competicao";
+    finishIntercontinental(winner);
   }
 }
 
@@ -2767,7 +3112,8 @@ function finishCopaLeg(){
     }
   }
   progressCopaBracket();
-  if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw(); checkForPostSeasonDeadEnd();
+  if(cb.phase==="copa_qf_draw_pending") startCopaQfDraw();
+  checkForPostSeasonDeadEnd(); // in case that elimination just now was the last personal match the user could ever get in any competition this season
 }
 function progressCopaBracket(){
   const cb = ST.copaDoBrasil;
@@ -2821,8 +3167,9 @@ function advanceCopaFinalStep(){
 function tickCopaDoBrasil(){
   const cb = ST.copaDoBrasil;
   if(!cb || cb.phase==="copa_done") return false;
-  const leagueOver = brasaLeagueOver(); if(!leagueOver && cb.roundsUntilNextLeg>0){ cb.roundsUntilNextLeg--; return false; }
-  cb.roundsUntilNextLeg = leagueOver ? 0 : 3;
+  const leagueOver = brasaLeagueOver();
+  if(!leagueOver && cb.roundsUntilNextLeg>0){ cb.roundsUntilNextLeg--; return false; }
+  cb.roundsUntilNextLeg = leagueOver ? 0 : 3; // no Brasileirão rounds left post-season to ever count this back down — see brasaLeagueOver()
   if(cb.phase==="copa_final") return advanceCopaFinalStep();
   return advanceCopaLeg();
 }
@@ -3009,7 +3356,8 @@ function finishSulaGroupRound(){
   const ties = pairs.map((pair,i)=>makeTie(pair[0].team, pair[1].team, i<4?0:1, i%4));
   s.knockout.sula_r16 = { ties, legIndex:0 };
   s.phase = "sula_r16";
-  ST.newsLog.unshift({title:"Fase de grupos da Sul-Americana encerrada", text:"Classificados para as oitavas de final definidos."}); checkForPostSeasonDeadEnd();
+  ST.newsLog.unshift({title:"Fase de grupos da Sul-Americana encerrada", text:"Classificados para as oitavas de final definidos."});
+  checkForPostSeasonDeadEnd(); // in case group-stage elimination just now was the last personal match the user could ever get this season
 }
 function currentSulaKORound(){ return ST.sulamericana.knockout[ST.sulamericana.phase]; }
 function advanceSulaLeg(){
@@ -3061,7 +3409,8 @@ function finishSulaLeg(){
       ST.newsLog.unshift({title:"Eliminado na Sul-Americana", text:`O ${ST.teamId} caiu na ${stageLabelFor(s.phase)} da Sul-Americana ${s.year}. O torneio segue sem você.`});
     }
   }
-  progressSulaBracket(); checkForPostSeasonDeadEnd();
+  progressSulaBracket();
+  checkForPostSeasonDeadEnd(); // in case that elimination just now was the last personal match the user could ever get in any competition this season
 }
 function progressSulaBracket(){
   const s = ST.sulamericana;
@@ -3124,8 +3473,9 @@ function advanceSulaFinalStep(){
 function tickSulamericana(){
   const s = ST.sulamericana;
   if(!s || s.phase==="sula_done") return false;
-  const leagueOver = brasaLeagueOver(); if(!leagueOver && s.roundsUntilNextLeg>0){ s.roundsUntilNextLeg--; return false; }
-  s.roundsUntilNextLeg = leagueOver ? 0 : 2;
+  const leagueOver = brasaLeagueOver();
+  if(!leagueOver && s.roundsUntilNextLeg>0){ s.roundsUntilNextLeg--; return false; }
+  s.roundsUntilNextLeg = leagueOver ? 0 : 2; // see brasaLeagueOver() — post-season, nothing left to count this back down
   if(s.phase==="sula_groups") return advanceSulaGroupRound();
   if(s.phase==="sula_final") return advanceSulaFinalStep();
   return advanceSulaLeg();
@@ -3302,7 +3652,8 @@ function finishLibGroupRound(){
   const ties = pairs.map((pair,i)=>makeTie(pair[0].team, pair[1].team, i<4?0:1, i%4));
   l.knockout.lib_r16 = { ties, legIndex:0 };
   l.phase = "lib_r16";
-  ST.newsLog.unshift({title:"Fase de grupos da Libertadores encerrada", text:"Classificados para as oitavas de final definidos."}); checkForPostSeasonDeadEnd();
+  ST.newsLog.unshift({title:"Fase de grupos da Libertadores encerrada", text:"Classificados para as oitavas de final definidos."});
+  checkForPostSeasonDeadEnd(); // in case group-stage elimination just now was the last personal match the user could ever get this season
 }
 function currentLibKORound(){ return ST.libertadoresCompleto.knockout[ST.libertadoresCompleto.phase]; }
 function advanceLibLeg(){
@@ -3354,7 +3705,8 @@ function finishLibLeg(){
       ST.newsLog.unshift({title:"Eliminado na Libertadores", text:`O ${ST.teamId} caiu na ${stageLabelFor(l.phase)} da Libertadores ${l.year}. O torneio segue sem você.`});
     }
   }
-  progressLibBracket(); checkForPostSeasonDeadEnd();
+  progressLibBracket();
+  checkForPostSeasonDeadEnd(); // in case that elimination just now was the last personal match the user could ever get in any competition this season
 }
 function progressLibBracket(){
   const l = ST.libertadoresCompleto;
@@ -3418,8 +3770,9 @@ function advanceLibFinalStep(){
 function tickLibertadoresCompleto(){
   const l = ST.libertadoresCompleto;
   if(!l || l.phase==="lib_done") return false;
-  const leagueOver = brasaLeagueOver(); if(!leagueOver && l.roundsUntilNextLeg>0){ l.roundsUntilNextLeg--; return false; }
-  l.roundsUntilNextLeg = leagueOver ? 0 : 2;
+  const leagueOver = brasaLeagueOver();
+  if(!leagueOver && l.roundsUntilNextLeg>0){ l.roundsUntilNextLeg--; return false; }
+  l.roundsUntilNextLeg = leagueOver ? 0 : 2; // see brasaLeagueOver() — post-season, nothing left to count this back down
   if(l.phase==="lib_groups") return advanceLibGroupRound();
   if(l.phase==="lib_final") return advanceLibFinalStep();
   return advanceLibLeg();
@@ -3666,7 +4019,8 @@ function finishPendingMatch(){
       cb.champion = f.hs>f.as ? f.home : f.away;
       cb.phase = "copa_done";
       closeRatingRound("copa", "Copa do Brasil");
-      if(cb.champion===ST.teamId) payCopaStagePrize("copa_final"); checkForPostSeasonDeadEnd();
+      if(cb.champion===ST.teamId) payCopaStagePrize("copa_final");
+      checkForPostSeasonDeadEnd(); // the Copa final itself may have been the last thing keeping the season open
       ST.newsLog.unshift({title:"Campeão da Copa do Brasil!", text:`${cb.champion} conquista a Copa do Brasil ${cb.year}.`});
     } else {
       finishCopaLeg();
@@ -3684,7 +4038,8 @@ function finishPendingMatch(){
       s.champion = f.hs>f.as ? f.home : f.away;
       s.phase = "sula_done";
       closeRatingRound("sula", "Sul-Americana");
-      if(s.champion===ST.teamId) paySulaStagePrize("sula_final"); checkForPostSeasonDeadEnd();
+      if(s.champion===ST.teamId) paySulaStagePrize("sula_final");
+      checkForPostSeasonDeadEnd(); // the Sul-Americana final itself may have been the last thing keeping the season open
       ST.newsLog.unshift({title:"Campeão da Sul-Americana!", text:`${s.champion} conquista a Sul-Americana ${s.year}.`});
     } else {
       finishSulaLeg();
@@ -3702,12 +4057,32 @@ function finishPendingMatch(){
       l.champion = f.hs>f.as ? f.home : f.away;
       l.phase = "lib_done";
       closeRatingRound("lib", "Libertadores");
-      if(l.champion===ST.teamId) payLibStagePrize("lib_final"); checkForPostSeasonDeadEnd();
+      if(l.champion===ST.teamId) payLibStagePrize("lib_final");
+      checkForPostSeasonDeadEnd(); // the Libertadores final itself may have been the last thing keeping the season open
       ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${l.champion} conquista a Libertadores ${l.year}.`});
     } else {
       finishLibLeg();
     }
-  } else if(ctx.type==="ic_semi"){ const ic = ST.intercontinental; const f = ic.semis.sf1; if(f.hs===f.as){ startShootout(f.home, f.away, {type:"icSemi"}); return; } f.winner = f.hs>f.as ? f.home : f.away; closeRatingRound("ic", "Mundial de Clubes"); if(f.winner===ST.teamId) payIntercontinentalPrize("ic_semi"); ST.newsLog.unshift(f.winner===ST.teamId ? {title:"Classificado para a final do Mundial de Clubes!", text:`O ${ST.teamId} vence e vai à final do Mundial de Clubes ${ic.year}.`} : {title:"Eliminado no Mundial de Clubes", text:`O ${ST.teamId} cai na semifinal do Mundial de Clubes ${ic.year} diante do ${f.home}.`}); progressIntercontinentalBracket(); advanceIntercontinentalStep(); } else if(ctx.type==="ic_final"){ const ic = ST.intercontinental; const f = ic.final; if(f.hs===f.as){ startShootout(f.home, f.away, {type:"icFinal"}); return; } f.winner = f.hs>f.as ? f.home : f.away; closeRatingRound("ic", "Mundial de Clubes"); finishIntercontinental(f.winner); } else if(ctx.type==="group"){
+  } else if(ctx.type==="ic_semi"){
+    const ic = ST.intercontinental;
+    const f = ic.semis.sf1;
+    if(f.hs===f.as){ startShootout(f.home, f.away, {type:"icSemi"}); return; }
+    f.winner = f.hs>f.as ? f.home : f.away;
+    closeRatingRound("ic", "Mundial de Clubes");
+    if(f.winner===ST.teamId) payIntercontinentalPrize("ic_semi");
+    ST.newsLog.unshift(f.winner===ST.teamId
+      ? {title:"Classificado para a final do Mundial de Clubes!", text:`O ${ST.teamId} vence e vai à final do Mundial de Clubes ${ic.year}.`}
+      : {title:"Eliminado no Mundial de Clubes", text:`O ${ST.teamId} cai na semifinal do Mundial de Clubes ${ic.year} diante do ${f.home}.`});
+    progressIntercontinentalBracket();
+    advanceIntercontinentalStep();
+  } else if(ctx.type==="ic_final"){
+    const ic = ST.intercontinental;
+    const f = ic.final;
+    if(f.hs===f.as){ startShootout(f.home, f.away, {type:"icFinal"}); return; }
+    f.winner = f.hs>f.as ? f.home : f.away;
+    closeRatingRound("ic", "Mundial de Clubes");
+    finishIntercontinental(f.winner);
+  } else if(ctx.type==="group"){
     finishGroupRound();
   } else if(ctx.type==="final"){
     const f = ST.competition.knockout.final;
@@ -3974,7 +4349,19 @@ function recordTransferFeed(entry){
   ST.transferFeed.push(Object.assign({}, entry, {year: ST.seasonYear, day: ST.dayCounter||0}));
   if(ST.transferFeed.length>300) ST.transferFeed = ST.transferFeed.slice(-300);
 }
-function romanoDayLabel(entryDay){ const diff = Math.max(0, (ST.dayCounter||0) - (entryDay||0)); if(diff===0) return "Hoje"; if(diff===1) return "Ontem"; if(diff<7) return `há ${diff} dias`; if(diff<60) return `há ${Math.floor(diff/7)} sem.`; return "há muito tempo"; } // the core CONMEBOL recruitment pass: each AI club checks its starting XI slot by slot, and where
+// "hoje" / "ontem" / "há N dias" — reads a transfer's stamped day (recordTransferFeed()) against
+// the current one, same idea as a real social feed's relative timestamps. A signing from a
+// previous save (no day stamp yet, or from before this counter existed) just falls back to 0,
+// so it reads as "há muito tempo" rather than crashing.
+function romanoDayLabel(entryDay){
+  const diff = Math.max(0, (ST.dayCounter||0) - (entryDay||0));
+  if(diff===0) return "Hoje";
+  if(diff===1) return "Ontem";
+  if(diff<7) return `há ${diff} dias`;
+  if(diff<60) return `há ${Math.floor(diff/7)} sem.`;
+  return "há muito tempo";
+}
+// the core CONMEBOL recruitment pass: each AI club checks its starting XI slot by slot, and where
 // its best option falls under what a club of its tier should field, tries to fix it — first by
 // shopping the global market pool (weighted toward nationality fit and a realistic price band),
 // then, failing that, by poaching a genuine surplus player from a lower-tier AI club (never the
@@ -4158,13 +4545,20 @@ function runSingleGlobalReshuffle(rng){
   p.club = dest;
   p.value = fee;
 }
-// rolled once per AVANÇAR DIA (see Game.advance/advanceSlow/advanceFast) — most days are quiet,
-// but on the ones that aren't, exactly one of these three fires so transfer news actually
-// trickles in day by day instead of arriving all at once at the season boundary.
+// rolled once per calendar day — every rest day (Game.advanceDay()) AND every match day
+// (Game.advance/advanceSlow/advanceFast) each get their own roll, so news actually trickles in
+// day by day (not just once per match, 3-4 real calendar days apart) instead of arriving all at
+// once at the season boundary. Most days are quiet, but on the ones that aren't, exactly one of
+// these three fires.
 function dailyTransferTick(){
   if(!ST.world || !ST.world.teams) return;
+  // every calendar day gets its own tick of the day counter (see recordTransferFeed()) — this is
+  // what lets the FABRIZIO ROMANO feed actually show "hoje"/"ontem"/"há N dias" per deal, instead
+  // of every deal in a save just carrying the same season year. Ticks even on a quiet day (no
+  // signing), so the counter always reflects real calendar time, not just "days with news".
+  ST.dayCounter = (ST.dayCounter||0)+1;
   const rng = E.makeRNG(nextSeed());
-  ST.dayCounter = (ST.dayCounter||0)+1; if(rng() > 0.32) return;
+  if(rng() > 0.32) return;
   const roll = rng();
   if(roll < 0.45) runSingleAISigning(rng);
   else if(roll < 0.85) runEuropeanPoaching(rng);
@@ -4690,7 +5084,8 @@ function render(){
     else if(ST.stage==="season_end") html = renderSeasonEndScreen();
     else if(ST.stage==="group_draw") html = renderGroupDraw();
     else if(ST.stage==="copa_draw") html = renderCopaDraw();
-    else if(ST.stage==="copa_qf_draw") html = renderCopaQfDraw(); else if(ST.stage==="ic_announce") html = renderIcAnnounce();
+    else if(ST.stage==="copa_qf_draw") html = renderCopaQfDraw();
+    else if(ST.stage==="ic_announce") html = renderIcAnnounce();
     else if(ST.stage==="job_offers") html = renderJobOffers();
     else if(ST.stage==="career_over") html = renderCareerOver();
     else if(ST.stage==="penaltyShootout") html = renderPenaltyShootoutScreen();
@@ -5201,6 +5596,8 @@ function getNextUserBrasaMatch(){
   if(sulaPreview) return sulaPreview;
   const libPreview = libPendingUserMatch();
   if(libPreview) return libPreview;
+  const icPreview = icPendingUserMatch();
+  if(icPreview) return icPreview;
   const b = ST.brasileirao;
   if(!b || b.currentRound>=b.rounds.length) return null;
   const round = b.rounds[b.currentRound];
@@ -5335,7 +5732,23 @@ function renderLevelUpCard(name, pos, fromOvr, toOvr, delayMs){
 // so the table still owns most of the row and the page fits without scrolling.
 function renderNextMatchCard(compact){
   const nm = getNextUserMatch();
-  if(!nm){ if(ST.mode==="brasileirao" && brasaLeagueOver() && ST.stage==="hub"){ return `<div class="panel" style="text-align:center;${compact?'padding:14px;':''}"><div class="faint tiny uc mb12">Temporada ${ST.seasonYear}</div><p class="dim small">Todos os seus compromissos da temporada terminaram.</p><div class="btn-row center ${compact?'mt8':'mt16'}"><button class="btn btn-gold ${compact?'':'btn-lg'}" onclick="Game.forceEndSeason()">IR PARA ${ST.seasonYear+1} →</button></div></div>`; } return ""; }
+  if(!nm){
+    // safety valve: the Brasileirão itself is already done and there's genuinely no personal
+    // match left anywhere, but the season still hasn't wrapped up on its own — this should always
+    // be caught automatically (see brasaLeagueOver() and checkForPostSeasonDeadEnd()), so this is
+    // only a last-resort escape hatch for whatever edge case still slips past that. Never leave
+    // the player staring at an empty card with nothing left to click at all.
+    if(ST.mode==="brasileirao" && brasaLeagueOver() && ST.stage==="hub"){
+      return `<div class="panel" style="text-align:center;${compact?'padding:14px;':''}">
+        <div class="faint tiny uc mb12">Temporada ${ST.seasonYear}</div>
+        <p class="dim small">Todos os seus compromissos da temporada terminaram.</p>
+        <div class="btn-row center ${compact?'mt8':'mt16'}">
+          <button class="btn btn-gold ${compact?'':'btn-lg'}" onclick="Game.forceEndSeason()">IR PARA ${ST.seasonYear+1} →</button>
+        </div>
+      </div>`;
+    }
+    return "";
+  }
   ensureCalendarCountdown();
   const days = ST.calendarDaysLeft;
   const oppName = nm.home===ST.teamId ? nm.away : nm.home;
@@ -5405,10 +5818,10 @@ function renderPreLibCompeticaoTab(){
 // standings, upcoming fixtures and top scorers each get their own separated card.
 // "FABRIZIO ROMANO" — a transfer-news card on the Competição tab reading straight off
 // ST.transferFeed (every AI signing plus the user's own purchases). Click it to flip between
-// the 5 priciest deals in the save so far and the 5 most recent ones; each row shows the fee,
-// the player, and both crests with an arrow pointing at whoever actually signed them.
+// the 5 priciest deals in the save so far and EVERY recent one, newest first, each stamped with
+// how long ago it happened (romanoDayLabel()) — real day-by-day news, not a season-end dump.
 function romanoRow(t){
-  return `<div class="romano-row">
+  return `<div class="romano-row">${playerFaceByName(t.name,38,"",t.pos)}
     <div class="romano-row-crests">
       ${clubCrestImg(t.fromClub, 22)}
       <span class="romano-arrow">→</span>
@@ -5418,7 +5831,10 @@ function romanoRow(t){
       <div class="bold">${esc(t.name)}</div>
       <div class="tiny dim">${esc(t.fromClub)} <span class="romano-arrow-inline">→</span> <span class="bold">${esc(t.toClub)}</span></div>
     </div>
-    <div class="romano-row-side"> <div class="romano-row-fee gold bold mono">${fmtMoney(t.price)}</div> <div class="tiny faint">${esc(romanoDayLabel(t.day))}</div> </div>
+    <div class="romano-row-side">
+      <div class="romano-row-fee gold bold mono">${fmtMoney(t.price)}</div>
+      <div class="tiny faint">${esc(romanoDayLabel(t.day))}</div>
+    </div>
   </div>`;
 }
 function renderFabrizioRomanoCard(){
@@ -5430,6 +5846,9 @@ function renderFabrizioRomanoCard(){
     </div>`;
   }
   const flipped = !!ST.romanoFlip;
+  // "mais recentes" now shows the WHOLE feed, newest first, scrolling inside the card instead of
+  // being capped at 5 — see .romano-flip-inner's max-height in global.css. "mais caras" stays a
+  // top-5 leaderboard on purpose, that one was never meant to be exhaustive.
   const list = flipped
     ? feed.slice().reverse()
     : feed.slice().sort((a,b)=>b.price-a.price).slice(0,5);
@@ -6071,8 +6490,8 @@ function renderElencoTab(){
       const c = coords[i];
       const unavailable = p && (p.injured||p.suspended);
       return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;" onclick="Game.openSlotPicker(${i})">
-        <div class="jersey-card ${unavailable?'unavailable':''}">
-          <div class="jersey-shirt">${slot==="GK"?shirtGK:shirtLine}</div>
+        <div class="jersey-card ${unavailable?'unavailable':''}${p&&faceTmFor(p)?' has-face':''}">
+          <div class="jersey-shirt">${slot==="GK"?shirtGK:shirtLine}${p?playerFaceImg(p,40,"pface-over"):""}</div>
           <div class="jersey-stats">
             <span class="jersey-pos">${slot}</span>
             <span class="jersey-ovr">${p?p.ovr:'—'}</span>
@@ -6158,7 +6577,7 @@ function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
     <th>Jogador</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">POT</th><th class="tac">Valor</th><th>Status</th><th></th>
   </tr></thead><tbody>
   ${players.map(p=>`<tr>
-    <td class="bold">${esc(p.name)} <span class="faint tiny">${p.nat}</span></td>
+    <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)} <span class="faint tiny">${p.nat}</span></span></span></td>
     <td><span class="badge badge-pos">${p.pos}</span></td>
     <td class="tac">${p.age}</td>
     <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
@@ -6702,7 +7121,7 @@ function renderMatch(){
   const pm = ST.pendingMatch;
   const home = pm.ref.home, away = pm.ref.away;
   const stageLblType = (pm.context.type==="copa"||pm.context.type==="sula"||pm.context.type==="lib") ? pm.context.phase : pm.context.type;
-  const stageLbl = stageLabelFor(stageLblType) + (pm.context.legIndex!=null ? ` — jogo de ${pm.context.legIndex===0?'ida':'volta'}` : ((stageLblType==="final"||stageLblType==="copa_final"||stageLblType==="sula_final"||stageLblType==="lib_final"||String(stageLblType).indexOf("prelib_")===0)?" — jogo único":""));
+  const stageLbl = stageLabelFor(stageLblType) + (pm.context.legIndex!=null ? ` — jogo de ${pm.context.legIndex===0?'ida':'volta'}` : ((stageLblType==="final"||stageLblType==="copa_final"||stageLblType==="sula_final"||stageLblType==="lib_final"||stageLblType==="ic_semi"||stageLblType==="ic_final"||String(stageLblType).indexOf("prelib_")===0)?" — jogo único":""));
   if(!pm.result){
     const lp = lineupPlayers();
     const missing = lp.filter(p=>!p).length;
@@ -6912,7 +7331,7 @@ function renderSquadCentralModal(){
   const totalValue = players.reduce((a,p)=>a+p.value,0);
   const rows = players.map(p=>`<tr>
     <td class="tac" style="width:44px;"><input type="number" class="input-inline squad-number-input" min="1" max="99" placeholder="—" value="${p.number||''}" onchange="Game.setPlayerNumber(${p.id}, this.value)"/></td>
-    <td class="bold">${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></td>
+    <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></span></span></td>
     <td><span class="badge badge-pos">${p.pos}</span></td>
     <td class="tac">${p.age}</td>
     <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
@@ -7052,7 +7471,7 @@ function renderIncomingOfferModal(m){
         </div>
         <div class="contract-kv"><span>Tipo de transferência</span><span>Vender</span></div>
         <div class="contract-kv"><span>Categoria</span><span>${isArab?'Proposta inacreditável':'Proposta do exterior'}</span></div>
-        ${p ? contractPlayerCard(p) : ""}
+        ${p ? contractPlayerCard(p, ST.teamId) : ""}
       </div>
       <div class="contract-divider"><span class="contract-pen">✒️</span></div>
       <div class="contract-panel">
@@ -7143,16 +7562,21 @@ function renderContractSigning(message){
     </div>
   </div>`;
 }
-function contractPlayerCard(p){
+function contractPlayerCard(p, clubName){
+  const photo = playerFolderPhoto(p);
+  const crest = clubName ? `<span class="contract-player-crest">${clubCrestImg(clubName,22,null)}</span>` : "";
   return `<div class="contract-player-card">
-    <div class="contract-player-banner"><span>${esc(p.name)}</span><span>${p.pos}</span></div>
-    <div class="contract-player-body">
+    <div class="contract-player-banner"><span class="contract-player-name">${crest}<span>${esc(p.name)}</span></span><span>${p.pos}</span></div>
+    <div class="contract-player-body${photo?' has-photo':''}">
+      ${photo}
+      <div class="contract-player-data">
       <div class="contract-stat-grid">
         <div><span>Ger</span><b>${p.ovr}</b></div>
         <div><span>Idade</span><b>${p.age}</b></div>
         <div><span>Pot</span><b>${p.pot}</b></div>
       </div>
       <div class="contract-stat-row"><span>Valor de mercado</span><b class="gold">${fmtMoney(p.value)}</b></div>
+      </div>
     </div>
   </div>`;
 }
@@ -7178,7 +7602,7 @@ function renderBuyOfferModal(m){
         </div>
         <div class="contract-kv"><span>Tipo de transferência</span><span>Comprar</span></div>
         <div class="contract-kv"><span>Valor de passe estipulado</span><span class="gold bold">${fmtMoney(ask)}</span></div>
-        ${contractPlayerCard(p)}
+        ${contractPlayerCard(p, clubName)}
       </div>
       <div class="contract-divider"><span class="contract-pen">✒️</span></div>
       <div class="contract-panel">
@@ -7297,7 +7721,41 @@ function renderReiDaAmericaPanel(r){
 // slots pot-by-pot, group-by-group (TIME 1 grupo A, TIME 1 grupo B, ... TIME 2 grupo A, ...),
 // each one unrolling like a paper slip pulled from the draw pot. ST.drawRevealed (ticked by
 // startGroupDrawAnimation's timer, or jumped straight to 32 by SKIP) drives how many show.
-function renderIcAnnounce(){ const ic = ST.intercontinental; const slot = (teamName)=>{ const isUser = teamName===ST.teamId; return `<div class="draw-slot draw-slot-reveal${isUser?" draw-slot-user":""}"> <span class="draw-slot-crest">${clubCrestImg(teamName,20,null)}</span> <span class="draw-slot-name">${esc(teamName)}</span> </div>`; }; const boxes = `<div class="draw-group"> <div class="draw-group-title">Semifinal 1 — Ásia x Libertadores</div> ${slot(ic.asiaChampion)}${slot(ic.libChampion)} </div> <div class="draw-group"> <div class="draw-group-title">Semifinal 2 — Champions League x Concacaf</div> ${slot(ic.euroChampion)}${slot(ic.concacafChampion)} </div>`; return `${cornerWatermarks()}<div class="draw-screen"> <div class="draw-header"> <div class="draw-trophy">${competitionTrophyImg("intercontinental",90,1)}</div> <div class="draw-title-badge">FIFA</div> <h1 class="draw-title">Mundial de Clubes</h1> <div class="draw-year">${esc(ic.libChampion)} — CAMPEÃO DA LIBERTADORES ${ic.year}</div> </div> <div class="draw-grid">${boxes}</div> <div class="btn-row center mt24"> <button class="btn btn-gold btn-lg" onclick="Game.continueIntercontinental()">Encarar o mundo →</button> </div> </div>`; } function renderCopaDraw(){
+// the Mundial de Clubes announcement screen — only ever reached once, the moment this club wins
+// the Libertadores: shows who else made the field (all three simulated in the background, see
+// startIntercontinental()) and both semifinal pairings, no incremental reveal needed since
+// there's no suspense here — the club is already in it, the only question left is winning it.
+function renderIcAnnounce(){
+  const ic = ST.intercontinental;
+  const slot = (teamName)=>{
+    const isUser = teamName===ST.teamId;
+    return `<div class="draw-slot draw-slot-reveal${isUser?" draw-slot-user":""}">
+      <span class="draw-slot-crest">${clubCrestImg(teamName,20,null)}</span>
+      <span class="draw-slot-name">${esc(teamName)}</span>
+    </div>`;
+  };
+  const boxes = `<div class="draw-group">
+      <div class="draw-group-title">Semifinal 1 — Ásia x Libertadores</div>
+      ${slot(ic.asiaChampion)}${slot(ic.libChampion)}
+    </div>
+    <div class="draw-group">
+      <div class="draw-group-title">Semifinal 2 — Champions League x Concacaf</div>
+      ${slot(ic.euroChampion)}${slot(ic.concacafChampion)}
+    </div>`;
+  return `${cornerWatermarks()}<div class="draw-screen">
+    <div class="draw-header">
+      <div class="draw-trophy">${competitionTrophyImg("intercontinental",90,1)}</div>
+      <div class="draw-title-badge">FIFA</div>
+      <h1 class="draw-title">Mundial de Clubes</h1>
+      <div class="draw-year">${esc(ic.libChampion)} — CAMPEÃO DA LIBERTADORES ${ic.year}</div>
+    </div>
+    <div class="draw-grid">${boxes}</div>
+    <div class="btn-row center mt24">
+      <button class="btn btn-gold btn-lg" onclick="Game.continueIntercontinental()">Encarar o mundo →</button>
+    </div>
+  </div>`;
+}
+function renderCopaDraw(){
   const cb = ST.copaDoBrasil;
   const ties = cb.knockout.copa_r16.ties;
   const revealed = cb.drawRevealed||0;
@@ -7582,7 +8040,8 @@ const Game = {
     ensureCalendarCountdown();
     if(ST.calendarDaysLeft>0) ST.calendarDaysLeft--;
     ST.calendarWeekdayIdx = (ST.calendarWeekdayIdx+1)%7;
-    generateDailyMail(); dailyTransferTick();
+    generateDailyMail();
+    dailyTransferTick(); // every rest day rolls for transfer news too, not just match days — see dailyTransferTick()
     // calendarDaysLeft hitting 0 just flips the card over to "DIA DO JOGO" — the actual
     // advanceTournament() call happens when the player clicks one of those buttons, exactly
     // like it always did before AVANÇAR DIA existed. A training day never interrupts match
@@ -7597,7 +8056,18 @@ const Game = {
     scheduleSave();
     render();
   },
-  forceEndSeason(){ autoFinishBackgroundCups(); scheduleSave(); render(); }, simulateTraining(){
+  // safety-valve button on the empty-card fallback (see renderNextMatchCard()) — forces every
+  // still-unfinished cup straight to its real conclusion, same fast-forward autoFinishBackgroundCups()
+  // already uses for the AI-only remainder once the player is confirmed to have no personal match
+  // left, then lands on the normal season-end recap (troféus, reputação, artilheiros, colocação em
+  // cada campeonato). Only ever reachable when the Brasileirão itself is already done, so there's no
+  // league round left to skip — this can't cut short anything the player hadn't already finished.
+  forceEndSeason(){
+    autoFinishBackgroundCups();
+    scheduleSave();
+    render();
+  },
+  simulateTraining(){
     ST.trainingAnimating = true;
     render();
     setTimeout(()=>{
@@ -7874,8 +8344,14 @@ const Game = {
     ST.copaDoBrasil.qfDrawRevealed = 8;
     render();
   },
-  continueIntercontinental(){ ST.intercontinental.phase = "ic_semi"; advanceIntercontinentalStep(); scheduleSave(); render(); }, finishCopaQfDraw(){
+  finishCopaQfDraw(){
     ST.stage = "hub"; ST.hubTab = "competicao";
+    scheduleSave();
+    render();
+  },
+  continueIntercontinental(){
+    ST.intercontinental.phase = "ic_semi";
+    advanceIntercontinentalStep();
     scheduleSave();
     render();
   },
