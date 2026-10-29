@@ -949,7 +949,12 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .romano-arrow-inline{color:var(--marigold);font-weight:800;}
 .romano-row-body{flex:1;min-width:0;}
 .romano-row-body .bold{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.romano-row-side{flex:0 0 auto;text-align:right;} .romano-row-fee{font-size:12.5px;white-space:nowrap;} .romano-flip-scroll{max-height:320px;overflow-y:auto;}
+.romano-row-side{flex:0 0 auto;text-align:right;}
+.romano-row-fee{font-size:12.5px;white-space:nowrap;}
+/* "mais recentes" can now hold the whole feed instead of just 5 rows — scrolls inside the card
+   rather than pushing the rest of the Competição grid down. "mais caras" (5 rows, no this class)
+   is short enough it never needs to scroll. */
+.romano-flip-scroll{max-height:320px;overflow-y:auto;}
 
 /* ---------------- BRASILEIRÃO — Série A table (Competição tab, Brasileirão career mode) ----
    Chrome (background/borders/title/points) follows the site's own warm-dark/marigold identity;
@@ -1085,4 +1090,22 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .season-comp-card-row{
   display:flex;justify-content:space-between;width:100%;font-size:12px;
   margin-top:8px;padding-top:8px;border-top:1px solid var(--line);
+}
+
+/* player portraits (TheSMF-Group/assets faces) — Fabrizio Romano feed, Elenco pitch + tables, and the transfer "pasta do jogador" */
+.pface{display:block;flex:0 0 auto;object-fit:cover;object-position:50% 12%;background:var(--panel2);border:1px solid var(--line-strong);}
+.pface-round{border-radius:50%;}
+.pface-cell{display:inline-flex;align-items:center;gap:9px;}
+.romano-row > .pface{margin-right:2px;}
+.jersey-shirt{position:relative;}
+.jersey-shirt .pface-over{position:absolute;left:50%;top:-4px;transform:translateX(-50%);z-index:1;border-width:1px;border-color:var(--marigold-dim);}
+.jersey-card.has-face{height:84px;padding-top:7px;}
+.pface-folder{border-radius:6px;border-color:var(--marigold-dim);}
+.contract-player-name{display:inline-flex;align-items:center;gap:8px;min-width:0;}
+.contract-player-crest{display:inline-flex;flex:0 0 auto;}
+.contract-player-body.has-photo{display:flex;align-items:center;gap:14px;}
+.contract-player-body.has-photo .contract-player-data{flex:1;min-width:0;}
+@media (max-width:640px){
+  .jersey-shirt .pface-over{width:30px !important;height:30px !important;top:-3px;}
+  .jersey-card.has-face{height:66px;}
 }
