@@ -1109,3 +1109,6 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
   .jersey-shirt .pface-over{width:30px !important;height:30px !important;top:-3px;}
   .jersey-card.has-face{height:66px;}
 }
+.pface-anon{display:inline-flex;align-items:flex-end;justify-content:center;overflow:hidden;background:#c9c6bd;border-color:var(--line-strong);}
+.pface-anon svg{display:block;flex:0 0 auto;}
+.jersey-shirt .pface-anon.pface-over{align-items:flex-end;}
