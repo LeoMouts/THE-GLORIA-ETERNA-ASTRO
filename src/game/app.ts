@@ -5,7 +5,7 @@
 import * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
-import { PRELIB_DATA } from "./prelib"; import FACE_RAW from "./data/faces.json";
+import { PRELIB_DATA } from "./prelib"; import FACE_RAW from "./data/faces.json"; import POSX_RAW from "./data/positions.json";
 import { SERIE_A_EXTRA_TEAMS, SERIE_A_2026 } from "./serieA"; import { SULAMERICANA_EXTRA_TEAMS, SULAMERICANA_2026 } from "./sulamericana";
 
 const GOAT_MASCOT_URI = "/images/image-1787868287812.webp";
@@ -399,6 +399,37 @@ const TEAM_KIT_GK = {
 };
 // Elenco pitch jersey: real camisa 1 render when we have one for the club (outfield vs. goalkeeper
 // kit chosen by slot), falling back to the generic tinted SVG for anything missing.
+/* real playing positions (primary + up to two secondary, from the SMF Arena base, mapped to this game's position codes): merged into each known player's altPos so lineups, match strength and the AI squads all use them */
+const POSX = POSX_RAW as unknown as Record<string, string[]>;
+function applyRealPositions(p: any){
+  const x = p && p.id!=null ? POSX[p.id] : null;
+  if(!x) return;
+  const merged = (p.altPos && p.altPos.length) ? p.altPos.slice() : [p.pos];
+  x.forEach((c: string) => { if(!merged.includes(c)) merged.push(c); });
+  p.altPos = merged;
+}
+function applyRealPositionsAll(){
+  const eatTeams = (obj: any) => { for(const k in obj){ const pl = obj[k] && obj[k].players; if(pl) pl.forEach(applyRealPositions); } };
+  GLOBAL_MARKET_SRC.forEach(applyRealPositions);
+  eatTeams((DATA as any).teams); eatTeams(SERIE_A_EXTRA_TEAMS); eatTeams(SULAMERICANA_EXTRA_TEAMS); eatTeams((PRELIB_DATA as any).teams);
+}
+applyRealPositionsAll();
+/* old saves carry their own copies of every player, so they get the same merge once on load */
+function applyRealPositionsToWorld(world: any){
+  if(!world) return;
+  for(const k in (world.teams||{})){ const pl = world.teams[k] && world.teams[k].players; if(pl) pl.forEach(applyRealPositions); }
+  (world.globalMarket||[]).forEach(applyRealPositions);
+  (world.prelibMarket||[]).forEach(applyRealPositions);
+}
+function posList(p: any){
+  const out: string[] = [p.pos];
+  (p.altPos||[]).forEach((c: string) => { if(!out.includes(c)) out.push(c); });
+  return out;
+}
+function posBadges(p: any){
+  const [main, ...rest] = posList(p);
+  return `<span class="badge badge-pos">${main}</span>${rest.map(c=>`<span class="badge badge-pos badge-pos2">${c}</span>`).join("")}`;
+}
 /* shirts from the SMF kit repo for every club that has no local kit of its own: only the transparent cutouts (the repo also holds photos with a person wearing the shirt, which would look wrong in a jersey slot), keyed by the same slug the crest uses */
 const FENOMENO_KIT_CDN = "https://cdn.jsdelivr.net/gh/TheSMF-Group/thefenomeno-assets@main/kits/";
 const KIT_CUTOUT_SLUGS = new Set(["aberdeen","ac-milan","ajax","al-ahli-sa","alaves","aldosivi","alianza-fc","america","america-cali","anderlecht","angers","antwerp","argentinos-jrs","arouca","arsenal","aston-villa","atalanta","athletic","athletico-pr","atlanta-utd","atlas","atletico","audax-italiano","auxerre","avispa-fukuoka","az-alkmaar","bahia","barcelona","basaksehir","basel","bayern","belgrano","benfica","besiktas","betis","blackburn","boca","bologna","bournemouth","braga","bragantino","brentford","brest","brighton","bristol-city","brondby","brugge","bucaramanga","burnley","cagliari","ceara","cercle-brugge","chapecoense","charleroi","chelsea","chicago-fire","colorado-rapids","columbus","como","coritiba","coventry","crystal-palace","dc-united","defensa-justicia","deportivo-pereira","dinamo-zagreb","dortmund","empoli","espanyol","estoril","everton","fc-cincinnati","fc-seoul","fenerbahce","feyenoord","fiorentina","fortaleza","frankfurt","freiburg","fulham","galatasaray","gangwon-fc","genk","genoa","gent","getafe","gil-vicente","gladbach","heerenveen","heracles","hoffenheim","houston-dynamo","hull","huracan","independiente","inter","internacional","ipswich","jeju-united","jeonbuk-hyundai-motors","juventus","kasimpasa","konyaspor","la-galaxy","lafc","las-palmas","lazio","le-havre","lecce","leeds","legia-warsaw","leicester","leipzig","lens","leon","leverkusen","lille","liverpool","lyon","mainz","mallorca","man-city","man-utd","marseille","mechelen","melbourne-city","middlesbrough","midtjylland","millwall","minnesota-utd","monaco","monterrey","montpellier","monza","moreirense","nantes","napoli","new-england","newcastle","nice","nordsjaelland","nottm-forest","ny-red-bulls","orlando-city","osasuna","pachuca","panathinaikos","paok","pec-zwolle","philadelphia","pohang-steelers","portland-timbers","porto","preston","psg","psv","pumas","qpr","racing","randers","rayo-vallecano","real-madrid","real-salt-lake","red-star-belgrade","reims","rennes","rio-ave","river","roma","san-jose","san-lorenzo","santos","sao-paulo","sarmiento","sevilla","shakhtar","sheff-utd","sheff-wed","silkeborg","sint-truiden","sociedad","southampton","sport-recife","sporting","sporting-kc","st-pauli","standard","stoke","strasbourg","stuttgart","sunderland","swansea","tigre","torino","toronto-fc","tottenham","toulouse","trabzonspor","twente","udinese","utrecht","valencia","valladolid","vancouver","vasco","velez","venezia","verona","villarreal","vitoria-ba","vitoria-sc","watford","werder","west-brom","west-ham","westerlo","wolfsburg"]);
@@ -1595,6 +1626,7 @@ async function initApp(){
   const loaded = await loadState();
   if(loaded && loaded.schemaVersion===SCHEMA_VERSION){
     ST = loaded;
+    applyRealPositionsToWorld(ST.world);
     // never resume into a transient pre-career setup screen (team pick / manager name / mode
     // pick) — only resume straight into the hub (or an in-progress Pré-Libertadores run) if
     // something was actually committed.
@@ -6583,7 +6615,7 @@ function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
   </tr></thead><tbody>
   ${players.map(p=>`<tr>
     <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)} <span class="faint tiny">${p.nat}</span></span></span></td>
-    <td><span class="badge badge-pos">${p.pos}</span></td>
+    <td>${posBadges(p)}</td>
     <td class="tac">${p.age}</td>
     <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
     <td class="tac"><span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span></td>
@@ -6712,7 +6744,7 @@ function renderXferBuySubTab(f){
         ${shown.map(p=>`<tr>
           <td class="bold">${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></td>
           <td class="dim"><span style="display:inline-flex;align-items:center;gap:7px;">${clubCrestImg(p.club,20,p.name)}<span>${esc(p.club)}</span></span></td>
-          <td><span class="badge badge-pos">${p.pos}</span></td>
+          <td>${posBadges(p)}</td>
           <td class="tac">${p.age}</td>
           <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
           <td class="tac">${renderPotCell("global",p)}</td>
@@ -6752,7 +6784,7 @@ function renderXferBuySubTab(f){
       ${shown.map(p=>`<tr>
         <td class="bold">${esc(p.name)} <span class="faint tiny">${p.nat}</span></td>
         <td class="dim"><span style="display:inline-flex;align-items:center;gap:7px;">${clubCrestImg(p._team,20,p.name)}<span>${esc(p._team)}</span></span></td>
-        <td><span class="badge badge-pos">${p.pos}</span></td>
+        <td>${posBadges(p)}</td>
         <td class="tac">${p.age}</td>
         <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
         <td class="tac">${renderPotCell(p._team,p)}</td>
@@ -6804,7 +6836,7 @@ function renderScoutTab(){
     const ask = askingPrice(p, t);
     return `<tr>
       <td class="bold">${esc(p.name)}</td>
-      <td><span class="badge badge-pos">${p.pos}</span></td>
+      <td>${posBadges(p)}</td>
       <td class="tac">${p.age}</td>
       <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
       <td class="tac"><span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span></td>
@@ -6882,7 +6914,7 @@ function renderMeuClubeTab(){
     const rec = statsMap[String(p.id)] || {apps:0, goals:0, assists:0, yellow:0, red:0, ratingSum:0, ratingCount:0, injuries:[]};
     return `<tr>
       <td class="bold">${esc(p.name)}</td>
-      <td><span class="badge badge-pos">${p.pos}</span></td>
+      <td>${posBadges(p)}</td>
       <td class="tac">${rec.apps}</td>
       <td class="tac gold bold">${rec.goals}</td>
       <td class="tac">${rec.assists}</td>
@@ -7337,7 +7369,7 @@ function renderSquadCentralModal(){
   const rows = players.map(p=>`<tr>
     <td class="tac" style="width:44px;"><input type="number" class="input-inline squad-number-input" min="1" max="99" placeholder="—" value="${p.number||''}" onchange="Game.setPlayerNumber(${p.id}, this.value)"/></td>
     <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></span></span></td>
-    <td><span class="badge badge-pos">${p.pos}</span></td>
+    <td>${posBadges(p)}</td>
     <td class="tac">${p.age}</td>
     <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
     <td class="tac"><span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span></td>
@@ -7525,7 +7557,7 @@ function renderSlotPickerModal(m){
     const isStarterElsewhere = startersElsewhere.has(p.id);
     return `<div class="slot-pick-row ${isCur?'current':''} ${disabled?'unavailable':''}">
       <div class="slot-pick-main">
-        <span class="badge badge-pos">${p.pos}</span>
+        ${posBadges(p)}
         <span class="bold">${esc(p.name)}</span>
         <span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span>
         ${isCur?'<span class="badge badge-titular">Nesta posição</span>':(isStarterElsewhere?'<span class="badge badge-titular">Titular</span>':'')}
@@ -7580,6 +7612,7 @@ function contractPlayerCard(p, clubName){
         <div><span>Idade</span><b>${p.age}</b></div>
         <div><span>Pot</span><b>${p.pot}</b></div>
       </div>
+      <div class="contract-stat-row"><span>Posições</span><b>${posList(p).join(" · ")}</b></div>
       <div class="contract-stat-row"><span>Valor de mercado</span><b class="gold">${fmtMoney(p.value)}</b></div>
       </div>
     </div>
