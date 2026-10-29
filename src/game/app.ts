@@ -272,8 +272,12 @@ function faceImgTag(tm: number, w: number, h: number, cls?: string){
   if(!tm) return "";
   return `<img class="pface ${cls||''}" src="${FACE_CDN}${tm}.png" alt="" width="${w}" height="${h}" loading="lazy" style="width:${w}px;height:${h}px;" onerror="this.remove()"/>`;
 }
-function playerFaceImg(p: any, size: number, cls?: string){ return faceImgTag(faceTmFor(p), size, size, "pface-round " + (cls||"")); }
-function playerFaceByName(name: string, size: number, cls?: string, pos?: string){ return faceImgTag(faceTmByName(name, pos), size, size, "pface-round " + (cls||"")); }
+/* no portrait: a black anonymous-person silhouette on a light disc, same size and round shape as a real photo (an inline SVG, not an emoji) */
+function anonFaceTag(size: number, cls?: string){
+  return `<span class="pface pface-round pface-anon ${cls||''}" style="width:${size}px;height:${size}px;"><svg viewBox="0 0 24 24" width="${Math.round(size*0.72)}" height="${Math.round(size*0.72)}" aria-hidden="true"><circle cx="12" cy="8.6" r="4.3" fill="#111"/><path d="M3.6 23c0-5 3.7-8.4 8.4-8.4s8.4 3.4 8.4 8.4z" fill="#111"/></svg></span>`;
+}
+function playerFaceImg(p: any, size: number, cls?: string){ return faceImgTag(faceTmFor(p), size, size, "pface-round " + (cls||"")) || anonFaceTag(size, cls); }
+function playerFaceByName(name: string, size: number, cls?: string, pos?: string){ return faceImgTag(faceTmByName(name, pos), size, size, "pface-round " + (cls||"")) || anonFaceTag(size, cls); }
 function playerFolderPhoto(p: any){ return faceImgTag(faceTmFor(p), 78, 101, "pface-folder"); }
 const TEAM_KIT_OUTFIELD = {
   "Flamengo": "/images/kits/outfield/outfield/flamengo.png",
@@ -6490,7 +6494,7 @@ function renderElencoTab(){
       const c = coords[i];
       const unavailable = p && (p.injured||p.suspended);
       return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;" onclick="Game.openSlotPicker(${i})">
-        <div class="jersey-card ${unavailable?'unavailable':''}${p&&faceTmFor(p)?' has-face':''}">
+        <div class="jersey-card ${unavailable?'unavailable':''}${p?' has-face':''}">
           <div class="jersey-shirt">${slot==="GK"?shirtGK:shirtLine}${p?playerFaceImg(p,40,"pface-over"):""}</div>
           <div class="jersey-stats">
             <span class="jersey-pos">${slot}</span>
