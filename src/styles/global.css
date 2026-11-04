@@ -320,6 +320,35 @@ input,select{font-family:inherit;}
 .mail-status-good{color:var(--green);border-left:2px solid var(--green);}
 .mail-status-bad{color:var(--red);border-left:2px solid var(--red);}
 .mail-posture-hint{padding:10px 12px;border-radius:4px;background:var(--panel);border-left:2px solid var(--marigold-dim);font-size:12.5px;color:var(--text-dim);line-height:1.5;}
+/* ---------------- Barra de humor do diretor ---------------- */
+.mood-card{position:relative;margin:12px 0 10px;padding:14px 16px 12px;border:1px solid var(--line-strong);border-radius:12px;background:var(--panel);overflow:hidden;}
+.mood-title{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px;}
+.mood-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}
+.mood-state{font-family:var(--font-display);font-size:24px;letter-spacing:.04em;line-height:1;transition:color .5s ease;}
+.mood-score{font-family:var(--font-mono);font-size:12px;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.05);transition:color .5s ease;}
+.mood-score b{font-weight:700;font-variant-numeric:tabular-nums;}
+.mood-track{position:relative;height:12px;border-radius:999px;background:#242a25;overflow:hidden;}
+.mood-fill{position:absolute;inset:0;border-radius:999px;background:linear-gradient(90deg,#ef4444 0%,#fb923c 26%,#facc15 50%,#a3e635 74%,#4ade80 100%);transition:clip-path .75s cubic-bezier(.22,.8,.3,1);}
+.mood-legend{display:flex;justify-content:space-between;margin-top:6px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);}
+.mood-legend span:first-child{color:#f87171;}
+.mood-legend span:last-child{color:#4ade80;}
+.mood-face{margin-top:10px;font-size:14px;font-weight:600;color:var(--text);}
+.mood-summary{margin-top:2px;font-size:12.5px;color:var(--text-dim);}
+.mood-shake{animation:mood-shake .6s cubic-bezier(.36,.07,.19,.97);}
+.mood-boost{animation:mood-boost 1s ease-out;}
+@keyframes mood-shake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,50%,70%{transform:translateX(-7px)}40%,60%{transform:translateX(7px)}}
+@keyframes mood-boost{0%{box-shadow:0 0 0 0 rgba(74,222,128,.55)}40%{box-shadow:0 0 0 8px rgba(74,222,128,.18),0 0 26px rgba(74,222,128,.35)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+.neg-thread{display:flex;flex-direction:column;gap:6px;margin:8px 0 10px;max-height:112px;overflow:auto;}
+.neg-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.neg-actions .btn{min-width:0;padding:12px 8px;white-space:nowrap;}
+.neg-actions .neg-take{grid-column:1 / -1;order:-1;}
+.neg-line{display:flex;font-size:12.5px;line-height:1.4;}
+.neg-line span{max-width:88%;padding:7px 11px;border-radius:12px;}
+.neg-line.you{justify-content:flex-end;}
+.neg-line.you span{background:rgba(255,210,31,.12);color:var(--text);}
+.neg-line.club span{background:rgba(255,255,255,.06);color:var(--text);}
+.neg-line.sys{justify-content:center;color:var(--text-faint);font-size:11.5px;}
+@media (prefers-reduced-motion:reduce){.mood-fill{transition:none;}.mood-shake,.mood-boost{animation:none;}}
 .risk-gauge{display:flex;flex-direction:column;align-items:center;gap:2px;margin:6px 0 4px;}
 .risk-gauge svg{display:block;}
 .risk-gauge-label{font-size:12px;color:var(--text-dim);text-align:center;}

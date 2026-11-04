@@ -3,6 +3,7 @@
 // build marker: force-fresh-deploy-2026-09-04
 // ============================================================
 import * as E from "./engine";
+import { decide as negDecide, newNegState, computeFlex, composeReply, moodBand, moodLine, moodSummary, NEG_CONFIG, roundMoney } from "./negotiation";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
 import { PRELIB_DATA } from "./prelib"; import FACE_RAW from "./data/faces.json"; import FACE_ALT_RAW from "./data/faces_alt.json"; import TP_RAW from "./data/transferProfile.json"; import POSX_RAW from "./data/positions.json";
@@ -2196,18 +2197,51 @@ function maybeGenerateScoutMail(){
 const OFFER_SUBJECTS_ARAB = ["Proposta inacreditável chegou","Oferta chocante de fora da Libertadores","Um clube árabe fez uma fortuna por ele"];
 const OFFER_SUBJECTS_EURO = ["Proposta pelo seu atleta","Sondagem de um clube de fora","Interesse por um dos seus titulares"];
 function offerPosture(pl){ return OFFER_POSTURES.find(p=>p.id===pl.posture) || OFFER_POSTURES[1]; }
-// the negotiation "risk gauge" — every counter this club fields raises, in clean visible
-// steps, the odds it just walks away from the table entirely: ~20% after the 1st push,
-// ~35% after the 2nd, climbing toward the 70-80% danger zone by the 4th-5th. A greedy ask
-// (well above market value) tacks on a bit more on top of that; a modest one, a bit less —
-// so restraint is still rewarded, but the round count alone already tells most of the story.
-function computeNegotiationRisk(pl, asked){
-  const posture = offerPosture(pl);
-  const valueRatio = asked/pl.value;
-  const aggressiveness = Math.max(0, valueRatio-1.3)*12;
-  return E.clamp(Math.round((5 + pl.round*15 + aggressiveness)*posture.angerMult), 3, 90);
+// ---------- negotiation context ----------
+// Every club has its own tolerance (computeFlex in negotiation.ts) built from its finances, how much it
+// depends on the player, how many equivalents it has, his age/rating/potential, his contract and the interest
+// other clubs show. Nothing here is a fixed percentage and nothing is a "take it exactly or nothing" rule.
+function strHash(s){ let h=0; s=String(s); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return Math.abs(h); }
+function posFamily(pos){ return pos==="GK"?"G" : (pos==="CB"||pos==="LB"||pos==="RB")?"D" : (pos==="LW"||pos==="RW"||pos==="ST"||pos==="SS")?"A" : "M"; }
+// how badly a club needs cash: its size group plus a stable per-club "books" factor (some are tight, some comfortable)
+function clubFinanceNeed(club){
+  const grp = clubGroupOf(club, ST&&ST.world);
+  const base = ({EUR_ELITE:-0.7, EUR_BIG:-0.4, SA_TOP:-0.35, EUR_MID:-0.1, SA_MID:0.1, EUR_SMALL:0.2, SA_SMALL:0.35} as any)[grp] || 0;
+  const stress = (strHash(club)%100)/100 - 0.5;
+  return E.clamp(base + stress*0.9, -1, 1);
 }
-function initialNegotiationRisk(posture){ return Math.round(5*posture.angerMult); }
+// the game has no contract field on players yet — derive a stable, plausible "years left" so the factor can still weigh in
+function derivedContractYears(p){
+  if(p.age>=34) return 1;
+  if(p.age<=21) return 3 + (p.id%3);
+  return 1 + ((p.id*7 + p.age*3) % 5);
+}
+function negFlexInputFor(p, squad, club, isKey){
+  const subs = (squad||[]).filter(q=>q.id!==p.id && posFamily(q.pos)===posFamily(p.pos) && q.ovr>=p.ovr-3).length;
+  const fin = clubFinanceNeed(club);
+  return {
+    financeNeed: fin, keyPlayer: !!isKey, substitutes: subs, age: p.age, ovr: p.ovr, pot: p.pot||p.ovr,
+    contractYears: derivedContractYears(p),
+    rivalInterest: Math.min(1, (p.ovr>=80?0.5:p.ovr>=76?0.25:0) + ((p.age<=24 && (p.pot||0)>=82)?0.4:0)),
+    mustSell: fin>0.35 ? (fin-0.35)*1.5 : 0,
+  };
+}
+// the club's temperament (how fast it loses patience / warms up) — stable per club
+function clubPosture(club){
+  const r = (strHash("posture:"+club)%100)/100;
+  return r<0.32 ? OFFER_POSTURES[0] : r<0.72 ? OFFER_POSTURES[1] : OFFER_POSTURES[2];
+}
+// the most a bidding club would really pay: well above market value only for the flexible/rich ones
+function offerNegCeiling(pl){
+  if(pl.W) return pl.W;
+  const posture = offerPosture(pl);
+  const jitter = 0.92 + (strHash(pl.playerId+":"+pl.club)%100)/100*0.16;
+  let W = pl.value*(1+(posture.estCeilingMult-1)*0.55)*jitter;
+  if(pl.category==="arabe") W *= 1.12;
+  pl.W = Math.round(Math.max(W, pl.offer*1.04)/5000)*5000;
+  return pl.W;
+}
+function fmtNeg(v){ return fmtMoney(v); }
 function queueOfferMail(playerId, playerName, club, category, value, offer, rng, posture){
   const isArab = category==="arabe";
   const subjects = isArab ? OFFER_SUBJECTS_ARAB : OFFER_SUBJECTS_EURO;
@@ -2218,42 +2252,13 @@ function queueOfferMail(playerId, playerName, club, category, value, offer, rng,
     subject: subjects[Math.floor(rng()*subjects.length)],
     from: club,
     preview: `Proposta por ${playerName}: ${fmtMoney(offer)}.`,
-    payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0, posture: posturePick, riskPercent: initialNegotiationRisk(postureObj), userReplyDaysLeft:7 },
+    payload:{ playerId, playerName, club, category, value, offer, round:0, status:"pending", comebackCount:0, posture: posturePick, mood: NEG_CONFIG.startMood, neg: newNegState(offer), userReplyDaysLeft:7 },
   });
 }
-const OFFER_RAISE_LINES = [
-  "Certo, aceitamos subir a proposta.",
-  "Conversamos com a diretoria e topamos esse valor.",
-  "Fechado — vamos até esse valor.",
-  "Está um pouco acima do que queríamos, mas aceitamos.",
-];
-const OFFER_HOLD_LINES = [
-  "Esse é o nosso limite por enquanto.",
-  "Não temos como subir mais que isso agora.",
-  "Vamos manter a proposta como está.",
-  "Precisamos pensar — por ora, mantemos o valor oferecido.",
-];
-const OFFER_WITHDRAW_LINES = [
-  "Isso está muito acima do que consideramos razoável. Vamos retirar a proposta.",
-  "Achamos que o pedido ficou exagerado. Desistimos, por ora.",
-  "Não vamos continuar essa negociação nesses termos.",
-  "A diretoria decidiu encerrar as conversas por aqui.",
-];
 const OFFER_COMEBACK_LINES = [
   "Reconsideramos e voltamos com uma proposta melhor.",
   "Depois da sua recusa, a diretoria autorizou um valor maior.",
   "Ainda temos interesse — aqui vai uma nova oferta.",
-];
-const OFFER_THINK_LINES = [
-  "Precisamos de alguns dias para levar isso à diretoria.",
-  "Vamos conversar internamente e te respondemos em breve.",
-  "Deixa a gente pensar com calma sobre esse valor.",
-  "Repassamos ao departamento financeiro — aguarde nossa resposta.",
-];
-const OFFER_COUNTER_LINES = [
-  "Pensamos bastante e chegamos a um novo valor.",
-  "Depois de avaliar com calma, essa é a nossa contraproposta.",
-  "Não é bem o que você pediu, mas é o que conseguimos oferecer agora.",
 ];
 // a subject only ever gets one "RE: " on it, even through a long back-and-forth thread.
 function reSubject(subject){ return subject.indexOf("RE: ")===0 ? subject : "RE: "+subject; }
@@ -2261,93 +2266,55 @@ function reSubject(subject){ return subject.indexOf("RE: ")===0 ? subject : "RE:
 // less than what's already on the table (that's what Aceitar is for), and capped well above
 // market value so an absurd ask is possible but not infinite.
 function offerAskRange(pl){
-  const minAsk = Math.round(pl.offer*1.05/5000)*5000;
+  const minAsk = Math.max(pl.offer+5000, Math.round(pl.offer*1.005/5000)*5000);   // can come all the way down to just above the bid on the table
   const maxAsk = Math.max(minAsk+5000, Math.round(pl.value*3/5000)*5000);
   return { minAsk, maxAsk };
 }
-// the manager types in the exact value they want to ask for (clamped to offerAskRange). The
-// risk gauge (computeNegotiationRisk) is the ONLY thing that can blow the deal up — once it
-// survives that roll, the club always genuinely moves the conversation forward: either it
-// needs a few days to think it over (see tickPendingOfferReplies), or it responds right now
-// with a real concession (the full ask, or a real chunk of the way there — never just a flat
-// "take it exactly or nothing") or, more rarely, holds the line for this round.
+// the manager types in the value they want to ask for (clamped to offerAskRange). The decision is made by the
+// negotiation engine (negotiation.ts) — pure numbers: how far the ask is from what the club would really pay, how
+// patient the director still is, how the last few proposals went. The club never walks away over a small gap:
+// it accepts, accepts with conditions, or counters; only a real reason (repeated absurd asks, or running out of
+// rounds with a far-apart number) ends the talks. The director's text is just the decision put into words.
 function negotiateOffer(mailId, askedAmountRaw){
   const mail = findMail(mailId);
   if(!mail || mail.type!=="offer" || mail.payload.status!=="pending") return;
   const pl = mail.payload;
-  const rng = E.makeRNG(nextSeed());
   const {minAsk, maxAsk} = offerAskRange(pl);
   const asked = Math.round(E.clamp(Number(askedAmountRaw)||minAsk, minAsk, maxAsk)/5000)*5000;
-  pl.round++;
-  pl.riskPercent = computeNegotiationRisk(pl, asked);
-  if(!mail.thread) mail.thread = [];
-  if(rng()*100 < pl.riskPercent){
-    pl.status = "withdrawn";
-    mail.thread.push(OFFER_WITHDRAW_LINES[Math.floor(rng()*OFFER_WITHDRAW_LINES.length)]);
-    scheduleSave();
-    return;
-  }
+  runOfferNegotiation(mail, asked);
+}
+// shared by the live click and the legacy "awaiting reply" ticks
+function runOfferNegotiation(mail, asked){
+  const pl = mail.payload;
   const posture = offerPosture(pl);
-  if(rng() < 0.3){
-    pl.status = "awaiting_reply";
-    pl.pendingAsk = asked;
-    pl.pendingReplyDays = 1 + Math.floor(rng()*3);
-    mail.thread.push(OFFER_THINK_LINES[Math.floor(rng()*OFFER_THINK_LINES.length)]);
-  } else {
-    // the mail stays "pending" either way here — a fresh 7-day window to act on THIS round's
-    // number, same as a brand-new offer, rather than the clock just running out mid-negotiation.
-    pl.userReplyDaysLeft = 7;
-    const meetChance = E.clamp(0.55*posture.acceptMult, 0.15, 0.85);
-    if(rng() < meetChance){
-      // a real concession — usually most of the way to the ask, sometimes all of it — instead
-      // of the old all-or-nothing jump straight to the exact number typed in.
-      const concessionFrac = 0.55 + rng()*0.45;
-      pl.offer = concessionFrac > 0.92 ? asked : Math.round((pl.offer + (asked-pl.offer)*concessionFrac)/5000)*5000;
-      mail.thread.push(OFFER_RAISE_LINES[Math.floor(rng()*OFFER_RAISE_LINES.length)]);
-    } else {
-      mail.thread.push(OFFER_HOLD_LINES[Math.floor(rng()*OFFER_HOLD_LINES.length)]);
-    }
+  if(!pl.neg) pl.neg = newNegState(pl.offer);
+  pl.neg.now = pl.offer;                       // the club's standing bid is the current offer
+  const W = offerNegCeiling(pl);
+  const dec = negDecide({role:"buyer", x:asked, target:pl.offer, limit:W, angerMult:posture.angerMult, acceptMult:posture.acceptMult}, pl.neg);
+  pl.neg = dec.state; pl.mood = dec.mood; pl.moodDelta = dec.moodDelta; pl.round = (pl.round||0)+1;
+  if(!mail.thread) mail.thread = [];
+  mail.thread.push("Você pediu "+fmtMoney(asked)+".");
+  mail.thread.push(composeReply(dec, {player:pl.playerName, club:pl.club, fmt:fmtNeg, role:"buyer", seed:strHash(pl.playerId+pl.club)}));
+  pl.userReplyDaysLeft = 7;                    // a fresh 7-day window on this round's number
+  if(dec.verdict==="accept"){
+    pl.offer = dec.price; acceptMailOffer(mail.id); return;
+  }
+  if(dec.verdict==="accept_conditions" || dec.verdict.indexOf("counter")===0){
+    if(dec.counter!=null && dec.counter>pl.offer) pl.offer = dec.counter;       // the club only ever raises its bid
+  } else if(dec.verdict==="end"){
+    pl.status = "withdrawn";
   }
   scheduleSave();
 }
-// resolves every negotiation the club asked "a few days to think about" once its countdown
-// reaches zero — a brand-new "RE: <assunto original>" mail arrives with the actual verdict,
-// same as a real e-mail reply thread, instead of the answer just appearing silently. Reuses
-// the exact risk percentage that was already locked in (and shown on the gauge) the moment
-// the ask was made, rather than rerolling it.
+// resolves a negotiation an OLD save left "awaiting reply" (the club used to ask a few days to think it over — that
+// random delay no longer exists, but a career saved in that state still resolves, through the same engine)
 function tickPendingOfferReplies(){
-  const rng = E.makeRNG(nextSeed());
   inboxList().filter(m=>m.type==="offer" && m.payload.status==="awaiting_reply").forEach(mail=>{
     const pl = mail.payload;
-    const posture = offerPosture(pl);
     pl.pendingReplyDays = (pl.pendingReplyDays==null?1:pl.pendingReplyDays)-1;
     if(pl.pendingReplyDays>0) return;
-    const asked = pl.pendingAsk||pl.offer;
-    const risk = pl.riskPercent!=null ? pl.riskPercent : computeNegotiationRisk(pl, asked);
-    let newOffer = pl.offer, status = "pending", verdictLine;
-    if(rng()*100 < risk){
-      status = "withdrawn";
-      verdictLine = OFFER_WITHDRAW_LINES[Math.floor(rng()*OFFER_WITHDRAW_LINES.length)];
-    } else {
-      const meetChance = E.clamp(0.6*posture.acceptMult, 0.2, 0.9);
-      if(rng() < meetChance){
-        const concessionFrac = 0.6 + rng()*0.4;
-        newOffer = Math.round((pl.offer + (asked-pl.offer)*concessionFrac)/5000)*5000;
-        verdictLine = OFFER_RAISE_LINES[Math.floor(rng()*OFFER_RAISE_LINES.length)];
-      } else {
-        newOffer = Math.round((pl.offer+asked)/2/5000)*5000; // still a real step, just a smaller one
-        verdictLine = OFFER_COUNTER_LINES[Math.floor(rng()*OFFER_COUNTER_LINES.length)];
-      }
-    }
-    pl.status = "answered"; // this mail is now historical — the reply below carries the live thread
-    addMail({
-      type:"offer",
-      subject: reSubject(mail.subject),
-      from: pl.club,
-      preview: status==="withdrawn" ? `A negociação por ${pl.playerName} não avançou.` : `Nova posição sobre ${pl.playerName}: ${fmtMoney(newOffer)}.`,
-      thread:[verdictLine],
-      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:pl.round, status, comebackCount:pl.comebackCount||0, posture:pl.posture, riskPercent: initialNegotiationRisk(posture), userReplyDaysLeft:7 },
-    });
+    pl.status = "pending";
+    runOfferNegotiation(mail, pl.pendingAsk||pl.offer);
   });
 }
 function acceptMailOffer(mailId){
@@ -2386,7 +2353,7 @@ function maybeGenerateOfferComeback(){
       from: pl.club,
       preview:`Nova proposta por ${pl.playerName}: ${fmtMoney(newOffer)}.`,
       thread:[OFFER_COMEBACK_LINES[Math.floor(rng()*OFFER_COMEBACK_LINES.length)]],
-      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1, posture:pl.posture, riskPercent: initialNegotiationRisk(offerPosture(pl)), userReplyDaysLeft:7 },
+      payload:{ playerId:pl.playerId, playerName:pl.playerName, club:pl.club, category:pl.category, value:pl.value, offer:newOffer, round:0, status:"pending", comebackCount:(pl.comebackCount||0)+1, posture:pl.posture, mood: NEG_CONFIG.startMood, neg: newNegState(newOffer), userReplyDaysLeft:7 },
     });
     break; // at most one comeback mail per day, keeps the inbox from flooding
   }
@@ -4887,27 +4854,101 @@ function askingPrice(p, team){
   return Math.round(p.value*f/5000)*5000;
 }
 
-function makeOffer(playerId, sellerTeamName, offer){
-  const sellerTeam = ST.world.teams[sellerTeamName];
-  const p = sellerTeam.players.find(x=>x.id===playerId);
-  if(!p) return {ok:false, msg:"Jogador não encontrado."};
-  if(offer>ST.budget) return {ok:false, msg:"Orçamento insuficiente."};
-  const ask = askingPrice(p, sellerTeam);
-  if(offer>=ask){
-    sellerTeam.players = sellerTeam.players.filter(x=>x.id!==playerId);
+// ---------- BUYING: a real negotiation with the selling club's director ----------
+// The asking price (askingPrice / globalMarketAskingPrice / prelibMarketAskingPrice, unchanged) is a REFERENCE, not a wall:
+// each club gets a tolerance (computeFlex) that depends on its finances, the player's role in the squad, his age, rating,
+// contract and the interest around him. The negotiation engine turns every proposal into accept / accept-with-conditions /
+// small-moderate-high counter / refuse — and ends the talks only for a real reason (see negotiation.ts). The session
+// (mood, rounds, standing counter, thread) persists in ST.negs until the deal closes.
+function buyContext(team, playerId){
+  ensureGlobalMarket(); ensurePrelibMarket();
+  let p, ask, squad, club, key, source;
+  if(team==="global"){
+    p = ST.world.globalMarket.find(x=>x.id===playerId); if(!p) return null;
+    ask = globalMarketAskingPrice(p); club = p.club; source = "global";
+    squad = ST.world.globalMarket.filter(q=>q.club===club); key = isKeyMarketPlayer(ST.world, p);
+  } else if(!ST.world.teams[team]){
+    p = ST.world.prelibMarket.find(x=>x.id===playerId); if(!p) return null;
+    ask = prelibMarketAskingPrice(p); club = p.club; source = "prelib";
+    squad = ST.world.prelibMarket.filter(q=>q.club===club);
+    key = squad.slice().sort((a,b)=>b.ovr-a.ovr).slice(0,11).some(q=>q.id===p.id);
+  } else {
+    const t = ST.world.teams[team];
+    p = t.players.find(x=>x.id===playerId); if(!p) return null;
+    ask = askingPrice(p, t); club = team; source = "team"; squad = t.players;
+    key = E.bestAvailableXI(t, "4-3-3").lineup.some(x=>x && x.id===p.id);
+  }
+  const fx = negFlexInputFor(p, squad, club, key);
+  const fr = computeFlex(fx);
+  return { p, ask, club, source, team, flex: fr.flex, flexParts: fr.parts, limit: ask*(1-fr.flex), posture: clubPosture(club), key };
+}
+function buyNegSession(team, playerId, ask){
+  if(!ST.negs) ST.negs = {};
+  const k = team+":"+playerId;
+  if(!ST.negs[k]) ST.negs[k] = { neg:newNegState(ask), thread:[], status:"open", endedDay:null };
+  return ST.negs[k];
+}
+const NEG_COOLDOWN_DAYS = 5;
+function buyCooldownLeft(sess){
+  if(sess.status!=="ended") return 0;
+  return Math.max(0, NEG_COOLDOWN_DAYS - ((ST.dayCounter||0) - (sess.endedDay||0)));
+}
+// moves the player into the manager's squad — the one place a purchase is actually carried out
+function finalizeBuy(ctx, price){
+  const {p, source, team, club} = ctx;
+  if(source==="team"){
+    const sellerTeam = ST.world.teams[team];
+    sellerTeam.players = sellerTeam.players.filter(x=>x.id!==p.id);
     p.injured=false; p.suspended=false; p.form=0;
     myTeam().players.push(p);
-    ST.budget -= offer;
-    ST.newsLog.unshift({title:"Transferência concluída", text:`${p.name} contratado do ${sellerTeamName} por ${fmtMoney(offer)}.`});
-    recordCareerSigning(p.name, offer);
-    recordTransferFeed({name:p.name, price:offer, fromClub:sellerTeamName, toClub:ST.teamId, pos:p.pos, ovr:p.ovr});
-    if(ST.lineup.length===0) autoFillLineup();
-    scheduleSave();
-    return {ok:true, msg:`Negócio fechado! ${p.name} é reforço do seu time.`};
-  } else if(offer>=ask*0.85){
-    return {ok:false, counter:ask, msg:`Proposta recusada. O ${sellerTeamName} pede ao menos ${fmtMoney(ask)}.`};
+    ST.newsLog.unshift({title:"Transferência concluída", text:`${p.name} contratado do ${team} por ${fmtMoney(price)}.`});
+  } else if(source==="global"){
+    ST.world.globalMarket = ST.world.globalMarket.filter(x=>x.id!==p.id);
+    const joined = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0});
+    delete joined.club; delete joined.league;
+    myTeam().players.push(joined);
+    ST.newsLog.unshift({title:"Contratação internacional!", text:`${p.name} (${club}) assina com o ${ST.teamId} por ${fmtMoney(price)}.`});
+  } else {
+    ST.world.prelibMarket = ST.world.prelibMarket.filter(x=>x.id!==p.id);
+    const joined = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0});
+    delete joined.club;
+    myTeam().players.push(joined);
+    ST.newsLog.unshift({title:"Transferência concluída", text:`${p.name} contratado do ${club} por ${fmtMoney(price)}.`});
   }
-  return {ok:false, msg:`Proposta recusada de imediato. Tente um valor mais próximo de ${fmtMoney(ask)}.`};
+  ST.budget -= price;
+  recordCareerSigning(p.name, price);
+  recordTransferFeed({name:p.name, price, fromClub:club, toClub:ST.teamId, pos:p.pos, ovr:p.ovr});
+  if(source!=="global" && ST.lineup.length===0) autoFillLineup();
+  if(ST.negs) delete ST.negs[team+":"+p.id];
+  scheduleSave();
+}
+// one proposal from the manager. Returns {deal, verdict, reply, mood, ended, ...} — the screen just shows it.
+function submitBuyProposal(team, playerId, offer){
+  const ctx = buyContext(team, playerId);
+  if(!ctx) return {ok:false, deal:false, msg:"Jogador não encontrado."};
+  const sess = buyNegSession(team, playerId, ctx.ask);
+  if(sess.status==="ended"){
+    const left = buyCooldownLeft(sess);
+    if(left>0) return {ok:false, deal:false, blocked:true, msg:`A diretoria encerrou as conversas por ${ctx.p.name}. Tente de novo em ${left} dia${left===1?"":"s"}.`};
+    sess.neg = newNegState(ctx.ask); sess.status = "open"; sess.thread.push({who:"sys", text:"As conversas foram retomadas."});
+  }
+  offer = Math.round(Number(offer)||0);
+  if(offer<=0) return {ok:false, deal:false, msg:"Informe um valor para a proposta."};
+  if(offer>ST.budget) return {ok:false, deal:false, msg:"Orçamento insuficiente."};
+  const dec = negDecide({role:"seller", x:offer, target:ctx.ask, limit:ctx.limit, angerMult:ctx.posture.angerMult, acceptMult:ctx.posture.acceptMult}, sess.neg);
+  sess.neg = dec.state;
+  sess.thread.push({who:"you", text:`Você ofereceu ${fmtMoney(offer)}.`});
+  const reply = composeReply(dec, {player:ctx.p.name, club:ctx.club, fmt:fmtNeg, role:"seller", seed:strHash(ctx.p.id+ctx.club)});
+  sess.thread.push({who:"club", text:reply, verdict:dec.verdict});
+  if(sess.thread.length>14) sess.thread = sess.thread.slice(-14);
+  if(dec.verdict==="end"){ sess.status = "ended"; sess.endedDay = ST.dayCounter||0; }
+  scheduleSave();
+  if(dec.verdict==="accept"){
+    if(dec.price>ST.budget) return {ok:false, deal:false, msg:"Orçamento insuficiente."};
+    finalizeBuy(ctx, dec.price);
+    return {ok:true, deal:true, price:dec.price, verdict:dec.verdict, reply, mood:dec.mood};
+  }
+  return {ok:false, deal:false, verdict:dec.verdict, reply, mood:dec.mood, moodDelta:dec.moodDelta, counter:dec.counter, ended:dec.ended, msg:reply};
 }
 
 // ---- global market (players outside the Libertadores — from clubs that never play the competition) ----
@@ -5009,29 +5050,6 @@ function globalMarketAskingPrice(p){
   if(ST && ST.world && isKeyMarketPlayer(ST.world, p)) f *= KEY_PLAYER_PREMIUM; // a starter never leaves at market value
   return Math.round(p.value*f/5000)*5000;
 }
-function buyGlobalPlayer(playerId, offer){
-  ensureGlobalMarket();
-  const p = ST.world.globalMarket.find(x=>x.id===playerId);
-  if(!p) return {ok:false, msg:"Jogador não encontrado no mercado."};
-  if(offer>ST.budget) return {ok:false, msg:"Orçamento insuficiente."};
-  const ask = globalMarketAskingPrice(p);
-  if(offer>=ask){
-    ST.world.globalMarket = ST.world.globalMarket.filter(x=>x.id!==playerId);
-    const joined = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0});
-    delete joined.club; delete joined.league;
-    myTeam().players.push(joined);
-    ST.budget -= offer;
-    ST.newsLog.unshift({title:"Contratação internacional!", text:`${p.name} (${p.club}) assina com o ${ST.teamId} por ${fmtMoney(offer)}.`});
-    recordCareerSigning(p.name, offer);
-    recordTransferFeed({name:p.name, price:offer, fromClub:p.club, toClub:ST.teamId, pos:p.pos, ovr:p.ovr});
-    scheduleSave();
-    return {ok:true, msg:`Negócio fechado! ${p.name} chega do ${p.club}.`};
-  } else if(offer>=ask*0.85){
-    return {ok:false, counter:ask, msg:`Proposta recusada. O estafe de ${p.name} pede ao menos ${fmtMoney(ask)}.`};
-  }
-  return {ok:false, msg:`Proposta recusada de imediato. Tente um valor mais próximo de ${fmtMoney(ask)}.`};
-}
-
 // ---- Pré-Libertadores market — these 8 clubs (Sul-Americana side) never get a real squad in
 // ST.world.teams (they only exist as opponents inside the standalone Pré-Libertadores mini-cup),
 // so without this their entire rosters were invisible everywhere. Surfaced as a flat pool, same
@@ -5067,31 +5085,6 @@ function prelibMarketAskingPrice(p){
   if(p.age<=21 && p.pot-p.ovr>=10) f += 0.25;
   return Math.round(p.value*f/5000)*5000;
 }
-function buyPrelibPlayer(playerId, offer){
-  ensurePrelibMarket();
-  const p = ST.world.prelibMarket.find(x=>x.id===playerId);
-  if(!p) return {ok:false, msg:"Jogador não encontrado no mercado."};
-  if(offer>ST.budget) return {ok:false, msg:"Orçamento insuficiente."};
-  const ask = prelibMarketAskingPrice(p);
-  if(offer>=ask){
-    ST.world.prelibMarket = ST.world.prelibMarket.filter(x=>x.id!==playerId);
-    const joined = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0});
-    const fromClub = joined.club;
-    delete joined.club;
-    myTeam().players.push(joined);
-    ST.budget -= offer;
-    ST.newsLog.unshift({title:"Transferência concluída", text:`${p.name} contratado do ${fromClub} por ${fmtMoney(offer)}.`});
-    recordCareerSigning(p.name, offer);
-    recordTransferFeed({name:p.name, price:offer, fromClub, toClub:ST.teamId, pos:p.pos, ovr:p.ovr});
-    if(ST.lineup.length===0) autoFillLineup();
-    scheduleSave();
-    return {ok:true, msg:`Negócio fechado! ${p.name} é reforço do seu time.`};
-  } else if(offer>=ask*0.85){
-    return {ok:false, counter:ask, msg:`Proposta recusada. O ${p.club} pede ao menos ${fmtMoney(ask)}.`};
-  }
-  return {ok:false, msg:`Proposta recusada de imediato. Tente um valor mais próximo de ${fmtMoney(ask)}.`};
-}
-
 function quickSell(playerId){
   const t = myTeam();
   const p = t.players.find(x=>x.id===playerId);
@@ -5387,6 +5380,7 @@ function render(){
     else if(ST.stage==="prelib_champion") html = renderPreLibChampion();
     else html = `<div class="empty-state">Estado desconhecido: ${esc(ST.stage)}</div>`;
     app.innerHTML = html + renderModal();
+    animateMoodBars();
     const tickerEl = document.getElementById("ticker");
     if(tickerEl) tickerEl.scrollTop = tickerEl.scrollHeight;
     if(ST && ST.stage==="match" && ST.pendingMatch && ST.pendingMatch.result && !matchAnimDone()
@@ -7356,27 +7350,45 @@ function renderMixedXIPitch(xi){
     }).join("")}
   </div>`;
 }
-// the "risco de melar" gauge — a half-circle speedometer (styled after an oxygen-tank
-// pressure gauge) with a needle that sweeps from green up through amber into red as
-// pl.riskPercent climbs, so the manager can SEE exactly how close the next push is to
-// blowing up the whole deal before they commit to it.
-function renderRiskGauge(percent){
-  const p = E.clamp(Math.round(percent||0), 0, 100);
-  const r = 44, cx = 60, cy = 60;
-  const circumference = Math.PI*r;
-  const offset = circumference*(1-p/100);
-  const angle = -90 + (p/100)*180;
-  const color = p<40 ? "var(--green)" : p<70 ? "var(--marigold)" : "var(--red)";
-  return `<div class="risk-gauge">
-    <svg viewBox="0 0 120 68" width="150" height="86">
-      <path d="M ${cx-r},${cy} A ${r},${r} 0 0 1 ${cx+r},${cy}" fill="none" stroke="#2a2620" stroke-width="10" stroke-linecap="round"/>
-      <path d="M ${cx-r},${cy} A ${r},${r} 0 0 1 ${cx+r},${cy}" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round"
-        stroke-dasharray="${circumference.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"/>
-      <line x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy-r+9}" stroke="var(--chalk)" stroke-width="3" stroke-linecap="round" transform="rotate(${angle} ${cx} ${cy})"/>
-      <circle cx="${cx}" cy="${cy}" r="5" fill="var(--chalk)"/>
-    </svg>
-    <div class="risk-gauge-label">Risco de a negociação <b>melar</b>: <span style="color:${color};font-weight:800;">${p}%</span></div>
+// ---------- DIRECTOR'S MOOD BAR ----------
+// One persistent bar per negotiation (key). The number comes straight from the negotiation engine's mood (0-100);
+// the bar only SHOWS it. The previous value shown for each key is remembered so that, after every re-render, the
+// fill glides from the old level to the new one and the score counts up/down (animateMoodBars below).
+const MOOD_SHOWN = {};
+function renderMoodBar(key, mood, ended){
+  const m = E.clamp(Math.round(mood==null ? NEG_CONFIG.startMood : mood), 0, 100);
+  const from = MOOD_SHOWN[key]==null ? m : MOOD_SHOWN[key];
+  const band = moodBand(m);
+  return `<div class="mood-card" data-key="${esc(key)}" data-from="${from}" data-to="${m}" data-band="${band.id}">
+    <div class="mood-title">Humor do diretor</div>
+    <div class="mood-row"><span class="mood-state" style="color:${band.color}">${esc(band.label.toUpperCase())}</span><span class="mood-score" style="color:${band.color}"><b class="mood-num">${from}</b>/100</span></div>
+    <div class="mood-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${m}" aria-label="Humor do diretor"><div class="mood-fill" style="clip-path:inset(0 ${100-from}% 0 0)"></div></div>
+    <div class="mood-legend"><span>0 — Furioso</span><span>100 — Muito satisfeito</span></div>
+    <div class="mood-face">“${esc(moodLine(m, ended))}”</div>
+    <div class="mood-summary">${esc(moodSummary(m))}</div>
   </div>`;
+}
+function animateMoodBars(){
+  if(typeof document==="undefined") return;
+  document.querySelectorAll(".neg-thread").forEach(t=>{ t.scrollTop = t.scrollHeight; });
+  document.querySelectorAll(".mood-card").forEach(card=>{
+    const el = card as HTMLElement;
+    const key = el.dataset.key||"", from = Number(el.dataset.from), to = Number(el.dataset.to);
+    MOOD_SHOWN[key] = to;
+    const fill = el.querySelector(".mood-fill") as HTMLElement, num = el.querySelector(".mood-num") as HTMLElement;
+    if(!fill || !num) return;
+    const apply = ()=>{ fill.style.clipPath = `inset(0 ${100-to}% 0 0)`; };
+    if(from===to){ apply(); num.textContent = String(to); return; }
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      apply();
+      const t0 = performance.now(), dur = 750;
+      const step = (t)=>{ const k = Math.min(1,(t-t0)/dur); num.textContent = String(Math.round(from+(to-from)*(1-Math.pow(1-k,3)))); if(k<1) requestAnimationFrame(step); };
+      requestAnimationFrame(step);
+      const delta = to-from;
+      if(delta<=-15){ el.classList.add("mood-shake"); setTimeout(()=>el.classList.remove("mood-shake"), 650); }
+      if(delta>=10){ el.classList.add("mood-boost"); setTimeout(()=>el.classList.remove("mood-boost"), 1100); }
+    }));
+  });
 }
 function offerStatusBanner(pl){
   if(pl.status==="accepted") return `<div class="mail-status mail-status-good">✅ Venda concluída — ${fmtMoney(pl.offer)} creditados ao orçamento.</div>`;
@@ -7393,12 +7405,13 @@ function offerStatusBanner(pl){
 function renderOfferMailBody(m){
   const pl = m.payload;
   const posture = offerPosture(pl);
-  const estMax = Math.round(pl.value*posture.estCeilingMult/5000)*5000;
+  const estMax = Math.round(offerNegCeiling(pl)/5000)*5000;
   const pct = Math.round((pl.offer/pl.value-1)*100);
   const thread = (m.thread||[]).map(t=>`<div class="mail-thread-line">"${esc(t)}"</div>`).join("");
   const pending = pl.status==="pending";
   const range = offerAskRange(pl);
-  const suggested = E.clamp(Math.round(pl.offer*1.2/5000)*5000, range.minAsk, range.maxAsk);
+  const lastAsk = pl.neg && pl.neg.prevX ? pl.neg.prevX : null;     // after the first round, suggest meeting the club a bit of the way
+  const suggested = E.clamp(Math.round((lastAsk ? pl.offer+(lastAsk-pl.offer)*0.6 : pl.offer*1.2)/5000)*5000, range.minAsk, range.maxAsk);
   return `<div class="panel mt16">
     <div class="row" style="justify-content:space-between;align-items:flex-start;">
       <div class="row" style="gap:10px;align-items:center;">
@@ -7411,10 +7424,10 @@ function renderOfferMailBody(m){
     <div class="contract-kv"><span>Proposta atual</span><span class="gold bold">${fmtMoney(pl.offer)}</span></div>
     <div class="contract-kv"><span>Acima do valor</span><span class="${pct>=0?"green":"red"} bold">${pct>=0?"+":""}${pct}%</span></div>
     ${pending?`<div class="mail-posture-hint mt12">
-      <b>${esc(posture.label)}.</b> Estimativa: dá pra pedir com boas chances até cerca de
-      <b class="gold">${fmtMoney(estMax)}</b>. Cada novo pedido aumenta o risco de a negociação melar de vez — acompanhe no medidor abaixo.
+      <b>${esc(posture.label)}.</b> Estimativa: dá pra chegar a cerca de
+      <b class="gold">${fmtMoney(estMax)}</b>. Contrapropostas razoáveis fazem parte da conversa — o diretor só perde a paciência se você insistir em valores muito acima do que o clube pode pagar.
     </div>
-    ${renderRiskGauge(pl.riskPercent)}
+    ${renderMoodBar("mail-"+m.id, pl.mood, pl.status==="withdrawn")}
     ${pl.userReplyDaysLeft!=null?`<div class="tiny faint uc mt8" style="letter-spacing:.04em;">⏰ Expira em ${pl.userReplyDaysLeft} dia${pl.userReplyDaysLeft===1?"":"s"} se não for respondida</div>`:""}`:""}
     ${thread?`<div class="mt12">${thread}</div>`:""}
     ${offerStatusBanner(pl)}
@@ -8042,15 +8055,18 @@ function contractPlayerCard(p, clubName){
 function renderBuyOfferModal(m){
   if(m.signing) return renderContractSigning(m.signMsg || "Contrato assinado!");
   const isGlobal = m.team==="global";
-  const isPrelib = !isGlobal && !ST.world.teams[m.team];
-  ensurePrelibMarket();
-  const p = isGlobal ? ST.world.globalMarket.find(x=>x.id===m.playerId)
-    : isPrelib ? ST.world.prelibMarket.find(x=>x.id===m.playerId)
-    : ST.world.teams[m.team].players.find(x=>x.id===m.playerId);
-  if(!p) return `<div class="modal-backdrop"><div class="modal"><p>Jogador indisponível.</p><button class="btn" onclick="Game.closeModal()">Fechar</button></div></div>`;
-  const ask = isGlobal ? globalMarketAskingPrice(p) : isPrelib ? prelibMarketAskingPrice(p) : askingPrice(p, ST.world.teams[m.team]);
-  const lo = Math.round(ask*0.85/5000)*5000, hi = Math.round(ask*1.3/5000)*5000;
-  const clubName = isGlobal ? p.club : m.team;
+  const ctx = buyContext(m.team, m.playerId);
+  if(!ctx) return `<div class="modal-backdrop"><div class="modal"><p>Jogador indisponível.</p><button class="btn" onclick="Game.closeModal()">Fechar</button></div></div>`;
+  const p = ctx.p, ask = ctx.ask, clubName = ctx.club;
+  const sess = buyNegSession(m.team, p.id, ask);
+  const cool = buyCooldownLeft(sess);
+  const started = sess.neg.round>0;
+  const standing = started ? sess.neg.now : ask;
+  const lastV = sess.neg.lastVerdict;
+  const canTakeCounter = started && sess.status!=="ended" && lastV && lastV!=="refuse" && lastV!=="end" && standing<=ST.budget;
+  const lo = Math.round(ctx.limit*0.97/5000)*5000, hi = Math.round(ask*1.05/5000)*5000;
+  const money = n=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,".");
+  const thread = sess.thread.slice(-4).map(t=>`<div class="neg-line ${t.who}"><span>${esc(t.text)}</span></div>`).join("");
   return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
     <div class="contract-doc">
       <div class="contract-panel">
@@ -8061,20 +8077,25 @@ function renderBuyOfferModal(m){
         </div>
         <div class="contract-kv"><span>Tipo de transferência</span><span>Comprar</span></div>
         <div class="contract-kv"><span>Valor de passe estipulado</span><span class="gold bold">${fmtMoney(ask)}</span></div>
+        ${started?`<div class="contract-kv"><span>Posição atual do clube</span><span class="gold bold">${fmtMoney(standing)}</span></div>`:""}
         ${contractPlayerCard(p, clubName)}
       </div>
       <div class="contract-divider"><span class="contract-pen">✒️</span></div>
       <div class="contract-panel">
-        <div class="contract-panel-header">Proposta</div>
-        <p class="contract-advisor"><b>Comentários do Gerente de Futebol:</b><br>${transferAdvisorLine(p, lo, hi)}</p>
+        <div class="contract-panel-header">Negociação</div>
+        <p class="contract-advisor"><b>Comentários do Gerente de Futebol:</b><br>${transferAdvisorLine(p, lo, hi)} O valor pedido é uma referência: contrapropostas fazem parte do jogo.</p>
+        ${renderMoodBar("buy-"+m.team+":"+p.id, sess.neg.mood, sess.status==="ended")}
+        ${thread?`<div class="neg-thread">${thread}</div>`:""}
         <div class="contract-kv"><span>Orç. de transferência</span><span class="gold bold">${fmtMoney(ST.budget)}</span></div>
-        <label class="tiny faint mt16" style="display:block;">Valor da proposta (US$)</label>
-        <input id="offerInput" type="text" inputmode="numeric" class="input-inline" style="width:100%;" value="${String(ask).replace(/\B(?=(\d{3})+(?!\d))/g,".")}" oninput="Game.updateOfferWords(this)"/>
-        <div id="offerWords" class="tiny faint mt4">${esc(numberToWordsPT(ask))}</div>
+        ${sess.status==="ended" && cool>0 ? `<div class="mail-status mail-status-bad mt12">A diretoria encerrou as conversas. Tente de novo em ${cool} dia${cool===1?"":"s"} (avance os dias na aba Competição).</div>` : `
+        <label class="tiny faint mt12" style="display:block;">${started?"Sua próxima proposta (US$)":"Valor da proposta (US$)"}</label>
+        <input id="offerInput" type="text" inputmode="numeric" class="input-inline" style="width:100%;" value="${money(standing)}" oninput="Game.updateOfferWords(this)"/>
+        <div id="offerWords" class="tiny faint mt4">${esc(numberToWordsPT(standing))}</div>`}
         <div id="offerMsg" class="small mt8"></div>
-        <div class="btn-row mt16">
-          <button class="btn btn-gold grow" onclick="Game.submitOffer(${p.id},'${escJs(m.team)}')">✒️ Enviar Proposta</button>
-          <button class="btn" onclick="Game.closeModal()">Cancelar</button>
+        <div class="neg-actions mt12">
+          ${sess.status==="ended" && cool>0 ? "" : `<button class="btn" onclick="Game.submitOffer(${p.id},'${escJs(m.team)}')">✒️ Nova proposta</button>`}
+          ${canTakeCounter ? `<button class="btn btn-gold neg-take" onclick="Game.acceptCounter(${p.id},'${escJs(m.team)}')">✔ Aceitar · ${fmtMoney(standing)}</button>` : ""}
+          <button class="btn" onclick="Game.closeModal()">${started?"Fechar":"Cancelar"}</button>
         </div>
       </div>
     </div>
@@ -8631,17 +8652,28 @@ const Game = {
     const m = ST.uiModal;
     if(!m || m.signing) return;
     const input = document.getElementById("offerInput");
-    const offer = Math.max(0, digitsFromMoneyInput(input.value));
-    const res = team==="global" ? buyGlobalPlayer(playerId, offer)
-      : !ST.world.teams[team] ? buyPrelibPlayer(playerId, offer)
-      : makeOffer(playerId, team, offer);
-    const msgEl = document.getElementById("offerMsg");
-    if(res.ok){
+    const offer = Math.max(0, digitsFromMoneyInput(input ? input.value : ""));
+    const res = submitBuyProposal(team, playerId, offer);
+    if(res.deal){
       m.signing = true; m.signMsg = "Contrato Assinado!";
       render();
       setTimeout(()=>{ ST.uiModal=null; render(); }, 2200);
-    } else if(msgEl){
-      msgEl.innerHTML = `<span class="red">${esc(res.msg)}</span>`;
+    } else if(!res.verdict){
+      const msgEl = document.getElementById("offerMsg");           // a plain validation message (budget, empty value, cooldown)
+      if(msgEl) msgEl.innerHTML = `<span class="red">${esc(res.msg)}</span>`;
+    } else render();                                                // a real answer from the director: redraw the mood bar and thread
+  },
+  acceptCounter(playerId, team){
+    const m = ST.uiModal; if(!m || m.signing) return;
+    const sess = ST.negs && ST.negs[team+":"+playerId]; if(!sess) return;
+    const res = submitBuyProposal(team, playerId, sess.neg.now);
+    if(res.deal){
+      m.signing = true; m.signMsg = "Contrato Assinado!";
+      render();
+      setTimeout(()=>{ ST.uiModal=null; render(); }, 2200);
+    } else {
+      const msgEl = document.getElementById("offerMsg");
+      if(msgEl) msgEl.innerHTML = `<span class="red">${esc(res.msg||"Não foi possível fechar agora.")}</span>`;
     }
   },
   setXferFilter(key, val){
@@ -8895,5 +8927,5 @@ if(typeof document !== "undefined"){
   else startBoot();
 }
 
-window.__APP_INTERNALS__ = { newCareerState, startCareer, advanceTournament, render, tierOf, buildJobOffers, teamAvgOvr, globalMarketAskingPrice, isKeyMarketPlayer, dailyTransferTick, runEuropeanPoaching, runSingleAISigning, runSingleGlobalReshuffle, nextSeed, E, get ST(){return ST;}, set ST(v){ST=v;} };
+window.__APP_INTERNALS__ = { startBrasileiraoCareer, submitBuyProposal, buyContext, buyNegSession, negotiateOffer, queueOfferMail, findMail, runOfferNegotiation, offerNegCeiling, newCareerState, startCareer, advanceTournament, render, tierOf, buildJobOffers, teamAvgOvr, globalMarketAskingPrice, isKeyMarketPlayer, dailyTransferTick, runEuropeanPoaching, runSingleAISigning, runSingleGlobalReshuffle, nextSeed, E, get ST(){return ST;}, set ST(v){ST=v;} };
 
