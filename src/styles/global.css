@@ -1135,6 +1135,18 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .mgr-home{position:relative;z-index:2;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden;}
 .mgr-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 28px;position:relative;z-index:3;border-bottom:1px solid var(--line);background:rgba(10,14,11,.85);}
 .mgr-brand{display:flex;align-items:center;gap:12px;background:none;border:0;padding:0;color:inherit;cursor:pointer;text-align:left;}
+.mgr-brand-logo{display:block;height:56px;width:auto;}
+.mgr-more h2{color:var(--marigold);}
+.mgr-more-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;}
+.mgr-more-card{display:flex;flex-direction:column;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:0 0 14px;overflow:hidden;text-decoration:none;color:var(--text);transition:transform .15s ease,border-color .15s ease;}
+.mgr-more-card:hover{border-color:var(--marigold);transform:translateY(-3px);}
+.mgr-more-card:focus-visible{outline:3px solid var(--marigold-bright);outline-offset:3px;}
+.mgr-more-card img{display:block;width:100%;height:auto;aspect-ratio:1200/630;object-fit:cover;border-bottom:1px solid var(--line);margin-bottom:8px;}
+.mgr-more-card > :not(img){margin-left:16px;margin-right:16px;}
+.mgr-more-card b{font-family:var(--font-display);font-weight:400;font-size:24px;line-height:1.05;letter-spacing:.02em;}
+.mgr-more-card p{margin:0;flex:1 1 0;color:var(--text-dim);font-size:13px;line-height:1.5;}
+.mgr-more-card small{color:var(--text-faint);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mgr-more-card .go{display:flex;justify-content:flex-end;margin-top:4px;font-family:var(--font-display);font-size:19px;letter-spacing:.04em;color:var(--marigold);}
 .mgr-mark{width:40px;height:40px;border-radius:9px;background:var(--marigold);color:#1c1600;display:inline-flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:30px;line-height:1;padding-top:3px;}
 .mgr-brand-name{font-family:var(--font-display);font-size:30px;line-height:1;letter-spacing:.02em;color:var(--text);}
 .mgr-brand-name b{font-weight:400;color:var(--marigold);}
@@ -1192,7 +1204,7 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
 .mgr-foot a:hover{color:var(--marigold);}
 @media (max-width:860px){
   .mgr-top{padding:12px 16px;}
-  .mgr-brand small{display:none;}
+  .mgr-brand-logo{height:44px;}
   .mgr-hero{padding:36px 20px 44px;grid-template-columns:minmax(0,1fr);}
   .mgr-hero-copy,.mgr-hero-logo{grid-column:1;}
   .mgr-hero-logo{grid-row:1;}

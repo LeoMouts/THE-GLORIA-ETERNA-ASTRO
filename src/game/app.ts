@@ -5495,8 +5495,7 @@ function renderBottomMarquee(){
 function renderSiteNav(hasCareer){
   return `<header class="mgr-top">
     <button class="mgr-brand" onclick="Game.goHome()" aria-label="THE MANAGER — início">
-      <span class="mgr-mark" aria-hidden="true">M</span>
-      <span><span class="mgr-brand-name">THE <b>MANAGER</b></span><small>SIMULADOR DE TÉCNICO</small></span>
+      <img class="mgr-brand-logo" src="/images/the-manager-logo.png" alt="THE MANAGER" width="1000" height="514" decoding="async"/>
     </button>
     <div class="mgr-top-right">
       <div class="mgr-social">
@@ -5567,6 +5566,21 @@ function renderHome(){
         <div class="mgr-tile"><h3>Campeonatos</h3><p>Brasileirão, Copa do Brasil, Libertadores e Intercontinental na mesma carreira.</p></div>
         <div class="mgr-tile"><h3>Reputação</h3><p>Resultados abrem portas. Campanha ruim custa o cargo.</p></div>
         <div class="mgr-tile"><h3>10 temporadas</h3><p>O elenco envelhece, as promessas evoluem e o seu legado é construído ano a ano.</p></div>
+      </div>
+    </section>
+    <section class="mgr-section mgr-more">
+      <h2>Conheça nossos outros jogos</h2>
+      <div class="mgr-more-grid">
+        ${[
+          ["THE FENÔMENO","Simulador de carreira no futebol: roube dos craques, viva uma carreira e descubra onde você fica entre os maiores.","www.thefenomeno.com","the-fenomeno"],
+          ["ARENA THE FENÔMENO","Vinte e dois mini games de futebol num lugar só: Draft, Leilão, Maleta, Forca, Bingo, Top 10 e muito mais.","jogue.thefenomeno.com","arena"],
+          ["MAIS OU MENOS","Qual é maior? Acerte em sequência e compartilhe o placar.","maisoumenos.thefenomeno.com","mais-ou-menos"],
+          ["CONECTE OS FENÔMENOS","Ligue dois craques pelos clubes que os dois vestiram. Um confronto novo todo dia.","conecte.thefenomeno.com","conecte"],
+          ["RECONSTRUINDO","Monte o XI ideal do seu time: decida quem fica, quem sai e quem chega.","reconstruindo.thefenomeno.com","reconstruindo"],
+        ].map(g=>`<a class="mgr-more-card" href="https://${g[2]}" target="_blank" rel="noopener noreferrer" onclick="Game.openExternal(event,'https://${g[2]}')">
+          <img src="/images/jogos/${g[3]}.webp" alt="${g[0]}" width="520" height="273" loading="lazy" decoding="async"/>
+          <b>${g[0]}</b><p>${g[1]}</p><small>${g[2].replace(/^www\./,"")}</small><span class="go">ABRIR →</span>
+        </a>`).join("")}
       </div>
     </section>
     <footer class="mgr-foot">
