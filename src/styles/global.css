@@ -511,6 +511,20 @@ table.data th{
 }
 table.data td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;}
 table.data tr:hover td{background:rgba(241,237,225,.025);}
+/* Contratar: every column fits the screen — no sideways scrolling. Names stack the country under them, badges and club names may wrap */
+.xfer-main .scroll-x{overflow-x:visible;}
+table.data-fit{table-layout:auto;}
+table.data-fit th{padding:8px 6px;}
+table.data-fit td{padding:7px 6px;white-space:normal;}
+table.data-fit td.tac,table.data-fit th.tac{white-space:nowrap;}
+table.data-fit .pface-cell{display:flex;align-items:center;gap:9px;min-width:0;}
+table.data-fit .pface-cell > span{display:flex;flex-direction:column;gap:1px;line-height:1.2;min-width:0;}
+table.data-fit .pface-cell .tiny{font-size:10.5px;}
+table.data-fit td .badge-pos{margin:1px 3px 1px 0;}
+table.data-fit .btn-sm{padding:7px 10px;font-size:12px;white-space:nowrap;}
+table.data-fa{width:auto;min-width:min(100%,640px);}
+table.data-fa td:last-child{padding-left:12px;}
+table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2px;}
 .badge{display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:800;letter-spacing:.02em;font-family:var(--font-mono);}
 .badge-pos{background:#2A2205;color:var(--marigold);}
 .badge-inj{background:#3A1B18;color:#F0B4AC;}

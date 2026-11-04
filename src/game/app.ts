@@ -7028,9 +7028,9 @@ function renderXferBuySubTab(f){
         ${renderXferSidebar(f, posOptions, null)}
       </aside>
       <div class="xfer-main">
-        <div class="dim tiny mb8">Jogadores sem clube: você paga só a <b>taxa de contratação + o salário</b>, não o valor de mercado. Mas os clubes também contratam — quem demora, perde. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
-        <div class="scroll-x"><table class="data"><thead><tr>
-          <th>Jogador</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Taxa</th><th class="tac">Salário</th><th class="tac">Total</th><th></th>
+        <div class="dim tiny mb8">Jogadores sem clube: você paga só a <b>taxa de contratação + o salário</b>, não o valor de mercado — o salário aparece ao abrir a contratação. Os clubes também contratam: quem demora, perde. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
+        <div class="scroll-x"><table class="data data-fit data-fa"><thead><tr>
+          <th>Jogador</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Taxa</th><th></th>
         </tr></thead><tbody>
         ${shown.map(p=>{ const c = freeAgentCost(p), ok = freeAgentWillSign(p); return `<tr>
           <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></span></span></td>
@@ -7038,9 +7038,7 @@ function renderXferBuySubTab(f){
           <td class="tac">${p.age}</td>
           <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
           <td class="tac">${renderPotCell("global",p)}</td>
-          <td class="tac mono">${fmtMoney(c.fee)}</td>
-          <td class="tac mono">${fmtMoney(c.wage)}</td>
-          <td class="tac mono gold bold">${fmtMoney(c.total)}</td>
+          <td class="tac mono gold bold">${fmtMoney(c.fee)}</td>
           <td>${ok ? `<button class="btn btn-sm btn-gold" onclick="Game.openFaModal(${p.id})">Contratar</button>` : `<span class="faint tiny" title="Não aceita um clube desse nível">Recusa</span>`}</td>
         </tr>`; }).join("")}
         </tbody></table></div>
@@ -7069,8 +7067,8 @@ function renderXferBuySubTab(f){
       </aside>
       <div class="xfer-main">
         <div class="dim tiny mb8">${iconGlobe(13)} Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
-        <div class="scroll-x"><table class="data"><thead><tr>
-          <th>Jogador</th><th>Clube (fora da Libertadores)</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Valor</th><th></th>
+        <div class="scroll-x"><table class="data data-fit"><thead><tr>
+          <th>Jogador</th><th>Clube</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Valor</th><th></th>
         </tr></thead><tbody>
         ${shown.map(p=>`<tr>
           <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></span></span></td>
@@ -7109,7 +7107,7 @@ function renderXferBuySubTab(f){
     </aside>
     <div class="xfer-main">
       <div class="dim tiny mb8">Mostrando ${shown.length} de ${list.length} jogadores. Orçamento disponível: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
-      <div class="scroll-x"><table class="data"><thead><tr>
+      <div class="scroll-x"><table class="data data-fit"><thead><tr>
         <th>Jogador</th><th>Time</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Valor</th><th></th>
       </tr></thead><tbody>
       ${shown.map(p=>`<tr>
