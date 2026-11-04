@@ -7553,6 +7553,7 @@ function renderSlotPickerModal(m){
     const isStarterElsewhere = startersElsewhere.has(p.id);
     return `<div class="slot-pick-row ${isCur?'current':''} ${disabled?'unavailable':''}">
       <div class="slot-pick-main">
+        ${playerFaceImg(p,38)}
         ${posBadges(p)}
         <span class="bold">${esc(p.name)}</span>
         <span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span>
