@@ -5122,8 +5122,6 @@ function render(){
   try{
     let html = "";
     if(!ST || ST.stage==="home") html = renderHome();
-    else if(ST.stage==="mode_select") html = renderModeSelect();
-    else if(ST.stage==="alt_mode_select") html = renderAltModeSelect();
     else if(ST.stage==="team_select") html = renderTeamSelect();
     else if(ST.stage==="manager_name") html = renderManagerName();
     else if(ST.stage==="brasa_team_select") html = renderBrasaTeamSelect();
@@ -5228,13 +5226,13 @@ function renderInstagramIcon(){
 }
 
 const NEWS_TICKER_ITEMS = [
-  "CHAVEAMENTO DIVULGADO: OS 8 GRUPOS DA LIBERTADORES 2026 JÁ ESTÃO DEFINIDOS",
-  "MERCADO GLOBAL LIBERADO: CLUBES DA LIBERTADORES JÁ PODEM CONTRATAR FORA DO CONTINENTE",
-  "OLHEIROS EM ALERTA: NOVAS PROMESSAS SUL-AMERICANAS CHAMAM ATENÇÃO",
-  "BASTIDORES: PRESSÃO AUMENTA SOBRE TÉCNICOS DE CLUBES TRADICIONAIS",
-  "RUMO À GLÓRIA ETERNA: 10 TEMPORADAS PARA CONSTRUIR SEU LEGADO",
-  "REPUTAÇÃO EM JOGO: UMA CAMPANHA RUIM PODE CUSTAR SEU CARGO",
+  "BRASILEIRÃO 2026: 20 CLUBES DISPUTAM O TÍTULO E AS VAGAS NA LIBERTADORES",
+  "MERCADO GLOBAL ABERTO: MAIS DE 7 MIL JOGADORES PARA CONTRATAR",
+  "OLHEIROS EM ALERTA: NOVAS PROMESSAS CHAMAM ATENÇÃO",
+  "PRESSÃO NO BANCO: UMA CAMPANHA RUIM PODE CUSTAR O SEU CARGO",
+  "REPUTAÇÃO EM JOGO: RESULTADOS ABREM AS PORTAS DOS GRANDES CLUBES",
   "ECONOMIA AQUECIDA: VALORES DE MERCADO DISPARAM PARA AS GRANDES ESTRELAS",
+  "10 TEMPORADAS PARA CONSTRUIR O SEU LEGADO",
 ];
 function renderNewsTicker(){
   const items = NEWS_TICKER_ITEMS.concat(NEWS_TICKER_ITEMS); // doubled for seamless loop
@@ -5243,91 +5241,85 @@ function renderNewsTicker(){
   </div></div>`;
 }
 function renderBottomMarquee(){
-  const items = Array(6).fill("THE GLÓRIA ETERNA");
-  return `<div class="bottom-marquee"><div class="bottom-marquee-track">
-    ${items.map(t=>`<span class="bottom-marquee-item">${esc(t)}</span>`).join("")}
+  const items = Array(8).fill("THE MANAGER");
+  return `<div class="mgr-band" aria-hidden="true"><div class="mgr-band-track">
+    ${items.map(t=>`<span class="mgr-band-item">${esc(t)}<i>★</i></span>`).join("")}
   </div></div>`;
 }
 function renderSiteNav(hasCareer){
-  return `<div class="site-nav">
-    <div class="site-nav-brand">
-      <img src="${GOAT_MASCOT_URI}" alt="Mascote"/>
-      <span class="wordmark">THEGLORIAETERNA<span class="dot">.COM</span></span>
-    </div>
-    <div class="site-nav-right">
+  return `<header class="mgr-top">
+    <button class="mgr-brand" onclick="Game.goHome()" aria-label="THE MANAGER — início">
+      <span class="mgr-mark" aria-hidden="true">M</span>
+      <span><span class="mgr-brand-name">THE <b>MANAGER</b></span><small>SIMULADOR DE TÉCNICO</small></span>
+    </button>
+    <div class="mgr-top-right">
       <div class="site-nav-social">
         <a href="https://www.instagram.com/_thefenomeno/" target="_top" onclick="Game.openInstagram(event)">📷 @_thefenomeno</a>
       </div>
-      <button class="nav-jogar-btn" onclick="${hasCareer?"Game.continueCareer()":"Game.goNewGame()"}">${hasCareer?"CONTINUAR":"JOGAR"}</button>
+      <button class="nav-jogar-btn mgr-nav-btn" onclick="${hasCareer?"Game.continueCareer()":"Game.goNewGame()"}">${hasCareer?"CONTINUAR":"JOGAR"}</button>
     </div>
-  </div>`;
+  </header>`;
 }
-// glow-border hover card (Uiverse.io design by gharsh11032000, recolored to the
-// site's black/gold identity) showing the "lift the trophy" art as its background.
-function renderRatingCards(){
-  return `<div class="hero-split-cards">
-    <div class="card">
-      <p class="heading">A Glória Eterna</p>
-      <p>Erga a taça. Escreva sua lenda.</p>
-      <p>THEGLORIAETERNA.COM</p>
-    </div>
-  </div>`;
+function renderPitchMarks(){
+  return `<svg class="mgr-pitch" viewBox="0 0 600 600" fill="none" stroke="#f2f4ef" stroke-width="3" aria-hidden="true">
+    <circle cx="300" cy="300" r="150"/><circle cx="300" cy="300" r="6" fill="#f2f4ef"/><line x1="0" y1="300" x2="600" y2="300"/>
+    <rect x="130" y="0" width="340" height="110"/><rect x="215" y="0" width="170" height="44"/>
+    <path d="M230 110 A80 80 0 0 0 370 110"/>
+  </svg>`;
 }
-
 function renderHome(){
   const hasCareer = ST && ST.teamId && ST.world;
   const inPrelib = hasCareer && !!ST.prelib;
   return `
-  ${cornerWatermarks()}
-  <div style="position:relative;z-index:2;">
-    ${renderSiteNav(hasCareer)}
+  <div class="mgr-home">
     ${renderNewsTicker()}
-    <div class="hero-split">
-      <div class="hero-split-text">
-        <div class="hero-eyebrow">Simulador de Carreira</div>
-        <h1 class="hero-split-title">VOCÊ CONQUISTA<br>A <span class="gold-word">GLÓRIA ETERNA?</span></h1>
-        <p class="hero-split-desc">Assuma o comando de um clube da Copa Libertadores 2026. Escale, negocie, evolua — e descubra se você tem o que é preciso para erguer a taça em 10 temporadas.</p>
-        <div class="hero-split-actions">
-          ${hasCareer ? `
-            <button class="btn btn-gold btn-lg" onclick="Game.continueCareer()">▶ ${inPrelib?"CONTINUAR PRÉ-LIBERTADORES":"CONTINUAR CARREIRA"}</button>
-            <button class="btn btn-ghost" onclick="Game.goNewGame()">Nova carreira</button>
-          ` : `
-            <button class="btn btn-gold btn-lg" onclick="Game.goNewGame()">▶ JOGAR</button>
-          `}
-        </div>
+    ${renderSiteNav(hasCareer)}
+    <section class="mgr-hero">
+      ${renderPitchMarks()}
+      <div class="mgr-eyebrow">Simulador de carreira · Brasileirão 2026</div>
+      <h1 class="mgr-title">Você é<span>THE MANAGER?</span></h1>
+      <p class="mgr-desc">Assuma um dos 20 clubes da Série A. Escale, negocie, contrate e faça o elenco evoluir — e descubra se você aguenta 10 temporadas no comando sem ser demitido.</p>
+      <div class="mgr-cta">
+        ${hasCareer ? `
+          <button class="mgr-play" onclick="Game.continueCareer()">▶ ${inPrelib?"CONTINUAR PRÉ-LIBERTADORES":"CONTINUAR CARREIRA"}</button>
+          <button class="mgr-ghost" onclick="Game.goNewGame()">Nova carreira</button>
+        ` : `
+          <button class="mgr-play" onclick="Game.goNewGame()">CRIAR CARREIRA COMO TÉCNICO</button>
+        `}
       </div>
-      ${renderRatingCards()}
-    </div>
+      <div class="mgr-comps">Brasileirão · Copa do Brasil · Libertadores · Intercontinental</div>
+      <div class="mgr-stats">
+        <div class="mgr-stat"><b>20</b><span>clubes da Série A</span></div>
+        <div class="mgr-stat"><b>+9 MIL</b><span>jogadores</span></div>
+        <div class="mgr-stat"><b>10</b><span>temporadas</span></div>
+      </div>
+    </section>
     ${renderBottomMarquee()}
-    <div class="social-wrap-center">${renderInstagramIcon()}</div>
-  </div>`;
-}
-
-// ---------------- MODE SELECT ----------------
-function renderModeSelect(){
-  return `
-  <div class="hero" style="min-height:80vh;">
-    <div style="align-self:flex-start;margin-left:20px;"><button class="btn btn-ghost btn-sm" onclick="Game.goHome()">← Voltar</button></div>
-    <div class="hero-eyebrow">Como você quer jogar?</div>
-    <h1 class="hero-title" style="font-size:clamp(28px,6vw,48px);">ESCOLHA SEU CAMINHO</h1>
-    <div class="mt24" style="display:flex;flex-direction:column;gap:14px;max-width:380px;width:100%;">
-      <button class="btn btn-gold btn-lg" onclick="Game.chooseBrasileiraoCareer()">MODO COMPLETO — Brasileirão 2026</button>
-      <button class="btn btn-ghost btn-sm" onclick="Game.goAltModes()">Jogar modos alternativos</button>
-    </div>
-    <p class="dim small mt24" style="max-width:420px;">Modo Completo: Brasileirão, Copa do Brasil, Libertadores e Intercontinental, tudo na mesma carreira, com um dos 20 clubes da Série A. Os modos alternativos abrem uma carreira isolada, só de Libertadores ou só de Pré-Libertadores.</p>
-  </div>`;
-}
-function renderAltModeSelect(){
-  return `
-  <div class="hero" style="min-height:80vh;">
-    <div style="align-self:flex-start;margin-left:20px;"><button class="btn btn-ghost btn-sm" onclick="Game.backToModeSelect()">← Voltar</button></div>
-    <div class="hero-eyebrow">Modos alternativos</div>
-    <h1 class="hero-title" style="font-size:clamp(28px,6vw,48px);">CARREIRAS ISOLADAS</h1>
-    <div class="mt24" style="display:flex;flex-direction:column;gap:14px;max-width:380px;width:100%;">
-      <button class="btn btn-gold btn-lg" onclick="Game.chooseNormalCareer()">Modo Libertadores 2026</button>
-      <button class="btn btn-ghost btn-lg" onclick="Game.goPreLib()">Modo Pré-Libertadores</button>
-    </div>
-    <p class="dim small mt24" style="max-width:420px;">Modo Libertadores: assuma um dos 32 clubes já classificados, direto na fase de grupos. Modo Pré-Libertadores: dispute um mata-mata entre 8 clubes da Sul-Americana — vença e ganhe uma vaga direta na Libertadores do ano seguinte.</p>
+    <section class="mgr-section">
+      <h2>Até onde vai a sua carreira?</h2>
+      <p class="lead">Todo técnico começa igual. O que separa um interino de uma lenda é o que ele faz com o elenco, o mercado e a pressão.</p>
+      <div class="mgr-tiers">
+        <div class="mgr-tier"><div class="tag">Nível 1</div><h3>Interino</h3><p>Escala no feeling, contrata sem olhar o caixa e vê a diretoria perder a paciência.</p><div class="quote">Onde muita gente termina</div></div>
+        <div class="mgr-tier"><div class="tag">Nível 2</div><h3>Técnico consagrado</h3><p>Segura o cargo, monta um time competitivo e briga por títulos nacionais e vaga na Libertadores.</p><div class="quote">Uma carreira sólida</div></div>
+        <div class="mgr-tier top"><div class="tag">Nível 3</div><h3>THE MANAGER</h3><p>Domina o Brasil, conquista a América e vai ao Mundial. Dez temporadas de domínio.</p><div class="quote">O sonho · THE MANAGER ★★★★★</div></div>
+      </div>
+    </section>
+    <section class="mgr-section">
+      <h2>O que você comanda</h2>
+      <p class="lead">Tudo o que um técnico decide, numa carreira só.</p>
+      <div class="mgr-tiles">
+        <div class="mgr-tile"><h3>Escalação</h3><p>Formação, titulares e substituições. Quem joga mal perde a vaga.</p></div>
+        <div class="mgr-tile"><h3>Mercado global</h3><p>Mais de 7 mil jogadores de clubes do mundo todo para contratar ou vender.</p></div>
+        <div class="mgr-tile"><h3>Olheiro</h3><p>Descubra promessas antes da concorrência e traga o próximo craque.</p></div>
+        <div class="mgr-tile"><h3>Campeonatos</h3><p>Brasileirão, Copa do Brasil, Libertadores e Intercontinental na mesma carreira.</p></div>
+        <div class="mgr-tile"><h3>Reputação</h3><p>Resultados abrem portas. Campanha ruim custa o cargo.</p></div>
+        <div class="mgr-tile"><h3>10 temporadas</h3><p>O elenco envelhece, as promessas evoluem e o seu legado é construído ano a ano.</p></div>
+      </div>
+    </section>
+    <footer class="mgr-foot">
+      <p>THE MANAGER é um jogo de fãs e não tem afiliação com ligas, federações, clubes ou jogadores. Nomes e escudos são usados apenas para identificação.</p>
+      <div class="social-wrap-center" style="padding:0;">${renderInstagramIcon()}</div>
+    </footer>
   </div>`;
 }
 
@@ -8010,10 +8002,8 @@ const Game = {
       render();
       return;
     }
-    ST.stage="mode_select"; render();
+    ST.tmpSelectedTeam=null; ST.tmpManagerNameInput=""; ST.stage="brasa_team_select"; render();
   },
-  goAltModes(){ ST.stage="alt_mode_select"; render(); },
-  backToModeSelect(){ ST.stage="mode_select"; render(); },
   chooseNormalCareer(){ ST.tmpSelectedTeam=null; ST.tmpManagerNameInput=""; ST.stage="team_select"; render(); },
   pickTeam(name){ ST.tmpSelectedTeam=name; render(); },
   confirmTeam(){ if(!ST.tmpSelectedTeam) return; ST.stage="manager_name"; render(); },
@@ -8172,7 +8162,7 @@ const Game = {
     if(!m) { render(); return; }
     if(m.action==="quickSell") quickSell(m.payload);
     else if(m.action==="resetCareer") { resetCareer(); return; }
-    else if(m.action==="confirmNewGame") { ST.stage="mode_select"; }
+    else if(m.action==="confirmNewGame") { ST.tmpSelectedTeam=null; ST.tmpManagerNameInput=""; ST.stage="brasa_team_select"; }
     else if(m.action==="clearInbox") clearInbox();
     render();
   },
@@ -8419,7 +8409,7 @@ function renderAccessGate(errorMsg){
   if(!app) return;
   app.innerHTML = `<div class="hero hero-home" style="min-height:100vh;">
     <div class="hero-badge">ACESSO RESTRITO</div>
-    <h1 class="hero-title" style="font-size:clamp(30px,7vw,58px);">THE GLÓRIA ETERNA</h1>
+    <h1 class="hero-title" style="font-size:clamp(30px,7vw,58px);">THE MANAGER</h1>
     <p class="hero-sub">Esse jogo é privado. Entre com usuário e senha para jogar.</p>
     <div class="panel mt24" style="max-width:340px;width:100%;text-align:left;">
       <label class="tiny faint uc" style="display:block;margin-bottom:4px;">Usuário</label>

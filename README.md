@@ -1,6 +1,6 @@
-# The Glória Eterna
+# THE MANAGER
 
-Simulador de carreira da Copa Libertadores 2026, em Astro + TypeScript.
+Simulador de carreira como técnico no Brasileirão (com Copa do Brasil, Libertadores e Intercontinental), em Astro + TypeScript.
 
 ## Estrutura
 
