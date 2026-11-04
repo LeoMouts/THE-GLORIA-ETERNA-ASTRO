@@ -5,7 +5,7 @@
 import * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
-import { PRELIB_DATA } from "./prelib"; import FACE_RAW from "./data/faces.json"; import FACE_ALT_RAW from "./data/faces_alt.json"; import POSX_RAW from "./data/positions.json";
+import { PRELIB_DATA } from "./prelib"; import FACE_RAW from "./data/faces.json"; import FACE_ALT_RAW from "./data/faces_alt.json"; import TP_RAW from "./data/transferProfile.json"; import POSX_RAW from "./data/positions.json";
 import { SERIE_A_EXTRA_TEAMS, SERIE_A_2026 } from "./serieA"; import { SULAMERICANA_EXTRA_TEAMS, SULAMERICANA_2026 } from "./sulamericana";
 
 const GOAT_MASCOT_URI = "/images/image-1787868287812.webp";
@@ -4415,6 +4415,105 @@ function romanoDayLabel(entryDay){
 // shopping the global market pool (weighted toward nationality fit and a realistic price band),
 // then, failing that, by poaching a genuine surplus player from a lower-tier AI club (never the
 // user). Every signing removes the player from wherever they came from, same as a real transfer.
+/* ---------- realistic transfer profiles ----------
+   data/transferProfile.json is built from Transfermarkt's own transfer pages (every arrival of the last two
+   windows at ~280 clubs: Premier League, LaLiga, Serie A, Bundesliga, Ligue 1, Portugal, Netherlands, Belgium,
+   Turkey, Brasileirão, Argentina, Colombia, Chile, Uruguay, Ecuador). Clubs are bucketed by what they actually
+   spend; each bucket carries the age mix, the fee bands, the fee/market-value premium and the origin->destination
+   flows of its signings, so who buys whom follows real behaviour (elite clubs pay big fees for young high-potential
+   players; a veteran or a 1M player never lands at a top club). */
+const TP = TP_RAW as any;
+function tpAgeBucket(a){ return a<=20?0:a<=23?1:a<=26?2:a<=29?3:4; }
+function tpFeeBin(f){ const e=TP.feeEdges; for(let i=0;i<e.length;i++){ if(f<e[i]) return i; } return e.length; }
+// what Transfermarkt would roughly value this game player at, in euros (fitted on ~6.7k matched players)
+function tmValueEstimate(p){
+  const c = TP.valueModel, age=p.age, ovr=p.ovr, pot=p.pot||p.ovr;
+  const x = c[0]+c[1]*ovr+c[2]*(age<=25?(pot-ovr):0)+c[3]*age+c[4]*age*age+c[5]*Math.max(0,26-age)*(pot-ovr)*0.1+c[6]*(age>=31?age-30:0);
+  return Math.exp(x);
+}
+function clubGroupOf(name, world){
+  if(!name || name==="Free Agents") return "OTHER";
+  if(world && world.teams && world.teams[name]){
+    const tier = tierOf(world, name);
+    return tier>=4 ? "SA_TOP" : tier>=3 ? "SA_MID" : "SA_SMALL";
+  }
+  return TP.clubGroup[name] || "EUR_SMALL";
+}
+function transitionShare(ab, origGrp, destGrp){
+  const row = (TP.T[ab]||{})[origGrp] || (TP.T[ab]||{}).OTHER || {};
+  let tot = 0; for(const k in row) tot += row[k];
+  return tot>0 ? (row[destGrp]||0)/tot : 0.14;
+}
+// how likely a club of group `grp` is to sign this player, 0..1-ish (relative weights only)
+// South American clubs sign South Americans: in the real data ~98% of everything Flamengo, Palmeiras, Cruzeiro, River,
+// Boca & co. bring in is South American, and the expensive ones are usually players already formed at European clubs
+// (Samuel Lino from Atlético de Madrid, Danilo from Nottingham Forest). Other nationalities are a rare exception.
+const SA_NATS = new Set(["Brasil","Brazil","Argentina","Uruguai","Uruguay","Paraguai","Paraguay","Colombia","Colômbia","Chile","Equador","Ecuador","Peru","Perú","Bolivia","Bolívia","Venezuela"]);
+function isSouthAmerican(p){ return SA_NATS.has(p.nat); }
+// market players carry English country names, the club rosters Portuguese ones — SA_NEIGHBORS speaks Portuguese
+function natPt(n){ return ({Brazil:"Brasil",Uruguay:"Uruguai",Paraguay:"Paraguai",Ecuador:"Equador",Colombia:"Colombia","Colômbia":"Colombia","Bolívia":"Bolivia","Perú":"Peru"} as any)[n] || n; }
+function buyerFit(grp, p, origGrp){
+  const gp = TP.groups[grp];
+  if(!gp) return 0.001;
+  const ab = tpAgeBucket(p.age);
+  const v = tmValueEstimate(p);
+  const bin = tpFeeBin(v * (gp.feeRatio[ab] || 1.1)), fb = gp.feeBins;
+  const feeShare = fb[bin]*0.6 + (fb[bin-1]||0)*0.2 + (fb[bin+1]||0)*0.2;
+  // rumours: who the club is actually being linked with (market value, age) — same idea, from the rumour mill
+  const rb = gp.rumValBins, vbin = tpFeeBin(v);
+  const rumShare = rb ? rb[vbin]*0.6 + (rb[vbin-1]||0)*0.2 + (rb[vbin+1]||0)*0.2 : feeShare;
+  const ageW = (gp.rumAge ? (gp.ageShare[ab]+gp.rumAge[ab])/2 : gp.ageShare[ab])*0.5 + 0.03;
+  const quality = Math.pow((feeShare+rumShare)/2 + 0.008, 1.5);
+  let w = ageW * quality * (transitionShare(ab, origGrp, grp)+0.003);
+  const sa = TP.saProfile && TP.saProfile[grp];
+  if(sa){
+    if(!isSouthAmerican(p)) w *= sa.nonSA;
+    else if(String(origGrp).indexOf("EUR")===0 && p.age>=23 && p.age<=31) w *= (origGrp==="EUR_SMALL" ? 1+(sa.euroExp-1)*0.4 : sa.euroExp); // already formed at a European club
+  }
+  return Math.max(0.00001, w);
+}
+// price paid, in the game's own money scale: the group's real fee/market-value premium for that age
+function premiumFee(p, grp, rng){
+  const gp = TP.groups[grp];
+  const base = p.value || E.calcValue(p.ovr,p.age,p.pot);
+  const r = (gp && gp.feeRatio[tpAgeBucket(p.age)]) || 1.1;
+  return Math.max(20000, Math.round(base * r * (0.88+rng()*0.3) / 5000) * 5000);
+}
+// a club's starters (best ~11 by rating) rarely leave, and when they do it is for well above market value
+// (a Matheus Cunha at a big club is not a 10M deal — it takes the price of a starter, if he is sold at all)
+const KEY_PLAYER_PREMIUM = 1.35;
+let _keyCache = {arr:null, len:-1, ids:new Set()};
+function keyMarketIds(world){
+  const arr = world && world.globalMarket;
+  if(!arr) return _keyCache.ids;
+  if(_keyCache.arr===arr && _keyCache.len===arr.length) return _keyCache.ids;
+  const byClub = {};
+  for(let i=0;i<arr.length;i++){ const q=arr[i]; if(!q.club || q.club==="Free Agents") continue; (byClub[q.club]||(byClub[q.club]=[])).push(q); }
+  const ids = new Set();
+  for(const c in byClub){ byClub[c].sort((a,b)=>b.ovr-a.ovr || a.id-b.id).slice(0,11).forEach(q=>{ if(q.ovr>=72) ids.add(q.id); }); }
+  _keyCache = {arr, len:arr.length, ids};
+  return ids;
+}
+function isKeyMarketPlayer(world, p){ return keyMarketIds(world).has(p.id); }
+function isKeyTeamPlayer(team, p){ return team.players.filter(q=>q.id!==p.id && (q.ovr>p.ovr || (q.ovr===p.ovr && q.id<p.id))).length < 11; }
+// what an AI club pays for a player from the global pool: starters cost the full import price, bench players the group's real premium
+function aiGlobalFee(p, grp, rng){
+  const ask = globalMarketAskingPrice(p);
+  if(ST.world && isKeyMarketPlayer(ST.world, p)) return Math.round(ask*(0.95+rng()*0.2)/5000)*5000;
+  return Math.max(ask*0.6, premiumFee(p, grp, rng));
+}
+// buyers a European/global side can be, with their bucket
+const TP_BUYERS = Object.keys(TP.clubGroup);
+function pickBuyer(rng, p, origGrp, names, excludeName, minRatio){
+  const scored = names.filter(n=>n!==excludeName).map(n=>({n, w: buyerFit(clubGroupOf(n, ST.world), p, origGrp)}));
+  if(!scored.length) return null;
+  const best = scored.reduce((m,x)=>Math.max(m,x.w),0);
+  if(best < (minRatio||0)) return null;
+  const total = scored.reduce((a,b)=>a+b.w,0);
+  let r = rng()*total;
+  for(const it of scored){ r -= it.w; if(r<=0) return it.n; }
+  return scored[scored.length-1].n;
+}
 function runAITransferWindow(rng){
   const world = ST.world;
   if(!world || !world.teams) return;
@@ -4432,13 +4531,17 @@ function runAITransferWindow(rng){
       if(best && best.ovr>=need) continue; // slot's already good enough for this tier
 
       let signed = null, fromClub = null, isGlobal = false;
-      const globalCands = eligibleGlobalCandidates(world, pos, tier);
+      let globalCands = eligibleGlobalCandidates(world, pos, tier);
+      { const saOnly = globalCands.filter(isSouthAmerican); if(saOnly.length && rng()>0.03) globalCands = saOnly; } // CONMEBOL clubs scout South Americans
+      { const sap = TP.saProfile && TP.saProfile[clubGroupOf(name, world)]; if(sap){ const afford = globalCands.filter(p=>tmValueEstimate(p) <= sap.maxValue); if(afford.length) globalCands = afford; } } // a South American club never pays a European superstar's price
       if(globalCands.length){
+        const grp = clubGroupOf(name, world);
+        const maxFit = globalCands.reduce((m,p)=>Math.max(m,buyerFit(grp,p,clubGroupOf(p.club,world))),0.0001);
         const picked = pickWeighted(rng, globalCands, p=>{
           let s = 10;
-          if((SA_NEIGHBORS[team.country]||[]).includes(p.nat)) s += 25; // regional scouting bias
+          if((SA_NEIGHBORS[team.country]||[]).includes(natPt(p.nat))) s += 25; // regional scouting bias
           s += Math.max(0, 20 - Math.abs(p.ovr-need)); // realistic fit over wild overkill
-          return s;
+          return s * (0.03 + buyerFit(grp,p,clubGroupOf(p.club,world))/maxFit) * (isKeyMarketPlayer(world,p)?0.12:1); // real signing profile of this kind of club; starters rarely leave
         });
         if(picked){ signed = picked; fromClub = picked.club; isGlobal = true; }
       }
@@ -4465,7 +4568,7 @@ function runAITransferWindow(rng){
       }
       if(!signed) continue;
 
-      const fee = isGlobal ? globalMarketAskingPrice(signed) : askingPrice(signed, world.teams[fromClub]);
+      const fee = isGlobal ? aiGlobalFee(signed, clubGroupOf(name, world), rng) : askingPrice(signed, world.teams[fromClub]);
       if(isGlobal){
         world.globalMarket = world.globalMarket.filter(p=>p.id!==signed.id);
       } else {
@@ -4493,11 +4596,11 @@ function runGlobalClubReshuffle(rng){
   for(let i=0;i<moves;i++){
     const p = pool[Math.floor(rng()*pool.length)];
     if(!p || !p.club || AI_EXCLUDED_CLUBS.has(p.club)) continue;
-    let dest = clubNames[Math.floor(rng()*clubNames.length)];
-    let guard = 0;
-    while(dest===p.club && guard<5){ dest = clubNames[Math.floor(rng()*clubNames.length)]; guard++; }
-    if(dest===p.club) continue;
-    const fee = Math.max(20000, Math.round((p.value || E.calcValue(p.ovr,p.age,p.pot)) * (0.9+rng()*0.4) / 5000) * 5000);
+    const keyP = isKeyMarketPlayer(ST.world, p);
+    if(keyP && rng()>0.25) continue; // starters rarely move
+    const dest = pickBuyer(rng, p, clubGroupOf(p.club, ST.world), clubNames, p.club, 0.0);
+    if(!dest) continue;
+    const fee = Math.max(Math.round(premiumFee(p, clubGroupOf(dest, ST.world), rng) * (keyP ? 1.6 : 1) / 5000) * 5000, keyP ? Math.round((p.value||0)*1.3/5000)*5000 : 0); // a starter never goes below ~1.3x his value
     recordTransferFeed({name:p.name, price:fee, fromClub:p.club, toClub:dest, pos:p.pos, ovr:p.ovr});
     p.club = dest;
     p.value = fee;
@@ -4530,6 +4633,14 @@ function bestJewelIn(team){
 // a European (or other global) club comes in for a Libertadores prospect — the reverse flow
 // from runAITransferWindow: talent LEAVING the confederation instead of reinforcing it. Never
 // touches the user's own squad.
+let _euroPool = null;
+function euroBuyerPool(){
+  if(_euroPool) return _euroPool;
+  const names = new Set(REAL_EURO_CLUBS);
+  Object.keys(GLOBAL_TEAM_CRESTS).forEach(n=>{ if(!AI_EXCLUDED_CLUBS.has(n) && !LEGACY_PLACEHOLDER_CLUBS.has(n) && String(TP.clubGroup[n]||"").indexOf("EUR")===0) names.add(n); });
+  _euroPool = Array.from(names).filter(n=>!AI_EXCLUDED_CLUBS.has(n));
+  return _euroPool;
+}
 function runEuropeanPoaching(rng){
   const world = ST.world;
   if(!world || !world.teams) return;
@@ -4538,11 +4649,16 @@ function runEuropeanPoaching(rng){
   const seller = world.teams[sellerName];
   const jewel = bestJewelIn(seller);
   if(!jewel) return;
-  const buyer = REAL_EURO_CLUBS[Math.floor(rng()*REAL_EURO_CLUBS.length)];
-  const fee = askingPrice(jewel, seller);
+  const keyJewel = isKeyTeamPlayer(seller, jewel);
+  if(keyJewel && rng()>0.35) return; // a starter is rarely sold
+  // who actually buys a player like this: weighted by the real age / fee / origin profile of each kind of club
+  // (a 22-year-old worth ~4M goes to a Portuguese, Dutch, Belgian or mid-table side — not to Liverpool)
+  const buyer = pickBuyer(rng, jewel, clubGroupOf(sellerName, world), euroBuyerPool(), null, 0.0015);
+  if(!buyer) return; // nobody abroad is interested in this profile right now
+  const fee = Math.max(askingPrice(jewel, seller), premiumFee(jewel, clubGroupOf(buyer, world), rng) * (keyJewel ? 1.8 : 1));
   seller.players = seller.players.filter(p=>p.id!==jewel.id);
   if(!Array.isArray(world.globalMarket)) world.globalMarket = [];
-  world.globalMarket.push(Object.assign({}, jewel, {club:buyer, league:"European League"}));
+  world.globalMarket.push(Object.assign({}, jewel, {club:buyer, league:(TP.clubLeague&&TP.clubLeague[buyer])||"European League"}));
   recordTransferFeed({name:jewel.name, price:fee, fromClub:sellerName, toClub:buyer, pos:jewel.pos, ovr:jewel.ovr});
 }
 // lighter single-transaction versions of the season-end sweeps above, rolled from
@@ -4561,17 +4677,21 @@ function runSingleAISigning(rng){
   const inSlot = team.players.filter(p=>p.pos===pos || (p.altPos && p.altPos.includes(pos)));
   const best = inSlot.reduce((b,p)=> (!b||p.ovr>b.ovr)?p:b, null);
   if(best && best.ovr>=need) return;
-  const globalCands = eligibleGlobalCandidates(world, pos, tier);
+  let globalCands = eligibleGlobalCandidates(world, pos, tier);
+  { const saOnly = globalCands.filter(isSouthAmerican); if(saOnly.length && rng()>0.03) globalCands = saOnly; } // CONMEBOL clubs scout South Americans
+  { const sap = TP.saProfile && TP.saProfile[clubGroupOf(name, world)]; if(sap){ const afford = globalCands.filter(p=>tmValueEstimate(p) <= sap.maxValue); if(afford.length) globalCands = afford; } } // a South American club never pays a European superstar's price
   if(!globalCands.length) return;
+  const grp = clubGroupOf(name, world);
+  const maxFit = globalCands.reduce((m,p)=>Math.max(m,buyerFit(grp,p,clubGroupOf(p.club,world))),0.0001);
   const picked = pickWeighted(rng, globalCands, p=>{
     let s = 10;
-    if((SA_NEIGHBORS[team.country]||[]).includes(p.nat)) s += 25;
+    if((SA_NEIGHBORS[team.country]||[]).includes(natPt(p.nat))) s += 25;
     s += Math.max(0, 20 - Math.abs(p.ovr-need));
-    return s;
+    return s * (0.03 + buyerFit(grp,p,clubGroupOf(p.club,world))/maxFit) * (isKeyMarketPlayer(world,p)?0.12:1);
   });
   if(!picked) return;
   const fromClub = picked.club;
-  const fee = globalMarketAskingPrice(picked);
+  const fee = aiGlobalFee(picked, grp, rng);
   world.globalMarket = world.globalMarket.filter(p=>p.id!==picked.id);
   const joined = Object.assign({}, picked, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0, value:fee});
   delete joined.club; delete joined.league;
@@ -4585,11 +4705,11 @@ function runSingleGlobalReshuffle(rng){
   if(!clubNames.length) return;
   const p = pool[Math.floor(rng()*pool.length)];
   if(!p || !p.club || AI_EXCLUDED_CLUBS.has(p.club)) return;
-  let dest = clubNames[Math.floor(rng()*clubNames.length)];
-  let guard = 0;
-  while(dest===p.club && guard<5){ dest = clubNames[Math.floor(rng()*clubNames.length)]; guard++; }
-  if(dest===p.club) return;
-  const fee = Math.max(20000, Math.round((p.value || E.calcValue(p.ovr,p.age,p.pot)) * (0.9+rng()*0.4) / 5000) * 5000);
+  const keyP = isKeyMarketPlayer(ST.world, p);
+  if(keyP && rng()>0.25) return; // starters rarely move
+  const dest = pickBuyer(rng, p, clubGroupOf(p.club, ST.world), clubNames, p.club, 0.0);
+  if(!dest) return;
+  const fee = Math.max(Math.round(premiumFee(p, clubGroupOf(dest, ST.world), rng) * (keyP ? 1.6 : 1) / 5000) * 5000, keyP ? Math.round((p.value||0)*1.3/5000)*5000 : 0); // a starter never goes below ~1.3x his value
   recordTransferFeed({name:p.name, price:fee, fromClub:p.club, toClub:dest, pos:p.pos, ovr:p.ovr});
   p.club = dest;
   p.value = fee;
@@ -4761,6 +4881,7 @@ function globalMarketAskingPrice(p){
   else if(p.ovr>=74) f += 0.25;
   else f += 0.05;
   if(p.age<=21 && p.pot-p.ovr>=10) f += 0.35;
+  if(ST && ST.world && isKeyMarketPlayer(ST.world, p)) f *= KEY_PLAYER_PREMIUM; // a starter never leaves at market value
   return Math.round(p.value*f/5000)*5000;
 }
 function buyGlobalPlayer(playerId, offer){
@@ -5676,7 +5797,7 @@ function getNextUserMatch(){
 // caption line below it still says exactly how many days remain).
 // the match-day cell shows the actual opponent's crest (not a generic ball icon) — a tiny
 // preview of who's up, right on the calendar itself.
-function renderCalendarStrip(oppName, compType){
+function renderCalendarStrip(oppName, compType, wide){
   const days = ST.calendarDaysLeft;
   const todayIdx = ST.calendarWeekdayIdx;
   // how many more AVANÇAR DIA clicks until daysSinceTraining actually hits 2 and a training
@@ -5699,9 +5820,9 @@ function renderCalendarStrip(oppName, compType){
       <div class="cal-day-icon${isMatchDay?' cal-day-icon-trophy':''}">${icon}</div>
     </div>`;
   }
-  return `<div class="cal-panel mt16">
+  return `<div class="cal-panel mt16${wide?' cal-panel-wide':''}">
     <div class="cal-panel-title">Avançar</div>
-    <div class="cal-strip">${cells}</div>
+    <div class="cal-strip${wide?' cal-strip-wide':''}">${cells}</div>
   </div>`;
 }
 // "DIA DE TREINO" — interrupts the calendar every 2 days to show the squad's individual
@@ -5771,7 +5892,7 @@ function renderLevelUpCard(name, pos, fromOvr, toOvr, delayMs){
 // grid), not the persistent header. compact:true is the small square-ish version used in the
 // Brasileirão career's left column (smaller crests, tighter spacing, no time-config shortcut)
 // so the table still owns most of the row and the page fits without scrolling.
-function renderNextMatchCard(compact){
+function renderNextMatchCard(compact, wide){
   const nm = getNextUserMatch();
   if(!nm){
     // safety valve: the Brasileirão itself is already done and there's genuinely no personal
@@ -5793,7 +5914,7 @@ function renderNextMatchCard(compact){
   ensureCalendarCountdown();
   const days = ST.calendarDaysLeft;
   const oppName = nm.home===ST.teamId ? nm.away : nm.home;
-  const crestSize = compact ? 40 : 64;
+  const crestSize = compact ? 40 : wide ? 92 : 64;
   const timeConfigBtn = `<div class="btn-row center mt8">
          <button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button>
        </div>`;
@@ -5808,21 +5929,21 @@ function renderNextMatchCard(compact){
          <button class="btn ${compact?'btn-sm':''}" onclick="Game.advanceFast()">⏭ ${compact?'Resultado':'Ir para o Resultado'}</button>
        </div>
        ${timeConfigBtn}`
-    : `${renderCalendarStrip(oppName, nm.compType)}
+    : `${renderCalendarStrip(oppName, nm.compType, wide)}
        ${nm.compType==="copa"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">Copa do Brasil</div>':nm.compType==="sulamericana"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">CONMEBOL Sul-Americana</div>':nm.compType==="libertadores"?'<div class="tac gold bold tiny uc mt8" style="letter-spacing:.06em;color:#4ee14e;">CONMEBOL Libertadores</div>':''}
        <div class="tac dim small mt8">Próximo jogo em ${days} dia${days===1?"":"s"}</div>
        <div class="btn-row center ${compact?'mt8':'mt16'}">
          <button class="btn btn-gold ${compact?'':'btn-lg'}" onclick="Game.advanceDay()">AVANÇAR DIA</button>
        </div>
        ${timeConfigBtn}`;
-  return `<div class="panel" style="text-align:center;${compact?'padding:14px;':''}">
+  return `<div class="panel${wide?' next-match-wide':''}" style="text-align:center;${compact?'padding:14px;':''}">
     <div class="faint tiny uc mb12">${esc(nm.label)}</div>
-    <div class="row center" style="gap:${compact?'16px':'28px'};">
+    <div class="row center" style="gap:${compact?'16px':wide?'clamp(28px,9vw,120px)':'28px'};">
       <div style="width:${crestSize+26}px;">
         <div style="width:${crestSize}px;height:auto;margin:0 auto;">${clubCrestImg(nm.home,crestSize,null)}</div>
         <div class="bold small mt8">${esc(nm.home)}</div>
       </div>
-      <div class="faint" style="font-family:var(--font-display);font-size:${compact?'16px':'22px'};font-weight:800;">VS</div>
+      <div class="faint" style="font-family:var(--font-display);font-size:${compact?'16px':wide?'38px':'22px'};font-weight:800;">VS</div>
       <div style="width:${crestSize+26}px;">
         <div style="width:${crestSize}px;height:auto;margin:0 auto;">${clubCrestImg(nm.away,crestSize,null)}</div>
         <div class="bold small mt8">${esc(nm.away)}</div>
@@ -6020,15 +6141,51 @@ function renderCopaDoBrasilPanel(){
 // the "próximo jogo" card (compact) anchors the left column here; the tab otherwise sticks to
 // what's actually happening, contratações and the latest e-mails, sized to fit in one view.
 // Artilheiros/assistências (top 25 each) and the full 20-team table moved to DESEMPENHO.
-function renderBrasileiraoCompeticaoTab(){
-  /* the home screen is deliberately static: the same three boxes (next match, last e-mail, Fabrizio Romano) in the same place and at the same size whatever competition is being played - only the text inside changes. No tables or brackets here; those all live in the Desempenho tab. */
-  const card = renderNextMatchCard(false) || `<div class="panel" style="text-align:center;"><div class="faint tiny uc mb12">Temporada ${ST.seasonYear}</div><p class="dim small">Nenhuma partida marcada no momento.</p></div>`;
-  return `<div class="competicao-grid comp-home">
-    <div class="competicao-col">
-      <div class="comp-home-match">${card}</div>
-      <div class="comp-home-mail">${renderLatestEmailCard()}</div>
+// which competition the NEXT match belongs to decides whose top scorers the home screen shows —
+// a Libertadores week shows the Libertadores table, a Copa do Brasil week the Copa's, and so on.
+function nextCompetitionStats(){
+  const nm = getNextUserMatch();
+  const t = nm ? nm.compType : "brasileirao";
+  if(t==="copa" && ST.copaDoBrasil) return {store:ST.copaDoBrasil, title:"Copa do Brasil"};
+  if(t==="libertadores" && ST.libertadoresCompleto) return {store:ST.libertadoresCompleto, title:"Libertadores"};
+  if(t==="sulamericana" && ST.sulamericana) return {store:ST.sulamericana, title:"Sul-Americana"};
+  if(t==="intercontinental" && ST.intercontinental) return {store:ST.intercontinental, title:"Mundial de Clubes"};
+  return {store:ST.brasileirao, title:"Brasileirão"};
+}
+function renderWeekScorersCard(){
+  const info = nextCompetitionStats();
+  const rows = compTopScorersFull(info.store, 8);
+  const head = `<div class="row" style="justify-content:space-between;align-items:baseline;">
+      <div class="panel-title" style="margin:0;">⚽ ARTILHEIROS</div>
+      <div class="tiny faint uc">${esc(info.title)}</div>
+    </div>`;
+  if(!rows.length){
+    return `<div class="panel">${head}<div class="faint tiny mt8">Nenhum gol registrado ainda nesta competição. Os artilheiros aparecem aqui assim que a bola rolar.</div></div>`;
+  }
+  return `<div class="panel">${head}
+    <div class="comp-scorers-list">
+    ${rows.map((r,i)=>{
+      const pl = playerById(r.team, r.id) || {id:r.id, name:r.name};
+      return `<div class="comp-scorer-row ${r.team===ST.teamId?'is-user':''}">
+        <span class="comp-scorer-rank">${i+1}</span>
+        ${playerFaceImg(pl,30)}
+        <div class="comp-scorer-body"><div class="bold">${esc(r.name)}</div><div class="tiny dim">${clubCrestImg(r.team,14,null)} ${esc(r.team)}</div></div>
+        <span class="comp-scorer-goals gold bold mono">${r.goals}</span>
+      </div>`;
+    }).join("")}
     </div>
-    <div class="comp-home-news">${renderFabrizioRomanoCard()}</div>
+  </div>`;
+}
+function renderBrasileiraoCompeticaoTab(){
+  /* the home screen is deliberately static: a wide "próximo jogo" card on top, then three equal square boxes (Fabrizio Romano, the artilheiros of whichever competition the next match belongs to, last e-mail) - only the text inside changes. No tables or brackets here; those all live in the Desempenho tab. */
+  const card = renderNextMatchCard(false, true) || `<div class="panel" style="text-align:center;"><div class="faint tiny uc mb12">Temporada ${ST.seasonYear}</div><p class="dim small">Nenhuma partida marcada no momento.</p></div>`;
+  return `<div class="comp-home2">
+    <div class="comp-home2-match">${card}</div>
+    <div class="comp-home2-boxes">
+      <div class="comp-box">${renderFabrizioRomanoCard()}</div>
+      <div class="comp-box">${renderWeekScorersCard()}</div>
+      <div class="comp-box">${renderLatestEmailCard()}</div>
+    </div>
   </div>`;
 }
 // last N rounds' results for a club, most recent first — read straight off the fixed
@@ -8450,5 +8607,5 @@ if(typeof document !== "undefined"){
   else startBoot();
 }
 
-window.__APP_INTERNALS__ = { newCareerState, startCareer, advanceTournament, render, tierOf, buildJobOffers, teamAvgOvr, get ST(){return ST;}, set ST(v){ST=v;} };
+window.__APP_INTERNALS__ = { newCareerState, startCareer, advanceTournament, render, tierOf, buildJobOffers, teamAvgOvr, globalMarketAskingPrice, isKeyMarketPlayer, dailyTransferTick, runEuropeanPoaching, runSingleAISigning, runSingleGlobalReshuffle, nextSeed, E, get ST(){return ST;}, set ST(v){ST=v;} };
 
