@@ -642,7 +642,7 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.seasonNum = 1;
   ST.seasonYear = 2026;
   ST.reputation = 50;
-  ST.budget = 6000000;
+  ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tierOf(ST.world, teamId)]; // starting kitty follows the club's own level
   ST.history = [];
   ST.newsLog = [{title:"Bem-vindo!", text:`${ST.managerName} assume o comando do ${teamId} para a campanha de ${ST.seasonYear} do Brasileirão Série A.`}];
   ST.stage = "hub";
@@ -5499,8 +5499,13 @@ function renderSiteNav(hasCareer){
       <span><span class="mgr-brand-name">THE <b>MANAGER</b></span><small>SIMULADOR DE TÉCNICO</small></span>
     </button>
     <div class="mgr-top-right">
-      <div class="site-nav-social">
-        <a href="https://www.instagram.com/_thefenomeno/" target="_top" onclick="Game.openInstagram(event)">📷 @_thefenomeno</a>
+      <div class="mgr-social">
+        <a href="https://www.instagram.com/_thefenomeno/" target="_blank" rel="noopener noreferrer" aria-label="Instagram @_thefenomeno" title="Instagram @_thefenomeno" onclick="Game.openExternal(event,'https://www.instagram.com/_thefenomeno/')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5.5"></rect><circle cx="12" cy="12" r="4.2"></circle><circle cx="17.4" cy="6.6" r="1.1" fill="currentColor" stroke="none"></circle></svg>
+        </a>
+        <a href="https://www.tiktok.com/@_thefenomeno" target="_blank" rel="noopener noreferrer" aria-label="TikTok @_thefenomeno" title="TikTok @_thefenomeno" onclick="Game.openExternal(event,'https://www.tiktok.com/@_thefenomeno')">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>
+        </a>
       </div>
       <button class="nav-jogar-btn mgr-nav-btn" onclick="${hasCareer?"Game.continueCareer()":"Game.goNewGame()"}">${hasCareer?"CONTINUAR":"JOGAR"}</button>
     </div>
@@ -5521,9 +5526,10 @@ function renderHome(){
     ${renderNewsTicker()}
     ${renderSiteNav(hasCareer)}
     <section class="mgr-hero">
-      ${renderPitchMarks()}
+      <div class="mgr-hero-logo"><img src="/images/the-manager-logo.png" alt="THE MANAGER" width="1000" height="514" decoding="async"/></div>
+      <div class="mgr-hero-copy">
       <div class="mgr-eyebrow">Simulador de carreira · Brasileirão 2026</div>
-      <h1 class="mgr-title">Você é<span>THE MANAGER?</span></h1>
+      <h1 class="mgr-title">THE MANAGER,<span>11 EM CAMPO e 1 NO COMANDO.</span></h1>
       <p class="mgr-desc">Assuma um dos 20 clubes da Série A. Escale, negocie, contrate e faça o elenco evoluir — e descubra se você aguenta 10 temporadas no comando sem ser demitido.</p>
       <div class="mgr-cta">
         ${hasCareer ? `
@@ -5538,6 +5544,7 @@ function renderHome(){
         <div class="mgr-stat"><b>20</b><span>clubes da Série A</span></div>
         <div class="mgr-stat"><b>+9 MIL</b><span>jogadores</span></div>
         <div class="mgr-stat"><b>10</b><span>temporadas</span></div>
+      </div>
       </div>
     </section>
     ${renderBottomMarquee()}
@@ -6953,12 +6960,12 @@ function renderTransfersTab(){
   ensureGlobalMarket();
   ensurePrelibMarket();
 
-  const modeToggle = `<div class="btn-row mb16 xfer-mode-toggle">
+  const modeToggle = `<div class="btn-row xfer-mode-toggle">
     <button class="btn ${mode==='buy'?'btn-gold':''}" onclick="Game.setXferFilter('mode','buy')">Contratar</button>
     <button class="btn ${mode==='sell'?'btn-gold':''}" onclick="Game.setXferFilter('mode','sell')">Vender</button>
   </div>`;
 
-  return modeToggle + (mode==="sell" ? renderXferSellSubTab(f) : renderXferBuySubTab(f));
+  return `<div class="xfer-page">${modeToggle}${mode==="sell" ? renderXferSellSubTab(f) : renderXferBuySubTab(f)}</div>`;
 }
 function renderXferSellSubTab(f){
   const posOptions = ["GK","CB","LB","RB","DMF","CM","AM","LM","RM","LW","RW","ST"];
@@ -6991,7 +6998,7 @@ function renderPotCell(teamKey, p){
 function renderXferBuySubTab(f){
   const source = f.source || "libertadores";
   const posOptions = ["GK","CB","LB","RB","DMF","CM","AM","LM","RM","LW","RW","ST"];
-  const toggle = `<div class="btn-row mb16">
+  const toggle = `<div class="btn-row xfer-source-toggle">
     <button class="btn btn-sm ${source==='libertadores'?'btn-gold':''}" onclick="Game.setXferFilter('source','libertadores')">${ST.mode==="brasileirao"?"Times do Brasileirão":"Times da Libertadores"}</button>
     <button class="btn btn-sm ${source==='global'?'btn-gold':''}" onclick="Game.setXferFilter('source','global')">Mercado Global</button>
     <button class="btn btn-sm ${source==='fa'?'btn-gold':''}" onclick="Game.setXferFilter('source','fa')">Free Agents</button>
@@ -8389,6 +8396,12 @@ function renderCareerOver(){
 // ============================================================
 const Game = {
   goHome(){ ST.stage="home"; render(); },
+  openExternal(ev, url){
+    // same escape hatches as the Instagram link — the game may run inside a sandboxed iframe
+    try{ window.open(url, "_blank", "noopener,noreferrer"); }catch(e){}
+    try{ if(window.top && window.top!==window) window.top.location.href = url; }catch(e){}
+    if(ev && ev.preventDefault) ev.preventDefault();
+  },
   openInstagram(ev){
     const url = "https://www.instagram.com/_thefenomeno/";
     // try every plausible escape hatch — sandboxed iframes vary in what they allow.
