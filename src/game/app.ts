@@ -274,7 +274,8 @@ function faceTmByName(name: string, pos?: string){
 }
 function faceImgTag(tm: number, w: number, h: number, cls?: string){
   if(!tm) return "";
-  return `<img class="pface ${cls||''}" src="${FACE_CDN}${tm}.png" alt="" width="${w}" height="${h}" loading="lazy" style="width:${w}px;height:${h}px;" onerror="var a=window.__faceAlt&&window.__faceAlt['${tm}'];if(a&&!this.dataset.fb){this.dataset.fb=1;this.src=window.__faceAltBase+a;}else{this.remove();}"/>`;
+  // CDN copy -> Transfermarkt copy (once) -> the anonymous silhouette, never an empty gap
+  return `<img class="pface ${cls||''}" src="${FACE_CDN}${tm}.png" alt="" width="${w}" height="${h}" loading="lazy" style="width:${w}px;height:${h}px;" onerror="var a=window.__faceAlt&&window.__faceAlt['${tm}'];if(a&&!this.dataset.fb){this.dataset.fb=1;this.src=window.__faceAltBase+a;}else{this.outerHTML=window.__anonFace(${w},${h},this.className);}"/>`;
 }
 /* no portrait: a black anonymous-person silhouette on a light disc, same size and round shape as a real photo (an inline SVG, not an emoji) */
 function anonFaceTag(size: number, cls?: string){
@@ -287,6 +288,9 @@ function playerFolderPhoto(p: any){
   if(img) return img;
   return `<span class="pface pface-folder pface-anon" style="width:78px;height:101px;"><svg viewBox="0 0 24 24" width="62" height="62" aria-hidden="true"><circle cx="12" cy="8.6" r="4.3" fill="#111"/><path d="M3.6 23c0-5 3.7-8.4 8.4-8.4s8.4 3.4 8.4 8.4z" fill="#111"/></svg></span>`;
 }
+(window as any).__anonFace = (w: number, h: number, cls: string) => (cls||"").indexOf("pface-folder")>=0
+  ? `<span class="pface pface-folder pface-anon" style="width:${w}px;height:${h}px;"><svg viewBox="0 0 24 24" width="62" height="62" aria-hidden="true"><circle cx="12" cy="8.6" r="4.3" fill="#111"/><path d="M3.6 23c0-5 3.7-8.4 8.4-8.4s8.4 3.4 8.4 8.4z" fill="#111"/></svg></span>`
+  : anonFaceTag(w, (cls||"").replace(/\bpface-anon\b|\bpface\b/g,"").trim());
 const TEAM_KIT_OUTFIELD = {
   "Flamengo": "/images/kits/outfield/outfield/flamengo.png",
   "Estudiantes": "/images/kits/outfield/outfield/estudiantes.png",
@@ -2798,7 +2802,7 @@ function startShootout(teamAName, teamBName, resolveCtx){
   const teamAObj = ST.world.teams[teamAName];
   const teamBObj = ST.world.teams[teamBName];
   function lineupFor(teamObj, teamName){
-    if(teamName===ST.teamId) return lineupPlayers().filter(Boolean);
+    if(teamName===ST.teamId) return lineupPlayers().filter(p=>p && !p.injured && !p.suspended);
     return E.bestAvailableXI(teamObj, "4-3-3").lineup.filter(Boolean);
   }
   const orderA = pickShootoutOrder(lineupFor(teamAObj, teamAName), teamAObj);
@@ -3912,12 +3916,40 @@ function autoFinishRest(){
   endOfSeason();
 }
 
+// starters who can't play today (injured / suspended) — the lineup itself is NOT touched by this
+function unavailableStarterSlots(){
+  const out = [];
+  lineupPlayers().forEach((p,i)=>{ if(p && (p.injured||p.suspended)) out.push(i); });
+  return out;
+}
+// the XI that actually takes the pitch: the saved lineup, or this match's own substitutions (ST.matchLineupOverride)
+function matchLineupPlayers(){
+  const base = (ST.matchLineupOverride && ST.matchLineupOverride.length===ST.lineup.length) ? ST.matchLineupOverride : ST.lineup;
+  return base.map(id => id ? playerById(ST.teamId, id) : null);
+}
+// best available replacement for each unavailable slot, for THIS match only
+function buildAutoSubstitutes(){
+  const slots = slotsForFormation();
+  const ids = ST.lineup.slice();
+  const used = new Set(ids.filter(Boolean));
+  unavailableStarterSlots().forEach(i=>{
+    const slot = slots[i];
+    const pool = myTeam().players.filter(p=>!p.injured && !p.suspended && !used.has(p.id));
+    const compat = pool.filter(p=>slotCompatible(p, slot));
+    const pick = (compat.length ? compat : pool.filter(p=>(slot==="GK")===(p.pos==="GK"))).sort((a,b)=>((b.pos===slot)-(a.pos===slot)) || (b.ovr-a.ovr))[0];
+    if(pick){ ids[i] = pick.id; used.add(pick.id); }
+  });
+  return ids;
+}
 function goToMatchDay(matchRef, context){
-  if(!lineupIsValid()) autoFillLineup();
+  ST.matchLineupOverride = null;
+  if(ST.lineup.length===0 || lineupPlayers().some(p=>!p)) autoFillLineup(); // only an EMPTY slot rebuilds the XI
   ST.pendingMatch = { ref:matchRef, context, result:null };
   ST.stage = "match";
   ST.matchPlaying = false;
   ST.matchAnimIdx = 0;
+  // injured/suspended starters: ask what to do instead of silently reshuffling the whole team
+  if(unavailableStarterSlots().length) ST.uiModal = {type:"injuredStarters"};
 }
 
 function simulatePendingMatch(){
@@ -3925,7 +3957,8 @@ function simulatePendingMatch(){
   const home = pm.ref.home, away = pm.ref.away;
   const userIsHome = home===ST.teamId;
   const oppName = userIsHome ? away : home;
-  const myXI = { lineup: lineupPlayers(), slots: slotsForFormation() };
+  if(!ST.matchLineupOverride && unavailableStarterSlots().length) ST.matchLineupOverride = buildAutoSubstitutes();
+  const myXI = { lineup: matchLineupPlayers(), slots: slotsForFormation() };
   const oppXI = E.bestAvailableXI(ST.world.teams[oppName], "4-3-3");
   const homeXI = userIsHome ? myXI : oppXI;
   const awayXI = userIsHome ? oppXI : myXI;
@@ -4023,25 +4056,36 @@ function resolveAllPendingPenalties(pm){
 // used by the "Próximo Jogo" card on the Competição tab: resolves the round's other
 // fixtures, then immediately simulates the user's own match at the chosen pace —
 // "slow" reveals the event ticker live, "fast" jumps straight to the final result.
+function runPendingSimulation(speed){
+  simulatePendingMatch();
+  if(speed==="fast"){
+    resolveAllPendingPenalties(ST.pendingMatch);
+    ST.matchAnimIdx = ST.pendingMatch.result.events.length;
+    // matchAnimDone() checks matchClockMinute (not matchAnimIdx) whenever the persisted
+    // ST.matchSpeed is "slow" — without this, "Ir para o Resultado" would still fall through
+    // to the minute-by-minute ticker (stuck at minute 0) instead of landing on the result
+    // instantly, if the user had "LENTA" selected in CONFIGURAÇÃO DE TEMPO.
+    ST.matchClockMinute = 90;
+  }
+}
 function advanceWithSpeed(speed){
   advanceTournament();
   if(ST.stage==="match" && ST.pendingMatch && !ST.pendingMatch.result){
-    simulatePendingMatch();
-    if(speed==="fast"){
-      resolveAllPendingPenalties(ST.pendingMatch);
-      ST.matchAnimIdx = ST.pendingMatch.result.events.length;
-      // matchAnimDone() checks matchClockMinute (not matchAnimIdx) whenever the persisted
-      // ST.matchSpeed is "slow" — without this, "Ir para o Resultado" would still fall through
-      // to the minute-by-minute ticker (stuck at minute 0) instead of landing on the result
-      // instantly, if the user had "LENTA" selected in CONFIGURAÇÃO DE TEMPO.
-      ST.matchClockMinute = 90;
-    }
+    // injured/suspended starters: the pop-up asks first, the match is simulated once the user has chosen
+    if(ST.uiModal && ST.uiModal.type==="injuredStarters"){ ST.pendingSpeed = speed; return; }
+    runPendingSimulation(speed);
   }
+}
+// once the user has decided who replaces the unavailable starters, carry on with the match they asked for
+function resumeAfterLineupChoice(){
+  const sp = ST.pendingSpeed; ST.pendingSpeed = null;
+  if(sp && ST.stage==="match" && ST.pendingMatch && !ST.pendingMatch.result) runPendingSimulation(sp);
 }
 
 function finishPendingMatch(){
   const pm = ST.pendingMatch;
   if(!pm) return; // guards against a stray double-invocation finding nothing left to finish
+  ST.matchLineupOverride = null; // this match's substitutions were one-off; the saved XI is untouched
   generatePostMatchMail(pm); // injury recap for the user's own squad, if anyone got hurt
   ST.calendarDaysLeft = null; // the next fixture gets its own fresh 3-4 day countdown
   ST.matchesPlayedTotal = (ST.matchesPlayedTotal||0)+1; // gates the scout-report cooldown
@@ -4328,6 +4372,7 @@ function ageWorld(){
   // trains their way further and further ahead every year.
   runAITransferWindow(rng);
   runGlobalClubReshuffle(rng);
+  for(let i=0;i<22;i++) runFreeAgentSigning(rng); // summer wave: a good share of the free agents find a club
   // a proper "summer window" wave of Libertadores prospects leaving for Europe, on top of
   // whatever already trickled in day by day during the season via dailyTransferTick().
   const jewelSales = 2 + Math.floor(rng()*3); // 2-4 per season
@@ -4727,6 +4772,7 @@ function dailyTransferTick(){
   // signing), so the counter always reflects real calendar time, not just "days with news".
   ST.dayCounter = (ST.dayCounter||0)+1;
   const rng = E.makeRNG(nextSeed());
+  if(rng() < 0.07) runFreeAgentSigning(rng); // the free-agent pool keeps shrinking all career long
   if(rng() > 0.32) return;
   const roll = rng();
   if(roll < 0.45) runSingleAISigning(rng);
@@ -4865,10 +4911,89 @@ function makeOffer(playerId, sellerTeamName, offer){
 }
 
 // ---- global market (players outside the Libertadores — from clubs that never play the competition) ----
+// ---------- free agents ----------
+// A free agent costs only the signing fee + his first-year salary — never the market value — but the pool is
+// contested: AI clubs keep signing them all career long, and a player won't join a club far below his level.
+function isFreeAgent(p){ return p && p.club==="Free Agents"; }
+function freeAgentCost(p){
+  const v = p.value || E.calcValue(p.ovr, p.age, p.pot);
+  const fee = Math.max(25000, Math.round(v*0.10/5000)*5000);
+  const wage = Math.max(40000, Math.round(v*(p.age>=31?0.28:p.age<=23?0.18:0.22)/5000)*5000);
+  return {fee, wage, total: fee+wage};
+}
+function freeAgentWillSign(p){
+  const tier = tierOf(ST.world, ST.teamId);
+  return p.ovr <= aiSignerBudgetCeiling(tier) + 4;
+}
+// 80+ rated players never start a career unattached: they belong to a club (only 79 and below float around
+// and get picked up as the seasons go by)
+function placeTopFreeAgents(world){
+  if(world._faPlaced) return;
+  world._faPlaced = true;
+  const rng = E.makeRNG(20260);
+  const pool = euroBuyerPool();
+  world.globalMarket.forEach(p=>{
+    if(isFreeAgent(p) && p.ovr>=80){
+      const dest = pickBuyer(rng, p, "OTHER", pool, null, 0) || pool[Math.floor(rng()*pool.length)];
+      p.club = dest; p.league = (TP.clubLeague&&TP.clubLeague[dest]) || "European League";
+    }
+  });
+}
+function runFreeAgentSigning(rng){
+  const world = ST.world;
+  if(!world || !world.globalMarket) return;
+  const pool = world.globalMarket.filter(isFreeAgent);
+  if(!pool.length) return;
+  // the better and younger ones go first
+  const p = pickWeighted(rng, pool, x=>Math.max(1, x.ovr-62) * (x.age<=31 ? 1.5 : 1));
+  if(!p) return;
+  const fee = freeAgentCost(p).fee;
+  const sa = isSouthAmerican(p);
+  const needy = Object.keys(world.teams).filter(n=>{
+    if(n===ST.teamId) return false;
+    const t = world.teams[n], tier = tierOf(world, n);
+    if(p.ovr > aiSignerBudgetCeiling(tier)+2 || p.ovr < positionNeedThreshold(tier)-10) return false;
+    const best = t.players.filter(q=>q.pos===p.pos || (q.altPos && q.altPos.includes(p.pos))).reduce((m,q)=>Math.max(m,q.ovr),0);
+    return best < p.ovr+4;
+  });
+  if(needy.length && rng() < (sa ? 0.7 : 0.25)){
+    const dest = needy[Math.floor(rng()*needy.length)];
+    world.globalMarket = world.globalMarket.filter(x=>x.id!==p.id);
+    const joined = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0});
+    delete joined.club; delete joined.league;
+    world.teams[dest].players.push(joined);
+    recordTransferFeed({name:p.name, price:fee, fromClub:"Free Agents", toClub:dest, pos:p.pos, ovr:p.ovr});
+    return;
+  }
+  const clubNames = Object.keys(GLOBAL_TEAM_CRESTS).filter(n=>!AI_EXCLUDED_CLUBS.has(n) && !LEGACY_PLACEHOLDER_CLUBS.has(n));
+  const dest = pickBuyer(rng, p, "OTHER", clubNames, null, 0);
+  if(!dest) return;
+  p.club = dest; p.league = (TP.clubLeague&&TP.clubLeague[dest]) || "European League";
+  recordTransferFeed({name:p.name, price:fee, fromClub:"Free Agents", toClub:dest, pos:p.pos, ovr:p.ovr});
+}
+function signFreeAgent(playerId){
+  ensureGlobalMarket();
+  const p = ST.world.globalMarket.find(x=>x.id===playerId);
+  if(!p || !isFreeAgent(p)) return {ok:false, msg:"Esse jogador já assinou com outro clube."};
+  if(!freeAgentWillSign(p)) return {ok:false, msg:`${p.name} não aceita o projeto do ${ST.teamId} — procura um clube do nível dele.`};
+  const c = freeAgentCost(p);
+  if(c.total>ST.budget) return {ok:false, msg:"Orçamento insuficiente."};
+  ST.world.globalMarket = ST.world.globalMarket.filter(x=>x.id!==playerId);
+  const joined = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0});
+  delete joined.club; delete joined.league;
+  myTeam().players.push(joined);
+  ST.budget -= c.total;
+  ST.newsLog.unshift({title:"Contratação sem custo de transferência!", text:`${p.name} (free agent) assina com o ${ST.teamId}: taxa ${fmtMoney(c.fee)} + salário ${fmtMoney(c.wage)}.`});
+  recordCareerSigning(p.name, c.total);
+  recordTransferFeed({name:p.name, price:c.fee, fromClub:"Free Agents", toClub:ST.teamId, pos:p.pos, ovr:p.ovr});
+  scheduleSave();
+  return {ok:true, msg:`${p.name} assinou como free agent.`};
+}
 function ensureGlobalMarket(){
   if(!ST.world.globalMarket){
     ST.world.globalMarket = GLOBAL_MARKET_SRC.map(p=>Object.assign({}, p));
   }
+  placeTopFreeAgents(ST.world);
 }
 function globalMarketAskingPrice(p){
   // buying from outside the Libertadores carries a heavy import/agent premium —
@@ -6869,10 +6994,48 @@ function renderXferBuySubTab(f){
   const toggle = `<div class="btn-row mb16">
     <button class="btn btn-sm ${source==='libertadores'?'btn-gold':''}" onclick="Game.setXferFilter('source','libertadores')">${ST.mode==="brasileirao"?"Times do Brasileirão":"Times da Libertadores"}</button>
     <button class="btn btn-sm ${source==='global'?'btn-gold':''}" onclick="Game.setXferFilter('source','global')">Mercado Global</button>
+    <button class="btn btn-sm ${source==='fa'?'btn-gold':''}" onclick="Game.setXferFilter('source','fa')">Free Agents</button>
   </div>`;
 
+  if(source==="fa"){
+    ensureGlobalMarket();
+    let list = ST.world.globalMarket.filter(isFreeAgent);
+    if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
+    if(f.ageMin!=null) list = list.filter(p=>p.age>=f.ageMin);
+    if(f.ageMax!=null) list = list.filter(p=>p.age<=f.ageMax);
+    if(f.q){ const q = f.q.toLowerCase(); list = list.filter(p=>p.name.toLowerCase().includes(q) || (p.nat||"").toLowerCase().includes(q)); }
+    list = sortXferList(list, f.sort);
+    const {shown, page, totalPages} = paginateXferList(list, f.page);
+    return `${toggle}
+    <div class="xfer-layout">
+      <aside class="xfer-sidebar">
+        <div class="xfer-filter-label" style="margin-bottom:10px;">Filtros</div>
+        ${renderXferSidebar(f, posOptions, null)}
+      </aside>
+      <div class="xfer-main">
+        <div class="dim tiny mb8">Jogadores sem clube: você paga só a <b>taxa de contratação + o salário</b>, não o valor de mercado. Mas os clubes também contratam — quem demora, perde. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
+        <div class="scroll-x"><table class="data"><thead><tr>
+          <th>Jogador</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Taxa</th><th class="tac">Salário</th><th class="tac">Total</th><th></th>
+        </tr></thead><tbody>
+        ${shown.map(p=>{ const c = freeAgentCost(p), ok = freeAgentWillSign(p); return `<tr>
+          <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></span></span></td>
+          <td>${posBadges(p)}</td>
+          <td class="tac">${p.age}</td>
+          <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
+          <td class="tac">${renderPotCell("global",p)}</td>
+          <td class="tac mono">${fmtMoney(c.fee)}</td>
+          <td class="tac mono">${fmtMoney(c.wage)}</td>
+          <td class="tac mono gold bold">${fmtMoney(c.total)}</td>
+          <td>${ok ? `<button class="btn btn-sm btn-gold" onclick="Game.openFaModal(${p.id})">Contratar</button>` : `<span class="faint tiny" title="Não aceita um clube desse nível">Recusa</span>`}</td>
+        </tr>`; }).join("")}
+        </tbody></table></div>
+        ${renderXferPagination(page, totalPages)}
+      </div>
+    </div>`;
+  }
+
   if(source==="global"){
-    let list = ST.world.globalMarket.slice();
+    let list = ST.world.globalMarket.filter(p=>!isFreeAgent(p));
     if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
     if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
     if(f.ageMin!=null) list = list.filter(p=>p.age>=f.ageMin);
@@ -6911,7 +7074,7 @@ function renderXferBuySubTab(f){
     `;
   }
 
-  const teamOptions = Object.keys(ST.world.teams).concat(PRELIB_MARKET_TEAM_NAMES).sort();
+  const teamOptions = Array.from(new Set(Object.keys(ST.world.teams).concat(PRELIB_MARKET_TEAM_NAMES))).sort();
   ensurePrelibMarket();
   let list = allPlayersList(ST.teamId).map(x=>Object.assign({}, x.p, {_team:x.team}))
     .concat(ST.world.prelibMarket.map(p=>Object.assign({}, p, {_team:p.club})));
@@ -7383,16 +7546,24 @@ function renderMatch(){
       if(ev.assist) assisters[ev.assist] = (assisters[ev.assist]||0)+1;
     }
   });
-  function playerIcons(name, id){
+  const redCards = new Set(), yellowCards = new Set();
+  visibleEvents.forEach(ev=>{
+    if(ev.type==="red") redCards.add(ev.side+"|"+ev.player);
+    if(ev.type==="yellow") yellowCards.add(ev.side+"|"+ev.player);
+  });
+  function playerIcons(name, id, side){
     let out = "";
     if(scorers[name]) out += " " + "⚽".repeat(scorers[name]);
     if(assisters[name]) out += " " + "🥾".repeat(assisters[name]);
+    if(redCards.has(side+"|"+name)) out += " 🟥";
+    else if(yellowCards.has(side+"|"+name)) out += " 🟨";
     if(done && id===motmId) out += " ⭐";
     return out;
   }
+  const sentOff = (name, side) => redCards.has(side+"|"+name) ? " sent-off" : "";
 
-  const homeLineupList = pm.homeLineup ? pm.homeLineup.map((p,i)=>p?`<div class="lineup-row"><span class="badge badge-pos">${pm.homeSlots[i]}</span><span>${esc(p.name)}${playerIcons(p.name,p.id)}</span></div>`:"").join("") : "";
-  const awayLineupList = pm.awayLineup ? pm.awayLineup.map((p,i)=>p?`<div class="lineup-row"><span class="badge badge-pos">${pm.awaySlots[i]}</span><span>${esc(p.name)}${playerIcons(p.name,p.id)}</span></div>`:"").join("") : "";
+  const homeLineupList = pm.homeLineup ? pm.homeLineup.map((p,i)=>p?`<div class="lineup-row${sentOff(p.name,"home")}"><span class="badge badge-pos">${pm.homeSlots[i]}</span><span>${esc(p.name)}${playerIcons(p.name,p.id,"home")}</span></div>`:"").join("") : "";
+  const awayLineupList = pm.awayLineup ? pm.awayLineup.map((p,i)=>p?`<div class="lineup-row${sentOff(p.name,"away")}"><span class="badge badge-pos">${pm.awaySlots[i]}</span><span>${esc(p.name)}${playerIcons(p.name,p.id,"away")}</span></div>`:"").join("") : "";
 
   // ---- match stats (possession / shots / shots on target / momentum flow) ----
   const shotsHome = visibleEvents.filter(e=>e.side==="home"&&["goal","miss","save","block"].includes(e.type)).length;
@@ -7597,9 +7768,84 @@ function renderPenaltyKickModal(m){
   </div>`;
 }
 // ---------------- MODAL ----------------
+function renderInjuredStartersModal(m){
+  const slots = slotsForFormation();
+  const bad = unavailableStarterSlots().map(i=>({i, p:lineupPlayers()[i], slot:slots[i]}));
+  return `<div class="modal-backdrop">
+    <div class="modal">
+      <div class="hero-badge" style="margin:0 auto 10px;">DIA DE JOGO</div>
+      <div class="panel-title">Você tem atleta(s) fora no time titular</div>
+      <div class="slot-pick-list" style="margin-bottom:12px;">
+        ${bad.map(b=>`<div class="slot-pick-row unavailable"><div class="slot-pick-main">${playerFaceImg(b.p,34)}<span class="badge badge-pos">${b.slot}</span><span class="bold">${esc(b.p.name)}</span>${statusBadges(b.p)}</div></div>`).join("")}
+      </div>
+      <p class="dim small" style="margin:0 0 14px;">Gostaria de:</p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button class="btn btn-gold btn-lg" onclick="Game.injuredAuto()">Substituir automaticamente para você</button>
+        <button class="btn btn-lg" onclick="Game.injuredManual()">Você substitui por atleta da sua preferência</button>
+      </div>
+      <p class="faint tiny" style="margin:14px 0 0;">A troca vale só para ESTE jogo. O atleta continua na escalação e só sai dela se você trocar na aba Elenco.</p>
+    </div>
+  </div>`;
+}
+function renderInjuredPickModal(m){
+  const slots = slotsForFormation();
+  const used = new Set(ST.lineup.filter(Boolean));
+  const rows = unavailableStarterSlots().map(i=>{
+    const slot = slots[i], out = lineupPlayers()[i];
+    const chosen = (m.picks||{})[i];
+    const taken = new Set(Object.entries(m.picks||{}).filter(([k,v])=>Number(k)!==i && v).map(([k,v])=>Number(v)));
+    const opts = myTeam().players.filter(p=>!p.injured && !p.suspended && !used.has(p.id) && !taken.has(p.id) && slotCompatible(p, slot))
+      .sort((a,b)=>((b.pos===slot)-(a.pos===slot)) || (b.ovr-a.ovr));
+    return `<div class="slot-pick-row">
+      <div class="slot-pick-main"><span class="badge badge-pos">${slot}</span><span class="bold">${esc(out.name)}</span><span class="faint tiny">sai</span></div>
+      <div class="slot-pick-actions" style="width:100%;">
+        <select class="select-inline" style="width:100%;" onchange="Game.injuredPick(${i}, this.value)">
+          <option value="">Escolha o substituto…</option>
+          ${opts.map(p=>`<option value="${p.id}" ${Number(chosen)===p.id?"selected":""}>${esc(p.name)} · ${p.pos} · OVR ${p.ovr}</option>`).join("")}
+        </select>
+      </div>
+    </div>`;
+  }).join("");
+  const ready = unavailableStarterSlots().every(i=>(m.picks||{})[i]);
+  return `<div class="modal-backdrop">
+    <div class="modal">
+      <div class="panel-title">Escolha os substitutos deste jogo</div>
+      <div class="slot-pick-list">${rows}</div>
+      <div class="btn-row mt16">
+        <button class="btn btn-gold" ${ready?"":"disabled"} onclick="Game.injuredConfirm()">Confirmar escalação</button>
+        <button class="btn" onclick="Game.injuredAuto()">Deixar automático</button>
+      </div>
+    </div>
+  </div>`;
+}
+function renderFaSignModal(m){
+  const p = ST.world.globalMarket.find(x=>x.id===m.playerId);
+  if(m.done) return `<div class="modal-backdrop"><div class="modal tac"><div class="hero-badge" style="margin:0 auto 10px;">CONTRATO ASSINADO!</div><div class="bold">${esc(m.msg)}</div></div></div>`;
+  if(!p) return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()"><div class="modal"><p class="dim">Esse jogador já assinou com outro clube.</p><button class="btn btn-block mt16" onclick="Game.closeModal()">Fechar</button></div></div>`;
+  const c = freeAgentCost(p);
+  return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
+    <div class="modal">
+      <div class="panel-title">Contratar free agent</div>
+      <div class="row" style="gap:12px;align-items:center;margin-bottom:12px;">${playerFaceImg(p,48)}<div><div class="bold">${esc(p.name)}</div><div class="tiny dim">${p.pos} · ${p.age} anos · OVR ${p.ovr}</div></div></div>
+      <div class="contract-kv"><span>Taxa de contratação</span><span class="mono">${fmtMoney(c.fee)}</span></div>
+      <div class="contract-kv"><span>Salário (1ª temporada)</span><span class="mono">${fmtMoney(c.wage)}</span></div>
+      <div class="contract-kv"><span class="bold">Total</span><span class="mono gold bold">${fmtMoney(c.total)}</span></div>
+      <div class="contract-kv"><span>Seu orçamento</span><span class="mono">${fmtMoney(ST.budget)}</span></div>
+      <p class="faint tiny" style="margin:10px 0 0;">Sem valor de mercado: ele é um jogador livre. Se esperar, outro clube pode contratá-lo antes.</p>
+      ${m.err?`<p class="red small mt8">${esc(m.err)}</p>`:""}
+      <div class="btn-row mt16">
+        <button class="btn btn-gold" ${c.total>ST.budget?"disabled":""} onclick="Game.signFreeAgent(${p.id})">Assinar contrato</button>
+        <button class="btn" onclick="Game.closeModal()">Cancelar</button>
+      </div>
+    </div>
+  </div>`;
+}
 function renderModal(){
   const m = ST.uiModal;
   if(!m) return "";
+  if(m.type==="faSign") return renderFaSignModal(m);
+  if(m.type==="injuredStarters") return renderInjuredStartersModal(m);
+  if(m.type==="injuredPick") return renderInjuredPickModal(m);
   if(m.type==="slotPicker") return renderSlotPickerModal(m);
   if(m.type==="buyOffer") return renderBuyOfferModal(m);
   if(m.type==="news") return renderNewsModal();
@@ -8328,6 +8574,21 @@ const Game = {
   clearInboxConfirm(){
     ST.uiModal = {type:"confirm", message:"Tem certeza que quer limpar a caixa de entrada? Todos os e-mails serão apagados — isso não pode ser desfeito.", action:"clearInbox"};
     render();
+  },
+  openFaModal(playerId){ ST.uiModal = {type:"faSign", playerId}; render(); },
+  signFreeAgent(playerId){
+    const res = signFreeAgent(playerId);
+    if(res.ok){ ST.uiModal = {type:"faSign", playerId, done:true, msg:res.msg}; render(); setTimeout(()=>{ if(ST.uiModal && ST.uiModal.type==="faSign" && ST.uiModal.done){ ST.uiModal=null; render(); } }, 1800); }
+    else { ST.uiModal = {type:"faSign", playerId, err:res.msg}; render(); }
+  },
+  injuredAuto(){ ST.matchLineupOverride = buildAutoSubstitutes(); ST.uiModal = null; resumeAfterLineupChoice(); render(); },
+  injuredManual(){ ST.uiModal = {type:"injuredPick", picks:{}}; render(); },
+  injuredPick(slotIdx, playerId){ if(ST.uiModal && ST.uiModal.type==="injuredPick"){ ST.uiModal.picks[slotIdx] = playerId ? Number(playerId) : null; render(); } },
+  injuredConfirm(){
+    const m = ST.uiModal; if(!m || m.type!=="injuredPick") return;
+    const ids = ST.lineup.slice();
+    unavailableStarterSlots().forEach(i=>{ if(m.picks[i]) ids[i] = m.picks[i]; });
+    ST.matchLineupOverride = ids; ST.uiModal = null; resumeAfterLineupChoice(); render();
   },
   openBuyModal(playerId, team){ ST.uiModal={type:"buyOffer", playerId, team}; render(); },
   acceptIncomingOffer(){

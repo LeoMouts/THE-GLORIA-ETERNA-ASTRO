@@ -1220,3 +1220,7 @@ table.data tr:hover td{background:rgba(241,237,225,.025);}
   .comp-box{aspect-ratio:auto;min-height:340px;}
   .comp-home2-match > .panel{padding:20px 14px;}
 }
+
+/* sent-off players stay in the match lineup, struck through and red */
+.lineup-row.sent-off span:last-child{color:var(--red);text-decoration:line-through;text-decoration-color:rgba(239,79,79,.7);}
+.lineup-row.sent-off .badge-pos{opacity:.5;}
