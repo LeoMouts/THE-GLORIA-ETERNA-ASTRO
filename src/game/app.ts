@@ -5,7 +5,7 @@
 import * as E from "./engine";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
-import { PRELIB_DATA } from "./prelib"; import FACE_RAW from "./data/faces.json"; import POSX_RAW from "./data/positions.json";
+import { PRELIB_DATA } from "./prelib"; import FACE_RAW from "./data/faces.json"; import FACE_ALT_RAW from "./data/faces_alt.json"; import POSX_RAW from "./data/positions.json";
 import { SERIE_A_EXTRA_TEAMS, SERIE_A_2026 } from "./serieA"; import { SULAMERICANA_EXTRA_TEAMS, SULAMERICANA_2026 } from "./sulamericana";
 
 const GOAT_MASCOT_URI = "/images/image-1787868287812.webp";
@@ -231,6 +231,10 @@ function clubCrestImg(clubName, size, playerName){
 /* ---------- player portraits: Transfermarkt retratos from TheSMF-Group/assets (faces/<tm_id>.png), matched to game players by data/faces.json ({gameId: tm_id}). A player without a portrait renders nothing here, so every caller just falls back to its old name-and-crest look. ---------- */
 const FACE_CDN = "https://cdn.jsdelivr.net/gh/TheSMF-Group/assets@main/faces/";
 const FACE_BY_ID = FACE_RAW as unknown as Record<string, number>;
+/* portraits not (yet) in the assets repo: tail of the Transfermarkt portrait URL, tried once when the CDN copy 404s. Dropping a <tm_id>.png into TheSMF-Group/assets/faces makes the CDN copy win with no code change. */
+const FACE_TM_BASE = "https://img.a.transfermarkt.technology/portrait/medium/";
+const FACE_ALT = FACE_ALT_RAW as unknown as Record<string, string>;
+(window as any).__faceAlt = FACE_ALT; (window as any).__faceAltBase = FACE_TM_BASE;
 let _faceNameTm: Record<string, number> | null = null;
 let _faceNamePosTm: Record<string, number> | null = null;
 let _faceIdName: Record<string, string> | null = null;
@@ -270,7 +274,7 @@ function faceTmByName(name: string, pos?: string){
 }
 function faceImgTag(tm: number, w: number, h: number, cls?: string){
   if(!tm) return "";
-  return `<img class="pface ${cls||''}" src="${FACE_CDN}${tm}.png" alt="" width="${w}" height="${h}" loading="lazy" style="width:${w}px;height:${h}px;" onerror="this.remove()"/>`;
+  return `<img class="pface ${cls||''}" src="${FACE_CDN}${tm}.png" alt="" width="${w}" height="${h}" loading="lazy" style="width:${w}px;height:${h}px;" onerror="var a=window.__faceAlt&&window.__faceAlt['${tm}'];if(a&&!this.dataset.fb){this.dataset.fb=1;this.src=window.__faceAltBase+a;}else{this.remove();}"/>`;
 }
 /* no portrait: a black anonymous-person silhouette on a light disc, same size and round shape as a real photo (an inline SVG, not an emoji) */
 function anonFaceTag(size: number, cls?: string){
@@ -6742,7 +6746,7 @@ function renderXferBuySubTab(f){
           <th>Jogador</th><th>Clube (fora da Libertadores)</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Valor</th><th></th>
         </tr></thead><tbody>
         ${shown.map(p=>`<tr>
-          <td class="bold">${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></td>
+          <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)} <span class="faint tiny">${esc(p.nat)}</span></span></span></td>
           <td class="dim"><span style="display:inline-flex;align-items:center;gap:7px;">${clubCrestImg(p.club,20,p.name)}<span>${esc(p.club)}</span></span></td>
           <td>${posBadges(p)}</td>
           <td class="tac">${p.age}</td>
@@ -6782,7 +6786,7 @@ function renderXferBuySubTab(f){
         <th>Jogador</th><th>Time</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Valor</th><th></th>
       </tr></thead><tbody>
       ${shown.map(p=>`<tr>
-        <td class="bold">${esc(p.name)} <span class="faint tiny">${p.nat}</span></td>
+        <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)} <span class="faint tiny">${p.nat}</span></span></span></td>
         <td class="dim"><span style="display:inline-flex;align-items:center;gap:7px;">${clubCrestImg(p._team,20,p.name)}<span>${esc(p._team)}</span></span></td>
         <td>${posBadges(p)}</td>
         <td class="tac">${p.age}</td>
@@ -6835,7 +6839,7 @@ function renderScoutTab(){
     const t = ST.world.teams[r.team];
     const ask = askingPrice(p, t);
     return `<tr>
-      <td class="bold">${esc(p.name)}</td>
+      <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)}</span></span></td>
       <td>${posBadges(p)}</td>
       <td class="tac">${p.age}</td>
       <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
@@ -6913,7 +6917,7 @@ function renderMeuClubeTab(){
   const playerRows = squad.map(p=>{
     const rec = statsMap[String(p.id)] || {apps:0, goals:0, assists:0, yellow:0, red:0, ratingSum:0, ratingCount:0, injuries:[]};
     return `<tr>
-      <td class="bold">${esc(p.name)}</td>
+      <td class="bold"><span class="pface-cell">${playerFaceImg(p,30)}<span>${esc(p.name)}</span></span></td>
       <td>${posBadges(p)}</td>
       <td class="tac">${rec.apps}</td>
       <td class="tac gold bold">${rec.goals}</td>
