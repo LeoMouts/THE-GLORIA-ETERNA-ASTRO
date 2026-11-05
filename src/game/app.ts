@@ -10114,7 +10114,7 @@ function renderAccessGate(errorMsg){
     <p class="hero-sub">Esse jogo está em fase de testes. Digite seu código de acesso para jogar.</p>
     <div class="panel mt24" style="max-width:340px;width:100%;text-align:left;">
       <label class="tiny faint uc" style="display:block;margin-bottom:4px;">Código de acesso</label>
-      <input id="gateCode" class="input-inline" style="width:100%;text-transform:uppercase;letter-spacing:.08em;" placeholder="BETA-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false"/>
+      <input id="gateCode" class="input-inline" style="width:100%;text-transform:uppercase;letter-spacing:.08em;" placeholder="BETA-XXXX-XXXX" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"/>
       ${errorMsg ? `<p class="red small mt8">${esc(errorMsg)}</p>` : ""}
       <button class="btn btn-gold btn-block mt16" onclick="window.__tryAccessLogin__()">Entrar</button>
     </div>
@@ -10123,7 +10123,9 @@ function renderAccessGate(errorMsg){
   if(codeEl){ codeEl.addEventListener("keydown", e=>{ if(e.key==="Enter") window.__tryAccessLogin__(); }); codeEl.focus(); }
 }
 window.__tryAccessLogin__ = async function(){
-  const raw = ((document.getElementById("gateCode")||{}).value || "").trim().toUpperCase();
+  // tolerant to phone keyboards: smart dashes, spaces, lower case, zero-width characters, a missing hyphen
+  let raw = ((document.getElementById("gateCode")||{}).value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if(raw.length===12 && raw.indexOf("BETA")===0) raw = raw.slice(0,4)+"-"+raw.slice(4,8)+"-"+raw.slice(8);
   let ok = false;
   let hash = "";
   try { hash = await sha256Hex(raw); ok = ACCESS_CODE_HASHES.includes(hash) || hash===VIP_RENATO_HASH; } catch(e){ ok = false; }
