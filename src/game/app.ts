@@ -653,7 +653,7 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.reputation = 50;
   ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tierOf(ST.world, teamId)]; // starting kitty follows the club's own level
   ST.history = [];
-  ST.newsLog = [{title:"Bem-vindo!", text:`${ST.managerName} assume o comando do ${teamId} para a campanha de ${ST.seasonYear} do Brasileirão Série A.`}];
+  ST.newsLog = [{title:"Bem-vindo!", text:`${mgrName(ST.managerName)} assume o comando do ${teamId} para a campanha de ${ST.seasonYear} do Brasileirão Série A.`}];
   ST.stage = "hub";
   ST.hubTab = "competicao";
   ST.formation = "4-3-3";
@@ -1426,7 +1426,7 @@ function crownPreLibChampion(managerName){
     : {title:"Campeão da Pré-Libertadores!", text:`${championName} venceu o torneio classificatório de ${wonYear} e garantiu vaga na Libertadores ${promotionYear} no lugar do ${worstTeamName}, dona da pior campanha na fase de grupos de ${wonYear}.`};
   ST.newsLog = [
     promoNews,
-    {title:"Bem-vindo!", text:`${ST.managerName} assume o comando do ${championName} para a campanha de ${ST.seasonYear} da CONMEBOL Libertadores.`},
+    {title:"Bem-vindo!", text:`${mgrName(ST.managerName)} assume o comando do ${championName} para a campanha de ${ST.seasonYear} da CONMEBOL Libertadores.`},
   ];
   ST.prelib = null;
   ST.stage = "hub";
@@ -1760,7 +1760,7 @@ function startCareer(teamId, managerName){
   const tier = tierOf(ST.world, teamId);
   ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tier];
   ST.history = [];
-  ST.newsLog = [{title:"Bem-vindo!", text:`${ST.managerName} assume o comando do ${teamId} para a campanha de ${ST.seasonYear} da CONMEBOL Libertadores.`}];
+  ST.newsLog = [{title:"Bem-vindo!", text:`${mgrName(ST.managerName)} assume o comando do ${teamId} para a campanha de ${ST.seasonYear} da CONMEBOL Libertadores.`}];
   ST.stage = "hub";
   ST.hubTab = "competicao";
   ST.formation = "4-3-3";
@@ -4943,7 +4943,7 @@ function selectNewJob(teamName){
   const baseByTier = [0, 1800000, 3800000, 7500000, 15000000, 26000000][newTier];
   const carry = ST.budget * 0.15;
   ST.budget = Math.round(E.clamp(carry + baseByTier, 500000, 140000000) / 10000) * 10000;
-  ST.newsLog.unshift({title:"Nova jornada", text:`${ST.managerName} assume o comando do ${teamName}.`});
+  ST.newsLog.unshift({title:"Nova jornada", text:`${mgrName(ST.managerName)} assume o comando do ${teamName}.`});
   setupSeasonCompetition();
   ST.formation = "4-3-3";
   autoFillLineup();
@@ -6020,7 +6020,7 @@ function renderHub(){
         </div>
       </div>
       <div class="stat-pill">${fmtMoney(ST.budget)}</div>
-      <div class="stat-pill">${esc(ST.managerName)}</div>
+      <div class="stat-pill vip-pill">${mgrNameHtml(ST.managerName)}</div>
       <div class="stat-pill">
         Reputação
         <div class="rep-bar-wrap"><div class="rep-bar" style="width:${rep}%"></div></div>
@@ -8267,7 +8267,7 @@ function renderContractSigning(message){
   return `<div class="modal-backdrop">
     <div class="contract-doc contract-doc-signing">
       <div class="contract-sign-title">${esc(message)}</div>
-      <div class="signature-wrap"><span class="signature-text">${esc(ST.managerName || "Treinador")}</span></div>
+      <div class="signature-wrap"><span class="signature-text">${esc(mgrName(ST.managerName))}</span></div>
       <div class="contract-sign-stamp">Contrato assinado</div>
     </div>
   </div>`;
@@ -8638,7 +8638,7 @@ function renderCareerOver(){
     <h1 class="hero-title" style="font-size:clamp(24px,5vw,40px);margin:4px 0 16px;">${titles.length>0? titles.length+" TÍTULO"+(titles.length>1?"S":"")+" DE LIBERTADORES" : "FIM DE CICLO"}</h1>
     <div style="display:flex;flex-wrap:wrap;gap:14px;justify-content:center;align-items:flex-start;width:100%;max-width:760px;">
       <div class="panel" style="flex:1 1 320px;max-width:360px;text-align:left;">
-        <div class="panel-title">Resumo de ${esc(ST.managerName)}</div>
+        <div class="panel-title">Resumo de ${esc(mgrName(ST.managerName))}</div>
         <div class="kv"><span>Times comandados</span><span class="bold">${teams.length} (${esc(teams.join(", "))})</span></div>
         <div class="kv"><span>Títulos de Libertadores</span><span class="bold gold">${titles.length}</span></div>
         <div class="kv"><span>Reputação de pico</span><span class="bold">${peakRep}</span></div>
@@ -10043,6 +10043,31 @@ function renderWcCallup(){
   </div>`;
 }
 
+// ---- verified user (only the Renato Vicente code sets window.__VIP_RENATO__) ----
+const VIP_NAME = "orenatovicente";
+function isVip(){ return !!window.__VIP_RENATO__; }
+function mgrName(name){ return isVip() ? VIP_NAME : (name || "Treinador"); }
+function verifiedBadge(size){
+  size = size || 15;
+  return `<svg class="vbadge" width="${size}" height="${size}" viewBox="0 0 24 24" role="img" aria-label="Conta verificada"><title>Conta verificada</title><path fill="#1d9bf0" d="M22.5 12.5c0-1.6-.9-3-2.2-3.7.4-1.4.1-3-.9-4.1-1.1-1.1-2.7-1.4-4.1-1C14.6 2.4 13.3 1.5 12 1.5S9.4 2.4 8.7 3.7c-1.4-.4-3 0-4.1 1-1.1 1.1-1.4 2.7-1 4.1C2.4 9.5 1.5 10.9 1.5 12.5s.9 3 2.1 3.7c-.4 1.4-.1 3 1 4.1 1.1 1.1 2.7 1.4 4.1 1 .7 1.3 2 2.2 3.3 2.2s2.6-.9 3.3-2.2c1.4.4 3 .1 4.1-1 1.1-1.1 1.4-2.7 1-4.1 1.2-.7 2.1-2.1 2.1-3.7z"/><path fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M7.6 12.6l3 3 5.9-6.2"/></svg>`;
+}
+function mgrNameHtml(name){ return esc(mgrName(name)) + (isVip() ? `<span class="vbadge-wrap">${verifiedBadge(15)}</span>` : ""); }
+function showVipWelcome(){
+  if(document.getElementById("vipWelcome")) return;
+  const d = document.createElement("div");
+  d.id = "vipWelcome"; d.className = "vip-welcome";
+  d.innerHTML = `<div class="vip-rays"></div>
+    <div class="vip-card">
+      <div class="vip-photo-wrap"><img class="vip-photo" src="/images/renato-welcome.webp" alt="Renatinho"/></div>
+      <div class="vip-title">SEJA BEM VINDO <span class="vip-name">Renatinho!</span></div>
+      <div class="vip-user">${esc(VIP_NAME)}${verifiedBadge(22)}</div>
+      <div class="vip-chat">Boa noite Chat!</div>
+      <button class="btn btn-gold btn-lg vip-go" onclick="window.__closeVipWelcome__()">BORA JOGAR →</button>
+    </div>
+    <div class="vip-confetti">${Array.from({length:36},(_,i)=>`<i style="left:${(i*97)%100}%;animation-delay:${(i%12)*0.18}s;background:${["#ffd21f","#ffffff","#1d9bf0","#3ddc84","#ff5a5f"][i%5]}"></i>`).join("")}</div>`;
+  document.body.appendChild(d);
+  window.__closeVipWelcome__ = function(){ d.classList.add("out"); setTimeout(()=>d.remove(), 450); };
+}
 // ============================================================
 // ACCESS GATE — a simple client-side login so the site isn't playable by
 // anyone who just stumbles on the URL. Asked fresh on every single visit/reload
@@ -10052,6 +10077,8 @@ function renderWcCallup(){
 // to" filter.
 // ============================================================
 // access codes: only the SHA-256 of each code lives in the source, so the codes themselves can't be read from the bundle
+// the one code that opens the game as the verified "orenatovicente" (badge + welcome animation) — nobody else gets either
+const VIP_RENATO_HASH = "623aa5ba7124bfb4eb49e4cd5a849d12a6f754b726ebfabce8643337d63412a9";
 const ACCESS_CODE_HASHES = [
   "4e84072c9a5dd6e68701837444d180c439816dd4a0e1c545f79f3d564ff1ad2f",
   "439cb9b573d641f07981f13a6804d2dc03a285d03b72af278732ff7e24735a4a",
@@ -10098,8 +10125,10 @@ function renderAccessGate(errorMsg){
 window.__tryAccessLogin__ = async function(){
   const raw = ((document.getElementById("gateCode")||{}).value || "").trim().toUpperCase();
   let ok = false;
-  try { ok = ACCESS_CODE_HASHES.includes(await sha256Hex(raw)); } catch(e){ ok = false; }
-  if(ok){ boot(); } else { renderAccessGate("Código inválido."); }
+  let hash = "";
+  try { hash = await sha256Hex(raw); ok = ACCESS_CODE_HASHES.includes(hash) || hash===VIP_RENATO_HASH; } catch(e){ ok = false; }
+  window.__VIP_RENATO__ = ok && hash===VIP_RENATO_HASH;
+  if(ok){ await boot(); if(window.__VIP_RENATO__) showVipWelcome(); } else { renderAccessGate("Código inválido."); }
 };
 
 // ============================================================
