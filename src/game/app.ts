@@ -5611,7 +5611,7 @@ function render(){
     app.innerHTML = html + renderModal();
     animateMoodBars();
     const tickerEl = document.getElementById("ticker");
-    if(tickerEl) tickerEl.scrollTop = tickerEl.scrollHeight;
+    if(tickerEl) tickerEl.scrollTop = tickerEl.dataset.rev ? 0 : tickerEl.scrollHeight;
     if(ST && ST.stage==="match" && ST.pendingMatch && ST.pendingMatch.result && !matchAnimDone()
        && !(ST.uiModal && ST.uiModal.type==="penaltyKick")){
       // that last guard matters: for the full "penaltyKick" card (suspense beat + result beat),
@@ -7745,6 +7745,37 @@ function eventText(ev, homeName, awayName){
   }
 }
 
+// ---- match screen, "Arena" look: rounded dark cards, big yellow score with a minute pill, feed of rounded rows,
+// and the two line-ups on green striped pitches on the SIDES of the match ----
+function mxFormationKey(slots){
+  for(const k in E.FORMATIONS){ if(E.FORMATIONS[k].join()===slots.join()) return k; }
+  return "4-3-3";
+}
+function mxShortName(n){ const t = String(n||"").trim().split(/\s+/); return t.length>1 ? t[t.length-1] : (t[0]||""); }
+// strengths of a line-up (average overall per line), like the "ATA · MEI · DEF · GOL" tag of the Arena
+function mxLines(teamName, lineup, slots){
+  const t = ST.world.teams[teamName];
+  const ovr = p => { if(!p) return 0; const f = t && t.players.find(x=>x.id===p.id); return f ? f.ovr : (p.ovr||0); };
+  const avg = g => { const a = lineup.map((p,i)=>p && E.POS_GROUP[slots[i]]===g ? ovr(p) : null).filter(v=>v); return a.length ? Math.round(a.reduce((x,y)=>x+y,0)/a.length) : 0; };
+  return {att:avg("ATT"), mid:avg("MID"), def:avg("DEF"), gk:avg("GK")};
+}
+function renderMxPitch(lineup, slots, opts){
+  opts = opts || {};
+  const coords = FORMATION_COORDS[mxFormationKey(slots)] || FORMATION_COORDS["4-3-3"];
+  return `<div class="mx-pitch"><i class="mx-box"></i><i class="mx-mid"></i>${lineup.map((p,i)=>{
+    const c = coords[i]; if(!c) return "";
+    if(!p) return `<div class="mx-pl empty" style="left:${c.x}%;top:${c.y}%"><span class="mx-face mx-plus">+</span><small>${slots[i]}</small></div>`;
+    const ic = opts.icons ? opts.icons(p) : "";
+    return `<div class="mx-pl${opts.sentOff&&opts.sentOff(p)?' off':''}" style="left:${c.x}%;top:${c.y}%" title="${esc(p.name)} · ${slots[i]}"><span class="mx-face">${playerFaceImg(p,32)}${ic?`<em class="mx-ic">${ic}</em>`:""}</span><b>${esc(mxShortName(p.name))}</b><small>${slots[i]}</small></div>`;
+  }).join("")}</div>`;
+}
+function renderMxSide(teamName, pitchHtml, tag){
+  return `<section class="mx-side mx-card">
+    <h4 class="mx-h">${clubCrestImg(teamName,22,null)}<span>${esc(teamName)}</span></h4>
+    ${tag?`<div class="mx-rt">${tag}</div>`:""}
+    ${pitchHtml}
+  </section>`;
+}
 function renderMatch(){
   const pm = ST.pendingMatch;
   const home = pm.ref.home, away = pm.ref.away;
@@ -7756,36 +7787,43 @@ function renderMatch(){
     const unavailable = lp.filter(p=>p && (p.injured||p.suspended)).length;
     const speed = ST.matchSpeed || "normal";
     const speedBtn = (id,label)=>`<button class="btn btn-sm${speed===id?' btn-gold':''}" onclick="Game.setMatchSpeed('${id}')">${label}</button>`;
+    const userIsHomePre = home===ST.teamId;
+    const mySlots = E.FORMATIONS[ST.formation] || E.FORMATIONS["4-3-3"];
+    const rt = mxLines(ST.teamId, lp, mySlots);
+    const myTag = `ATA ${rt.att} · MEI ${rt.mid} · DEF ${rt.def} · GOL ${rt.gk} · ${esc(ST.formation)}`;
+    const myPitch = renderMxSide(ST.teamId, renderMxPitch(lp, mySlots, {}), myTag);
+    const oppName = userIsHomePre ? away : home;
+    const oppSide = `<section class="mx-side mx-card"><h4 class="mx-h">${clubCrestImg(oppName,22,null)}<span>${esc(oppName)}</span></h4>
+      <div class="mx-rt">&nbsp;</div>
+      <div class="mx-pitch mx-hidden"><i class="mx-box"></i><i class="mx-mid"></i><div class="mx-hidden-msg">A escalação do adversário só aparece quando a bola rolar.</div></div></section>`;
     return `
-    <div style="padding:24px 20px;max-width:760px;margin:0 auto;">
-      <div class="tac faint tiny uc mb8">${esc(stageLbl)}</div>
-      <div class="scoreboard">
-        <div class="score-side">
-          <span class="match-crest">${clubCrestImg(home,44,null)}</span>
-          <div class="bold" style="font-size:16px;">${esc(home)}</div>
+    <div class="mx-wrap">
+      ${userIsHomePre ? myPitch : oppSide}
+      <div class="mx-center mx-card">
+        <div class="mx-stage">${esc(stageLbl)}</div>
+        <div class="mx-score">
+          <div class="mx-team">${clubCrestImg(home,44,null)}<b>${esc(home)}</b></div>
+          <div class="mx-mid-score"><b class="mx-n">0</b><span class="mx-min">VS</span><b class="mx-n">0</b></div>
+          <div class="mx-team">${clubCrestImg(away,44,null)}<b>${esc(away)}</b></div>
         </div>
-        <div class="score-num">VS</div>
-        <div class="score-side">
-          <span class="match-crest">${clubCrestImg(away,44,null)}</span>
-          <div class="bold" style="font-size:16px;">${esc(away)}</div>
+        <div class="mx-box-info">
+          <div class="panel-title">Confirmar escalação (${esc(ST.formation)})</div>
+          <p class="small dim">Sua escalação atual será usada nesta partida. Ajuste no campo se necessário antes de simular.</p>
+          ${missing>0?`<p class="small red">⚠ Você tem ${missing} posição(ões) vazia(s) — o time será completado automaticamente.</p>`:""}
+          ${unavailable>0?`<p class="small red">⚠ ${unavailable} jogador(es) escalado(s) estão suspensos/lesionados e serão substituídos.</p>`:""}
+          <button class="btn btn-sm mt8" onclick="Game.goEditLineup()">✏️ Editar escalação</button>
+        </div>
+        <div class="tac mt16">
+          <div class="tiny faint uc mb8">Velocidade da partida</div>
+          <div class="btn-row center mb16">
+            ${speedBtn("slow","LENTA")}
+            ${speedBtn("normal","RÁPIDA")}
+            ${speedBtn("fast","MUITO RÁPIDA")}
+          </div>
+          <button class="btn btn-gold btn-lg" onclick="Game.simulateMatch()">▶ Simular Partida</button>
         </div>
       </div>
-      <div class="panel mt24">
-        <div class="panel-title">Confirmar escalação (${ST.formation})</div>
-        <p class="small dim">Sua escalação atual será usada nesta partida. Ajuste no campo se necessário antes de simular.</p>
-        ${missing>0?`<p class="small red">⚠ Você tem ${missing} posição(ões) vazia(s) — o time será completado automaticamente.</p>`:""}
-        ${unavailable>0?`<p class="small red">⚠ ${unavailable} jogador(es) escalado(s) estão suspensos/lesionados e serão substituídos.</p>`:""}
-        <button class="btn btn-sm mt8" onclick="Game.goEditLineup()">✏️ Editar escalação</button>
-      </div>
-      <div class="tac mt24">
-        <div class="tiny faint uc mb8">Velocidade da partida</div>
-        <div class="btn-row center mb16">
-          ${speedBtn("slow","LENTA")}
-          ${speedBtn("normal","RÁPIDA")}
-          ${speedBtn("fast","MUITO RÁPIDA")}
-        </div>
-        <button class="btn btn-gold btn-lg" onclick="Game.simulateMatch()">▶ Simular Partida</button>
-      </div>
+      ${userIsHomePre ? oppSide : myPitch}
     </div>`;
   }
   const res = pm.result;
@@ -7837,8 +7875,19 @@ function renderMatch(){
   }
   const sentOff = (name, side) => redCards.has(side+"|"+name) ? " sent-off" : "";
 
-  const homeLineupList = pm.homeLineup ? pm.homeLineup.map((p,i)=>p?`<div class="lineup-row${sentOff(p.name,"home")}"><span class="badge badge-pos">${pm.homeSlots[i]}</span><span>${esc(p.name)}${playerIcons(p.name,p.id,"home")}</span></div>`:"").join("") : "";
-  const awayLineupList = pm.awayLineup ? pm.awayLineup.map((p,i)=>p?`<div class="lineup-row${sentOff(p.name,"away")}"><span class="badge badge-pos">${pm.awaySlots[i]}</span><span>${esc(p.name)}${playerIcons(p.name,p.id,"away")}</span></div>`:"").join("") : "";
+  // icons next to a player on the pitch: goals, assists, cards, man of the match
+  const mxIcons = side => p => {
+    let out = "";
+    if(scorers[p.name]) out += "⚽" + (scorers[p.name]>1 ? "×"+scorers[p.name] : "");
+    if(assisters[p.name]) out += "🥾" + (assisters[p.name]>1 ? "×"+assisters[p.name] : "");
+    if(redCards.has(side+"|"+p.name)) out += "🟥";
+    else if(yellowCards.has(side+"|"+p.name)) out += "🟨";
+    if(done && p.id===motmId) out += "⭐";
+    return out;
+  };
+  const tagFor = (name, lineup, slots) => { const r = mxLines(name, lineup, slots); return `ATA ${r.att} · MEI ${r.mid} · DEF ${r.def} · GOL ${r.gk}`; };
+  const homeSide = pm.homeLineup ? renderMxSide(home, renderMxPitch(pm.homeLineup, pm.homeSlots, {icons:mxIcons("home"), sentOff:p=>redCards.has("home|"+p.name)}), tagFor(home, pm.homeLineup, pm.homeSlots)) : "";
+  const awaySide = pm.awayLineup ? renderMxSide(away, renderMxPitch(pm.awayLineup, pm.awaySlots, {icons:mxIcons("away"), sentOff:p=>redCards.has("away|"+p.name)}), tagFor(away, pm.awayLineup, pm.awaySlots)) : "";
 
   // ---- match stats (possession / shots / shots on target / momentum flow) ----
   const shotsHome = visibleEvents.filter(e=>e.side==="home"&&["goal","miss","save","block"].includes(e.type)).length;
@@ -7856,52 +7905,39 @@ function renderMatch(){
     ${momentumSvg}
   </div>`;
 
+  const winnerTxt = curHome>curAway ? `${esc(home)} venceu!` : curAway>curHome ? `${esc(away)} venceu!` : "Empate!";
   const centerHtml = `
-    <div class="tac faint tiny uc mb8">${esc(stageLbl)}</div>
-    <div class="scoreboard">
-      <div class="score-side">
-        <span class="match-crest">${clubCrestImg(home,40,null)}</span>
-        <div class="bold" style="font-size:15px;">${esc(home)}</div>
-      </div>
-      <div>
-        <div class="score-num">${curHome} - ${curAway}</div>
-        <div class="score-min tac">${done? "FIM DE JOGO" : lastMin+"'"}</div>
-      </div>
-      <div class="score-side">
-        <span class="match-crest">${clubCrestImg(away,40,null)}</span>
-        <div class="bold" style="font-size:15px;">${esc(away)}</div>
-      </div>
+    <div class="mx-stage">${esc(stageLbl)}</div>
+    <div class="mx-score">
+      <div class="mx-team">${clubCrestImg(home,44,null)}<b>${esc(home)}</b></div>
+      <div class="mx-mid-score"><b class="mx-n">${curHome}</b><span class="mx-min">${done? "FIM" : lastMin+"'"}</span><b class="mx-n">${curAway}</b></div>
+      <div class="mx-team">${clubCrestImg(away,44,null)}<b>${esc(away)}</b></div>
     </div>
-    <div class="ticker" id="ticker">
-      ${visibleEvents.length===0?`<div class="tick-row"><span class="dim">Bola rolando...</span></div>`:""}
-      ${visibleEvents.map(ev=>`<div class="tick-row ${ev.type==='goal'?'goal':''}">
-        <span class="tick-min">${ev.minute}'</span><span class="tick-icon">${ev.penalty?"🎯":(EVENT_ICON[ev.type]||"•")}</span>
-        <span>${eventText(ev, home, away)}</span>
-      </div>`).join("")}
-    </div>
+    <ol class="mx-feed" id="ticker" data-rev="1">
+      ${visibleEvents.length===0?`<li class="idle"><span class="dim">Bola rolando...</span></li>`:""}
+      ${visibleEvents.slice().reverse().map(ev=>`<li class="${ev.type==='goal'?'gol':''} ${ev.type==='red'?'red':''} ${ev.side==='away'?'o':''}">
+        <span class="mn">${ev.minute}'</span><span class="ic">${ev.penalty?"🎯":(EVENT_ICON[ev.type]||"•")}</span>
+        <span class="tx">${eventText(ev, home, away)}</span>
+      </li>`).join("")}
+    </ol>
+    ${done ? `<div class="mx-final"><b>${winnerTxt}</b><span>${curHome} x ${curAway}</span></div>` : ""}
     ${!done? `
     <div class="tac mt16">
-      <button class="btn mt8" onclick="Game.skipMatch()">PULAR PARA O FINAL</button>
+      <button class="btn" onclick="Game.skipMatch()">PULAR PARA O FINAL</button>
     </div>` : `
     <div class="tac mt16">
       <button class="btn btn-gold btn-lg" onclick="Game.continueAfterMatch()">Continuar →</button>
-    </div>`}
-    ${statsHtml}
-    ${ratingsHtml}`;
+    </div>`}`;
 
   return `
-  <div style="padding:24px 20px;max-width:1080px;margin:0 auto;">
-    <div class="match-3col">
-      <div class="match-side-panel">
-        <div class="lineup-col-title tac">${esc(home)}</div>
-        ${homeLineupList}
-      </div>
-      <div class="match-center-col">${centerHtml}</div>
-      <div class="match-side-panel">
-        <div class="lineup-col-title tac">${esc(away)}</div>
-        ${awayLineupList}
-      </div>
+  <div class="mx-wrap">
+    ${homeSide}
+    <div class="mx-center-col">
+      <div class="mx-center mx-card">${centerHtml}</div>
+      ${statsHtml}
+      ${ratingsHtml}
     </div>
+    ${awaySide}
   </div>`;
 }
 
