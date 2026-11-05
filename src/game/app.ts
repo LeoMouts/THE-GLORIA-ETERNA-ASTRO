@@ -1697,6 +1697,9 @@ async function initApp(){
   }
   // same idea for the group-draw animation's setInterval — a reload mid-draw otherwise
   // resumes frozen with no way forward except SKIP.
+  if(ST.stage==="wc_draw" && ST.worldCup && (ST.worldCup.drawRevealed||0)<48){
+    startWcDrawAnimation();
+  }
   if(ST.stage==="group_draw" && (ST.drawRevealed||0)<32){
     startGroupDrawAnimation();
   }
@@ -5409,6 +5412,7 @@ function render(){
     else if(ST.stage==="copa_qf_draw") html = renderCopaQfDraw();
     else if(ST.stage==="ic_announce") html = renderIcAnnounce();
     else if(ST.stage==="wc_callup") html = renderWcCallup();
+    else if(ST.stage==="wc_draw") html = renderWcDraw();
     else if(ST.stage==="wc_end") html = renderWcEnd();
     else if(ST.stage==="job_offers") html = renderJobOffers();
     else if(ST.stage==="career_over") html = renderCareerOver();
@@ -8625,6 +8629,15 @@ const Game = {
   callupClear(){ const c = ST.wcCallup; if(!c) return; c.ids = []; c.msg = ""; render(); },
   callupConfirm(){ wcCallupConfirm(); render(); },
   callupClose(){ wcCallupClose(); render(); },
+  skipWcDraw(){
+    if(!ST.worldCup) return;
+    if(drawTimer){ clearInterval(drawTimer); drawTimer = null; }
+    ST.worldCup.drawRevealed = 48; render();
+  },
+  finishWcDraw(){
+    if(drawTimer){ clearInterval(drawTimer); drawTimer = null; }
+    ST.stage = "hub"; ST.hubTab = "competicao"; scheduleSave(); render();
+  },
   finishWcEnd(){ ST.stage = "hub"; ST.hubTab = "competicao"; ST.calendarDaysLeft = null; ST.desempenhoFilter = "brasileirao"; scheduleSave(); render(); },
   forceEndSeason(){
     autoFinishBackgroundCups();
@@ -9227,11 +9240,59 @@ function beginWorldCup(){
     autoFillLineup();
     if(ST.hubTab==="transfers" || ST.hubTab==="scout" || ST.hubTab==="clube" || ST.hubTab==="desempenho") ST.hubTab = "competicao";
   }
-  ST.stage = "hub"; ST.hubTab = "competicao"; ST.uiModal = null;
+  ST.stage = "wc_draw"; ST.hubTab = "competicao"; ST.uiModal = null;   // first the draw ceremony, then the tournament
+  ST.worldCup.drawRevealed = 0;
+  startWcDrawAnimation();
   ST.desempenhoFilter = "wc";
   ST.calendarDaysLeft = null; ST.trainingPending = false;
   ST.newsLog.unshift({title:`Começa a Copa do Mundo ${year}!`, text: job ? `Todos os campeonatos pararam. Você comanda a seleção ${job.pt}: grupo ${Object.keys(groups).find(g=>groups[g].includes(ST.worldCup.userKey))}.` : `Todos os campeonatos pararam: 48 seleções disputam a Copa do Mundo ${year}.`});
   scheduleSave();
+}
+// ceremony: 48 slots revealed pot by pot (pot 1 for groups A..L, then pot 2, ...)
+function startWcDrawAnimation(){
+  if(drawTimer){ clearInterval(drawTimer); drawTimer = null; }
+  drawTimer = setInterval(()=>{
+    if(ST.stage!=="wc_draw" || !ST.worldCup){ clearInterval(drawTimer); drawTimer = null; return; }
+    ST.worldCup.drawRevealed = (ST.worldCup.drawRevealed||0)+1;
+    if(ST.worldCup.drawRevealed>=48){ clearInterval(drawTimer); drawTimer = null; }
+    render();
+  }, 380);
+}
+function renderWcDraw(){
+  const wc = ST.worldCup;
+  const letters = Object.keys(wc.groups);
+  const revealed = wc.drawRevealed||0;
+  const done = revealed>=48;
+  const pot = Math.min(4, Math.floor(Math.max(0, revealed-1)/12)+1);
+  const boxes = letters.map((L, gIdx)=>{
+    const slots = wc.groups[L].map((key, potIdx)=>{
+      const step = potIdx*12 + gIdx;
+      if(step>=revealed) return `<div class="draw-slot draw-slot-empty"><span class="wc-pot">P${potIdx+1}</span><span class="draw-slot-roll"></span></div>`;
+      const isNew = step===revealed-1;
+      return `<div class="draw-slot${isNew?" draw-slot-reveal":""}${key===wc.userKey?" draw-slot-user":""}">
+        <span class="wc-pot">P${potIdx+1}</span>
+        <span class="draw-slot-crest wc-draw-flag">${wcFlagOf(key, 22)}</span>
+        <span class="draw-slot-name">${esc(key)}</span>
+      </div>`;
+    }).join("");
+    return `<div class="draw-group"><div class="draw-group-title">Grupo ${L}</div>${slots}</div>`;
+  }).join("");
+  const potTxt = done ? "Sorteio concluído" : `Sorteando o pote ${pot} de 4`;
+  return `${cornerWatermarks()}<div class="draw-screen wc-draw">
+    <div class="draw-header">
+      <div class="draw-trophy">${renderWcTrophy(110)}</div>
+      <div class="draw-title-badge">FIFA</div>
+      <h1 class="draw-title">Copa do Mundo ${wc.year}</h1>
+      <div class="draw-year">SORTEIO DOS GRUPOS · 48 SELEÇÕES · ${potTxt.toUpperCase()}</div>
+    </div>
+    <div class="draw-grid wc-draw-grid">${boxes}</div>
+    <div class="tiny faint mt16 tac">Quatro potes de 12 seleções (anfitriãs no pote 1). Nenhum grupo tem duas seleções da mesma confederação — exceto a UEFA, que pode ter duas.</div>
+    <div class="btn-row center mt24">
+      ${done
+        ? `<button class="btn btn-gold btn-lg" onclick="Game.finishWcDraw()">Começar a Copa →</button>`
+        : `<button class="btn btn-ghost" onclick="Game.skipWcDraw()">Pular animação (SKIP)</button>`}
+    </div>
+  </div>`;
 }
 function wcEvent(key){ return ST.worldCup.events.find(e=>e.key===key); }
 function wcNextEvent(){ return ST.worldCup.events.find(e=>!e.done) || null; }

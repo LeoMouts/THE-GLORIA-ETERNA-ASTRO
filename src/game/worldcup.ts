@@ -136,7 +136,7 @@ function gauss(rng: () => number): number { let u = 0, v = 0; while (u === 0) u 
 // confederation slots + hosts + two playoff places, with a little noise so a favourite can stumble
 export function qualify(year: number, cands: Cand[], rng: () => number): string[] {
   const pool = cands.filter(c => { const nn = nationByEn(c.en); return nn && !nn.banned; });
-  const score = new Map<string, number>(); pool.forEach(c => score.set(c.en, c.strength + gauss(rng) * 2.0 + (PEDIGREE.has(c.en) ? 4 : 0)));
+  const score = new Map<string, number>(); pool.forEach(c => score.set(c.en, c.strength + gauss(rng) * 2.0 + (PEDIGREE.has(c.en) ? 4 : c.conf === "UEFA" ? 0 : -3)));
   const out: string[] = [];
   hostsOf(year).forEach(h => { if (pool.some(c => c.en === h) && !out.includes(h)) out.push(h); });
   (Object.keys(CONF_SLOTS) as Conf[]).forEach(conf => {
@@ -170,7 +170,7 @@ export function drawGroups(teams: DrawTeam[], hosts: string[], rng: () => number
         groups[cand[Math.floor(rng() * cand.length)]].push(t);
       }
     }
-    if (ok) { const res: Record<string, string[]> = {}; groups.forEach((g, i) => { res[GROUP_LETTERS[i]] = shuffle(g).map(t => t.en); }); return res; }
+    if (ok) { const res: Record<string, string[]> = {}; groups.forEach((g, i) => { res[GROUP_LETTERS[i]] = g.map(t => t.en); }); return res; }   // groups keep pot order (pot 1 seed first), as in the real draw
   }
   const res: Record<string, string[]> = {};   // unreachable in practice: plain snake draw
   GROUP_LETTERS.forEach((l, i) => { res[l] = pots.map(p => p[i]).filter(Boolean).map(t => t.en); });
