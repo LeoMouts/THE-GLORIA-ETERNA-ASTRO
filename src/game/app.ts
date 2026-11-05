@@ -2260,10 +2260,12 @@ function clubPosture(club){
 function offerNegCeiling(pl){
   if(pl.W) return pl.W;
   const posture = offerPosture(pl);
-  const jitter = 0.92 + (strHash(pl.playerId+":"+pl.club)%100)/100*0.16;
-  let W = pl.value*(1+(posture.estCeilingMult-1)*0.55)*jitter;
-  if(pl.category==="arabe") W *= 1.12;
-  pl.W = Math.round(Math.max(W, pl.offer*1.04)/5000)*5000;
+  // how far above its opening bid this club is willing to stretch: a real share of the number on the table
+  // (so a 15M offer can go to 17-19M and a 70M one to 80M+), different per club and per posture
+  const baseRoom = posture.id==="flexivel" ? 0.30 : posture.id==="durao" ? 0.12 : 0.20;
+  const jitter = 0.7 + (strHash(pl.playerId+":"+pl.club)%100)/100*0.6;       // 0.7 .. 1.3 of that room
+  let W = pl.offer*(1+baseRoom*jitter*(pl.category==="arabe"?1.15:1));
+  pl.W = Math.round(Math.max(W, pl.offer*1.05)/50000)*50000;
   return pl.W;
 }
 function fmtNeg(v){ return fmtMoney(v); }
@@ -2292,7 +2294,7 @@ function reSubject(subject){ return subject.indexOf("RE: ")===0 ? subject : "RE:
 // market value so an absurd ask is possible but not infinite.
 function offerAskRange(pl){
   const minAsk = Math.max(pl.offer+5000, Math.round(pl.offer*1.005/5000)*5000);   // can come all the way down to just above the bid on the table
-  const maxAsk = Math.max(minAsk+5000, Math.round(pl.value*3/5000)*5000);
+  const maxAsk = Math.max(minAsk+5000, Math.round(pl.value*3/5000)*5000, Math.round(pl.offer*1.5/50000)*50000);   // room above the bid is a share of the bid itself (a 70M offer can be asked up to 105M), not just 3x the value
   return { minAsk, maxAsk };
 }
 // the manager types in the value they want to ask for (clamped to offerAskRange). The decision is made by the
@@ -2349,10 +2351,12 @@ function acceptMailOffer(mailId){
   const pl = mail.payload;
   const t = myTeam();
   if(!t.players.some(p=>p.id===pl.playerId && !sellLocked(p))){ pl.status="void"; scheduleSave(); return; }
+  const sold = t.players.find(p=>p.id===pl.playerId);
   t.players = t.players.filter(p=>p.id!==pl.playerId);
   ST.lineup = ST.lineup.map(id=> id===pl.playerId ? null : id);
   ST.budget += pl.offer;
   pl.status = "accepted";
+  if(sold){ moveSoldPlayer(sold, pl.club); openSaleDone(sold, pl.club, pl.offer); }
   ST.newsLog.unshift({title:"Venda concluída!", text:`${pl.playerName} foi vendido para o ${pl.club} por ${fmtMoney(pl.offer)}.`});
   scheduleSave();
 }
@@ -5216,15 +5220,61 @@ function prelibMarketAskingPrice(p){
   if(p.age<=21 && p.pot-p.ovr>=10) f += 0.25;
   return Math.round(p.value*f/5000)*5000;
 }
+// a sold player doesn't vanish: he joins the buying club's real squad (or, for clubs without a squad of their
+// own in this game, the global market under that club's name), keeps playing, ageing and developing, and can
+// be bought back later at whatever his price has become.
+function moveSoldPlayer(p, clubName){
+  const world = ST.world;
+  const moved = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0});
+  delete moved.faLockSeason;
+  const team = world.teams[clubName];
+  if(team && !team.isNation && clubName!==ST.teamId){
+    delete moved.club; delete moved.league;
+    team.players.push(moved);
+    return;
+  }
+  if(!Array.isArray(world.globalMarket)) world.globalMarket = [];
+  moved.club = clubName;
+  moved.league = (TP.clubLeague && TP.clubLeague[clubName]) || (REAL_ARAB_CLUBS.includes(clubName) ? "Saudi Pro League" : "European League");
+  world.globalMarket.push(moved);
+}
+// who buys a player sold on the spot: a club that actually needs him, mostly from the user's own country so he
+// can turn up against the user afterwards
+function pickQuickSellBuyer(p){
+  const world = ST.world;
+  const rng = E.makeRNG(nextSeed());
+  const names = Object.keys(world.teams).filter(n=>n!==ST.teamId && !world.teams[n].isNation);
+  if(!names.length) return null;
+  const mine = myTeam();
+  return pickWeighted(rng, names, n=>{
+    const t = world.teams[n], tier = tierOf(world, n);
+    const best = t.players.filter(q=>q.pos===p.pos || (q.altPos && q.altPos.includes(p.pos))).reduce((m,q)=>Math.max(m,q.ovr),0);
+    let w = 1;
+    if(t.country===mine.country) w *= 8;
+    if(best < p.ovr+2) w *= 3;
+    w *= p.ovr <= aiSignerBudgetCeiling(tier)+4 ? 2 : 0.3;
+    w *= Math.max(0.25, 1 - Math.abs(teamAvgOvr(t) - (p.ovr-4))/14);   // clubs of his own level
+    return w;
+  });
+}
+function openSaleDone(p, club, price){ ST.uiModal = {type:"saleDone", playerName:p.name, pos:p.pos, ovr:p.ovr, club, price}; }
 function quickSell(playerId){
   const t = myTeam();
   const p = t.players.find(x=>x.id===playerId);
   if(!p || sellLocked(p)) return;
   const price = Math.round(p.value*0.9/5000)*5000;
+  const buyer = pickQuickSellBuyer(p);
   t.players = t.players.filter(x=>x.id!==playerId);
   ST.lineup = ST.lineup.map(id=> id===playerId? null : id);
   ST.budget += price;
-  ST.newsLog.unshift({title:"Jogador vendido", text:`${p.name} foi vendido por ${fmtMoney(price)}.`});
+  if(buyer){
+    moveSoldPlayer(p, buyer);
+    openSaleDone(p, buyer, price);
+    recordTransferFeed({name:p.name, price, fromClub:ST.teamId, toClub:buyer, pos:p.pos, ovr:p.ovr});
+    ST.newsLog.unshift({title:"Jogador vendido", text:`${p.name} foi vendido para o ${buyer} por ${fmtMoney(price)}.`});
+  } else {
+    ST.newsLog.unshift({title:"Jogador vendido", text:`${p.name} foi vendido por ${fmtMoney(price)}.`});
+  }
   scheduleSave();
 }
 
@@ -5451,11 +5501,13 @@ function acceptIncomingOffer(){
   const off = ST.uiModal;
   if(!off || off.type!=="incomingOffer") return;
   const t = myTeam();
+  const sold = t.players.find(p=>p.id===off.playerId);
   t.players = t.players.filter(p=>p.id!==off.playerId);
   ST.lineup = ST.lineup.map(id=> id===off.playerId? null : id);
   ST.budget += off.offer;
   ST.newsLog.unshift({title:"Venda milionária!", text:`${off.playerName} foi vendido para o ${off.club} por ${fmtMoney(off.offer)}.`});
   ST.uiModal = null;
+  if(sold){ moveSoldPlayer(sold, off.club); openSaleDone(sold, off.club, off.offer); }
   scheduleSave();
 }
 function declineIncomingOffer(){
@@ -8044,7 +8096,20 @@ function renderModal(){
   if(m.type==="timeConfig") return renderTimeConfigModal();
   if(m.type==="seasonTOTY") return renderSeasonTOTYModal();
   if(m.type==="feedback") return renderFeedbackModal();
+  if(m.type==="saleDone") return renderSaleDoneModal(m);
   return "";
+}
+function renderSaleDoneModal(m){
+  return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
+    <div class="modal sale-modal" style="max-width:380px;text-align:center;">
+      <div class="faint tiny uc">Venda concluída</div>
+      <div style="margin:14px 0 6px;display:flex;justify-content:center;">${clubCrestImg(m.club, 72, null)}</div>
+      <p class="mt8" style="line-height:1.5;"><b>${esc(m.playerName)}</b> foi vendido para o <b>${esc(m.club)}</b> por</p>
+      <div class="gold bold mono" style="font-size:28px;margin-top:4px;">${fmtMoney(m.price)}</div>
+      <p class="tiny faint mt8">Ele segue a carreira no novo clube e pode ser recomprado mais para frente.</p>
+      <div class="btn-row mt16"><button class="btn btn-gold grow" onclick="Game.closeModal()">Ok</button></div>
+    </div>
+  </div>`;
 }
 function renderFeedbackModal(){
   const ig = "https://www.instagram.com/_thefenomeno/", tk = "https://www.tiktok.com/@_thefenomeno";

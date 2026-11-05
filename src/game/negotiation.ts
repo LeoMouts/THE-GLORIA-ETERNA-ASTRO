@@ -16,7 +16,7 @@
 export const NEG_CONFIG = {
   startMood: 70,          // every negotiation opens with the director at 70/100
   maxRounds: 5,           // the club makes at most 4 counter-offers; a 5th proposal that still does not close ends the talks
-  nearFraction: 0.004,    // |x - target| below this share of the price is "the same number"
+  nearFraction: 0.01,     // |x - target| below this share of the price is "the same number"
   nearMin: 15000,         // ...and never less than this many dollars of slack
   absurdGap: 0.4,         // a number this far (share of the club's standing position) from what the club holds is outrageous: talks end at once
   absurdPastLimit: 0.3,   // ...as is a number this far past the club's limit
@@ -72,7 +72,7 @@ export function computeFlex(i: FlexInput): FlexResult {
 
 // ---------- helpers ----------
 export function roundMoney(v: number): number {
-  const step = v >= 2_000_000 ? 5000 : v >= 200_000 ? 1000 : 500;
+  const step = v >= 10_000_000 ? 100_000 : v >= 2_000_000 ? 50_000 : v >= 200_000 ? 5_000 : 500;
   return Math.max(step, Math.round(v / step) * step);
 }
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -187,8 +187,10 @@ export function decide(inp: DecideInput, st0: NegState): Decision {
     st.now = closePrice;
   } else if (verdict === "counter_small" || verdict === "counter_moderate" || verdict === "counter_high") {
     const k = verdict === "counter_small" ? 0.55 : verdict === "counter_moderate" ? 0.75 : 0.9;     // how much of the way it keeps
+    // a club that BUYS from the manager steps toward the number he asked for in real chunks (millions, not thousands)
+    const kb = verdict === "counter_small" ? 0.4 : verdict === "counter_moderate" ? 0.5 : 0.6;
     if (inp.role === "seller") counter = round5(Math.max(L, x + (nowPos - x) * k));
-    else counter = round5(Math.min(L, nowPos + (Math.min(x, L) - nowPos) * (1 - k)));
+    else counter = round5(Math.min(L, nowPos + (Math.min(x, L) - nowPos) * (1 - kb)));
     // the club never moves backwards — and if the user just repeated (or worsened) his number, it holds its position
     if (inp.role === "seller") counter = Math.min(counter, nowPos); else counter = Math.max(counter, nowPos);
     if (st.prevX != null && moved <= 0) counter = nowPos;
