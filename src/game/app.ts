@@ -4372,11 +4372,12 @@ function ageWorld(){
   // team's only way to change is losing players to retirement, while the user actively buys and
   // trains their way further and further ahead every year.
   runAITransferWindow(rng);
+  runSquadRenewal(rng);
   runGlobalClubReshuffle(rng);
   for(let i=0;i<22;i++) runFreeAgentSigning(rng); // summer wave: a good share of the free agents find a club
   // a proper "summer window" wave of Libertadores prospects leaving for Europe, on top of
   // whatever already trickled in day by day during the season via dailyTransferTick().
-  const jewelSales = 2 + Math.floor(rng()*3); // 2-4 per season
+  const jewelSales = 3 + Math.floor(rng()*3); // 3-5 per season
   for(let i=0;i<jewelSales;i++) runEuropeanPoaching(rng);
 }
 
@@ -4625,6 +4626,98 @@ function runAITransferWindow(rng){
       team.players.push(joined);
       recordTransferFeed({name:signed.name, price:fee, fromClub: fromClub || "Free Agents", toClub:name, pos:signed.pos, ovr:signed.ovr});
       signingSlots--;
+    }
+  });
+}
+// ------------------------------------------------------------
+// SQUAD RENEWAL — the "need threshold" pass above only fires when a slot is below what the tier
+// expects, so once everyone clears that bar a club stays frozen for years (only retirements,
+// replaced by youth, changed anything). This is the real recruitment turnover: every season each
+// AI club upgrades its weakest/oldest starting slots with players who are clearly better (or
+// simply younger replacements for 33+ starters), Brazilian clubs most of all, and releases the
+// squad's dead weight so rosters don't just keep growing.
+// ------------------------------------------------------------
+const RENEWAL_SLOTS = [["GK",1],["CB",2],["LB",1],["RB",1],["DMF",1],["CM",2],["AM",1],["LW",1],["RW",1],["ST",2]];
+function runSquadRenewal(rng){
+  const world = ST.world;
+  if(!world || !world.teams) return;
+  const names = shuffled(rng, Object.keys(world.teams).filter(n=>n!==ST.teamId && !world.teams[n].isNation));
+  names.forEach(name=>{
+    const team = world.teams[name];
+    const tier = tierOf(world, name);
+    const br = team.country==="Brasil";
+    const range = br ? {5:[4,6],4:[4,5],3:[3,5],2:[3,4],1:[3,4]}[tier] : {5:[3,4],4:[3,4],3:[2,4],2:[2,3],1:[2,3]}[tier];
+    let slots = range[0] + Math.floor(rng()*(range[1]-range[0]+1));
+    const asp = positionNeedThreshold(tier) + 3;
+    const ceiling = aiSignerBudgetCeiling(tier);
+    const plan = RENEWAL_SLOTS.map(([pos,n])=>{
+      const here = team.players.filter(p=>p.pos===pos).sort((a,b)=>b.ovr-a.ovr).slice(0,n);
+      while(here.length<n) here.push({ovr:45, age:30, pot:45, missing:true});
+      const avg = here.reduce((a,p)=>a+p.ovr,0)/n;
+      const olds = here.filter(p=>p.age>=33).length;
+      return {pos, n, here, weakest: here[n-1], gap: (asp-avg) + olds*3.5 + rng()*5};
+    }).sort((a,b)=>b.gap-a.gap);
+    for(let k=0; k<plan.length && slots>0; k++){
+      const {pos, weakest} = plan[k];
+      const minOvr = weakest.missing ? 50 : (weakest.age>=33 ? weakest.ovr-3 : weakest.ovr);
+      let signed = null, fromClub = null, isGlobal = false;
+      let cands = world.globalMarket.filter(c=>
+        !AI_EXCLUDED_CLUBS.has(c.club) && c.ovr<=ceiling && c.ovr>=minOvr &&
+        (c.pos===pos || (c.altPos && c.altPos.includes(pos))) && (c.age<=weakest.age+(weakest.age>=33?0:6) || c.ovr>=weakest.ovr+4)
+      );
+      { const sa = cands.filter(isSouthAmerican); if(sa.length && rng()>0.04) cands = sa; }
+      { const sap = TP.saProfile && TP.saProfile[clubGroupOf(name, world)]; if(sap){ const afford = cands.filter(c=>tmValueEstimate(c) <= sap.maxValue); if(afford.length) cands = afford; } }
+      if(cands.length){
+        const grp = clubGroupOf(name, world);
+        const maxFit = cands.reduce((m,c)=>Math.max(m,buyerFit(grp,c,clubGroupOf(c.club,world))),0.0001);
+        signed = pickWeighted(rng, cands, c=>{
+          let sc = 10;
+          if((SA_NEIGHBORS[team.country]||[]).includes(natPt(c.nat))) sc += 25;
+          sc += Math.min(25, Math.max(0, c.ovr-weakest.ovr)*3);
+          sc += c.age<=26 ? 6 : 0;
+          return sc * (0.03 + buyerFit(grp,c,clubGroupOf(c.club,world))/maxFit) * (isKeyMarketPlayer(world,c)?0.12:1);
+        });
+        if(signed){ fromClub = signed.club; isGlobal = true; }
+      }
+      if(!signed){
+        // domestic move: a club of the same level or lower with real depth at the slot sells one
+        const donors = shuffled(rng, Object.keys(world.teams).filter(n=>n!==name && n!==ST.teamId && !world.teams[n].isNation && tierOf(world,n)<=tier && (!br || world.teams[n].country==="Brasil")));
+        for(const dn of donors){
+          const donor = world.teams[dn];
+          const here = donor.players.filter(c=>(c.pos===pos || (c.altPos && c.altPos.includes(pos))) && c.ovr>=minOvr && c.ovr<=ceiling);
+          const depth = donor.players.filter(c=>c.pos===pos).length;
+          if(here.length && depth>=3){ signed = here.slice().sort((a,b)=>b.ovr-a.ovr)[0]; fromClub = dn; break; }
+        }
+      }
+      if(!signed) continue;
+      const fee = isGlobal ? aiGlobalFee(signed, clubGroupOf(name, world), rng) : askingPrice(signed, world.teams[fromClub]);
+      if(isGlobal) world.globalMarket = world.globalMarket.filter(c=>c.id!==signed.id);
+      else world.teams[fromClub].players = world.teams[fromClub].players.filter(c=>c.id!==signed.id);
+      const joined = Object.assign({}, signed, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0, value:fee});
+      delete joined.club; delete joined.league;
+      team.players.push(joined);
+      if(signed.ovr>=68) recordTransferFeed({name:signed.name, price:fee, fromClub: fromClub || "Free Agents", toClub:name, pos:signed.pos, ovr:signed.ovr});
+      slots--;
+    }
+    // squad clean-up: the ones nobody needs (old and low, no potential) leave for free
+    const MAX_SQUAD = 31;
+    if(team.players.length > MAX_SQUAD){
+      const posCount = {}; team.players.forEach(p=>posCount[p.pos]=(posCount[p.pos]||0)+1);
+      const worth = p => p.ovr + Math.max(0,(p.pot||p.ovr)-p.ovr)*0.6*(p.age<=23?1:0) - Math.max(0,p.age-30)*1.2;
+      const out = team.players.slice().sort((a,b)=>worth(a)-worth(b));
+      const minPos = pos => pos==="GK" ? 2 : 3;
+      const released = [];
+      for(const p of out){
+        if(team.players.length - released.length <= MAX_SQUAD-1) break;
+        if((posCount[p.pos]||0) <= minPos(p.pos)) continue;
+        if(p.ovr >= asp+2) continue;
+        released.push(p); posCount[p.pos]--;
+      }
+      if(released.length){
+        const ids = new Set(released.map(p=>p.id));
+        team.players = team.players.filter(p=>!ids.has(p.id));
+        released.forEach(p=>world.globalMarket.push(Object.assign({}, p, {club:"Free Agents", league:"Free Agent", injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0})));
+      }
     }
   });
 }
@@ -5397,6 +5490,8 @@ function render(){
   const app = document.getElementById("app");
   if(!app) return;
   clearTimeout(tickTimer); tickTimer=null;
+  // end of the first season: invite the player to send feedback on Instagram and follow on TikTok (once, never blocks)
+  if(ST && ST.stage==="season_end" && !ST.feedbackShown && !ST.uiModal){ ST.feedbackShown = true; ST.uiModal = {type:"feedback"}; }
   try{
     let html = "";
     if(!ST || ST.stage==="home") html = renderHome();
@@ -7948,7 +8043,28 @@ function renderModal(){
   if(m.type==="penaltyKick") return renderPenaltyKickModal(m);
   if(m.type==="timeConfig") return renderTimeConfigModal();
   if(m.type==="seasonTOTY") return renderSeasonTOTYModal();
+  if(m.type==="feedback") return renderFeedbackModal();
   return "";
+}
+function renderFeedbackModal(){
+  const ig = "https://www.instagram.com/_thefenomeno/", tk = "https://www.tiktok.com/@_thefenomeno";
+  return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
+    <div class="modal fb-modal" style="max-width:420px;">
+      <div class="faint tiny uc">Fim da 1ª temporada</div>
+      <div class="panel-title mt8">Está curtindo o jogo?</div>
+      <p class="small dim mt8" style="line-height:1.55;">Sua opinião ajuda a construir o THE MANAGER. Manda pra gente no direct do Instagram <b>@_thefenomeno</b>:</p>
+      <ul class="fb-list small">
+        <li>o que você mais gostou;</li>
+        <li>bugs ou problemas que encontrou;</li>
+        <li>melhorias e novidades que gostaria de ver.</li>
+      </ul>
+      <a class="btn btn-gold btn-block mt16" href="${ig}" target="_blank" rel="noopener noreferrer" onclick="Game.openExternal(event,'${ig}')">Enviar feedback no Instagram</a>
+      <a class="btn btn-block mt8" href="${tk}" target="_blank" rel="noopener noreferrer" onclick="Game.openExternal(event,'${tk}')">Seguir a gente no TikTok</a>
+      <div class="btn-row mt16">
+        <button class="btn grow" onclick="Game.closeModal()">Agora não</button>
+      </div>
+    </div>
+  </div>`;
 }
 function renderTimeConfigModal(){
   const speed = ST.matchSpeed || "normal";

@@ -9,6 +9,14 @@ const POS_GROUP = {
   LW: "ATT", RW: "ATT", SS: "ATT", ST: "ATT",
 };
 
+// who scores / who assists, by the role the player is lined up in: strikers and wingers finish most
+// of the goals, midfielders chip in a little, and the defensive ones only on set pieces; assists come
+// mostly from wingers, attacking midfielders, central midfielders and full-backs.
+const GOAL_ROLE_W = { ST: 1.25, SS: 1.0, LW: 0.62, RW: 0.62, AM: 0.5, LM: 0.42, RM: 0.42, CM: 0.17, DMF: 0.05, LB: 0.06, RB: 0.06, CB: 0.1, GK: 0 };
+const ASSIST_ROLE_W = { ST: 0.45, SS: 0.7, LW: 1.0, RW: 1.0, AM: 1.0, LM: 0.9, RM: 0.9, CM: 0.7, DMF: 0.3, LB: 0.55, RB: 0.55, CB: 0.06, GK: 0 };
+const ASSIST_RATE = 0.62;   // share of goals that carry an assist
+function roleWeight(table, role) { return table[role] != null ? table[role] : 0.1; }
+
 const FORMATIONS = {
   "4-3-3": ["GK", "LB", "CB", "CB", "RB", "DMF", "CM", "AM", "LW", "ST", "RW"],
   "4-4-2": ["GK", "LB", "CB", "CB", "RB", "LM", "CM", "CM", "RM", "ST", "ST"],
@@ -177,6 +185,10 @@ function simulateDetailedMatch(homeTeam, awayTeam, homeLineup, awayLineup, slots
     const sl = slotsFor(lineup);
     return lineup.filter((p, i) => p && (POS_GROUP[sl[i]] === "ATT" || POS_GROUP[sl[i]] === "MID"));
   }
+  function outfieldOf(lineup) {
+    const sl = slotsFor(lineup);
+    return lineup.filter((p, i) => p && sl[i] !== "GK");
+  }
   function midfieldersOf(lineup) {
     const sl = slotsFor(lineup);
     return lineup.filter((p, i) => p && POS_GROUP[sl[i]] === "MID");
@@ -201,9 +213,10 @@ function simulateDetailedMatch(homeTeam, awayTeam, homeLineup, awayLineup, slots
   const awayChanceMinutes = genMinuteList(Math.round(chancesAway));
 
   function processChance(minute, side, atkLineup, defLineup, atkOvr, defOvr, gkPlayer) {
-    const atkPlayers = attackersOf(atkLineup);
+    const atkPlayers = outfieldOf(atkLineup);
     if (atkPlayers.length === 0) return;
-    const shooter = weightedChoice(rng, atkPlayers, p => Math.pow(1.03, p.sho || p.ovr));
+    const roleOfPlayer = new Map(); { const sl = slotsFor(atkLineup); atkLineup.forEach((q, i) => { if (q) roleOfPlayer.set(q.id, sl[i]); }); }
+    const shooter = weightedChoice(rng, atkPlayers, p => roleWeight(GOAL_ROLE_W, roleOfPlayer.get(p.id)) * Math.pow(1.03, p.sho || p.ovr));
     stats[side].shots++;
     const onTargetChance = clamp(0.35 + (atkOvr - defOvr) / 140, 0.15, 0.75);
     const onTarget = rng() < onTargetChance;
@@ -220,9 +233,9 @@ function simulateDetailedMatch(homeTeam, awayTeam, homeLineup, awayLineup, slots
     if (isGoal) {
       stats[side].goals++;
       let assister = null;
-      if (rng() < 0.68) {
-        const mids = midfieldersOf(atkLineup).concat(attackersOf(atkLineup)).filter(p => p.id !== shooter.id);
-        if (mids.length) assister = weightedChoice(rng, mids, p => Math.pow(1.02, p.pas || p.ovr));
+      if (rng() < ASSIST_RATE) {
+        const mates = outfieldOf(atkLineup).filter(p => p.id !== shooter.id);
+        if (mates.length) assister = weightedChoice(rng, mates, p => roleWeight(ASSIST_ROLE_W, roleOfPlayer.get(p.id)) * Math.pow(1.02, p.pas || p.ovr));
       }
       events.push({ minute, side, type: "goal", player: shooter.name, assist: assister ? assister.name : null });
       bump(shooter.id, 2.4);
@@ -408,27 +421,25 @@ function buildMomentumWave(events, rng){
 function pickFastScorers(xi, count, rng) {
   if (count <= 0) return [];
   const { lineup, slots } = xi;
-  const attackers = lineup.filter((p, i) => p && POS_GROUP[slots[i]] === "ATT");
-  const mids = lineup.filter((p, i) => p && POS_GROUP[slots[i]] === "MID");
-  const pool = attackers.length ? attackers.concat(mids) : lineup.filter(p => p && p.pos !== "GK");
+  const pool = lineup.map((p, i) => p && slots[i] !== "GK" ? { p, role: slots[i] } : null).filter(Boolean);
   if (pool.length === 0) return [];
   const scorers = [];
   for (let i = 0; i < count; i++) {
-    scorers.push(weightedChoice(rng, pool, p => Math.pow(1.03, p.sho || p.ovr)).id);
+    scorers.push(weightedChoice(rng, pool, x => roleWeight(GOAL_ROLE_W, x.role) * Math.pow(1.03, x.p.sho || x.p.ovr)).p.id);
   }
   return scorers;
 }
 
-// same 68%-of-goals-get-an-assist, pass-weighted pick the detailed sim uses (see the
+// same assist rate and role-weighted, pass-weighted pick the detailed sim uses (see the
 // "goal"/assist branch above) — so fast-simulated (AI-vs-AI) matches can feed a real
 // league-wide "Assistências" table too, not just goals.
 function pickFastAssists(scorerIds, xi, rng) {
-  const { lineup } = xi;
+  const { lineup, slots } = xi;
   return scorerIds.map(scorerId => {
-    if (rng() >= 0.68) return null;
-    const pool = lineup.filter(p => p && p.id !== scorerId);
+    if (rng() >= ASSIST_RATE) return null;
+    const pool = lineup.map((p, i) => p && slots[i] !== "GK" && p.id !== scorerId ? { p, role: slots[i] } : null).filter(Boolean);
     if (!pool.length) return null;
-    return weightedChoice(rng, pool, p => Math.pow(1.02, p.pas || p.ovr)).id;
+    return weightedChoice(rng, pool, x => roleWeight(ASSIST_ROLE_W, x.role) * Math.pow(1.02, x.p.pas || x.p.ovr)).p.id;
   });
 }
 
