@@ -699,6 +699,23 @@ function ensureDivisions(){
   ST.otherLeague = buildLeague("B", ST.divisions.B, b.year || ST.seasonYear);
   playOtherRoundsUpTo(b.currentRound);
 }
+// every foreign club of the Libertadores / Sul-Americana fields has its real squad in the world from the start (not only when the
+// user's own club qualifies), so the whole continental market — Boca, River, Peñarol... — is always there to scout and buy from
+function ensureForeignClubs(){
+  if(ST.mode!=="brasileirao" || !ST.world) return;
+  const names = new Set();
+  try{ Object.values(libertadoresGroupsForYear(2026)).flat().forEach(n=>names.add(n)); }catch(e){}
+  Object.values(SULAMERICANA_2026).flat().forEach(n=>names.add(n));
+  names.forEach(name=>{
+    if(ST.world.teams[name] || isBrazilianClubName(name)) return;
+    const src = sulamericanaTeamSource(name);
+    if(!src || !src.country || src.country==="Brasil") return;
+    const players = src.players.map(p=>Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0}));
+    players.forEach(p=>{ if(p.id>nextIdCounter) nextIdCounter = p.id; });
+    ST.world.teams[name] = { name, country: src.country||"", flag: src.flag||"", group:null, source: src.source||"gen", players };
+    if(Array.isArray(ST.world.prelibMarket)) ST.world.prelibMarket = ST.world.prelibMarket.filter(p=>p.club!==name); // saved careers: drop the old duplicate listing
+  });
+}
 // squad for a Série C club that has just come up (there are no real rosters for them): ~26 generated players around Série B level
 function ensureSerieCTeam(name){
   if(ST.world.teams[name]) return;
@@ -745,6 +762,8 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.careerStats = {goals:{}, assists:{}, signings:[]};
   ST.world = freshBrasaWorld();
   ensureGlobalMarket();
+  ST.teamId = teamId;
+  ensureForeignClubs();
   ensurePrelibMarket();
   ST.teamId = teamId;
   ST.managerName = managerName || "Treinador";
@@ -788,6 +807,7 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.transferFeed = [];
   ST.dayCounter = 0;
   ST.xferFilter = {pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null, mode:"buy", sort:"ovr", page:1};
+  ensureForeignClubs();
   ST.divisions = { A: SERIE_A_2026.slice(), B: SERIE_B_2026.slice() };
   ST.serieCPool = SERIE_C_POOL.slice();
   ST.brasileirao = buildLeague("A", ST.divisions.A, 2026);
@@ -1787,7 +1807,7 @@ async function initApp(){
   if(loaded && loaded.schemaVersion===SCHEMA_VERSION){
     ST = loaded;
     applyRealPositionsToWorld(ST.world);
-    try{ ensureDivisions(); }catch(err){ console.warn("ensureDivisions failed", err); }
+    try{ ensureDivisions(); ensureForeignClubs(); }catch(err){ console.warn("ensureDivisions failed", err); }
     if(ST.world && Array.isArray(ST.world.globalMarket)){ // carreiras salvas: tira do mercado os cadastros duplicados removidos da base
       const dup = new Set(DUP_REMOVED);
       ST.world.globalMarket = ST.world.globalMarket.filter(p=>!dup.has(p.id));
@@ -5402,7 +5422,7 @@ function ensurePrelibMarket(){
     // in a Brasileirão career all 20 Série A clubs already have a REAL, AI-controlled roster
     // in ST.world.teams (see freshBrasaWorld) — skip them here so their players don't also
     // show up as a separate, duplicate-id "buy from the market" listing.
-    const skip = ST.mode==="brasileirao" ? new Set(SERIE_A_2026) : new Set();
+    const skip = ST.mode==="brasileirao" ? new Set(SERIE_A_2026.concat(Object.keys(ST.world.teams))) : new Set(); // clubs that already have a real squad in the world never get a second, duplicate listing
     Object.values(PRELIB_DATA.teams).forEach(t=>{
       if(skip.has(t.name)) return;
       t.players.forEach(p=> out.push(Object.assign({}, p, {club:t.name})));
@@ -7527,6 +7547,7 @@ function renderXferBuySubTab(f){
 
   if(source==="global"){
     let list = ST.world.globalMarket.filter(p=>!isFreeAgent(p));
+    let intlTeams = null;
     if(ST.mode==="brasileirao"){
       // the foreign Libertadores / Sul-Americana clubs (and the Pré-Libertadores pool) are INTERNATIONAL market: they live here, not under "Times do Brasileirão"
       ensurePrelibMarket();
@@ -7534,6 +7555,9 @@ function renderXferBuySubTab(f){
       Object.values(ST.world.teams).forEach(t=>{ if(t.isNation || t.country==="Brasil" || t.name===ST.teamId) return; t.players.forEach(p=>foreign.push(Object.assign({}, p, {club:t.name, _team:t.name}))); });
       (ST.world.prelibMarket||[]).forEach(p=>{ if(!isBrazilianClubName(p.club)) foreign.push(Object.assign({}, p, {_team:p.club})); });
       list = list.concat(foreign);
+      // club picker: every club that has a squad here (Boca, River, Peñarol...) — pick one to see its whole team
+      intlTeams = Array.from(new Set(foreign.map(p=>p._team))).sort();
+      if(f.team && f.team!=="ALL" && intlTeams.includes(f.team)) list = list.filter(p=>p._team===f.team);
     }
     if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
     if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
@@ -7549,7 +7573,7 @@ function renderXferBuySubTab(f){
     <div class="xfer-layout">
       <aside class="xfer-sidebar">
         <div class="xfer-filter-label" style="margin-bottom:10px;">Filtros</div>
-        ${renderXferSidebar(f, posOptions, null)}
+        ${renderXferSidebar(f, posOptions, intlTeams, "Jogador, clube ou país...")}
       </aside>
       <div class="xfer-main">
         <div class="dim tiny mb8">${iconGlobe(13)} ${ST.mode==="brasileirao"?"Clubes e jogadores de fora do Brasil — inclui os times da Libertadores e da Sul-Americana.":"Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados."} Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
@@ -10434,7 +10458,97 @@ const ACCESS_CODE_HASHES = [
   "62072ebac12690cc91ff4089d0c5cf21f21c34c2c95204e95a968f552db9a816",
   "538cef4a538963ae3eec18098da0aa8c1706806f7447dae0208971f0377ce691",
   "0324a55a90c2dff1fc6125f4664358c7796f8d3a3ec1a6ab0723904b9fd03c7f",
-  "4d29e49e70f5774b0835273d80fd01b17e5e6ea6d95dd41c86b6add18c8deeae"
+  "4d29e49e70f5774b0835273d80fd01b17e5e6ea6d95dd41c86b6add18c8deeae",
+  "12d391dd5b98b180802898c1f2896628a34a2e8e73d85bd2b8104e78c3007ae3",
+  "0d69e1342354b24c7a3ff1b822f5ff7c1f86d7d1a0bdcc56f1ba3ba15f2da1f9",
+  "5fb119e6de9da91daf48dffb66b891566b2e7fd28212056a2df6af56840eeb6f",
+  "0be2bf8ad544d31f2aa21a002defd680acfe1064e5685e2ec6a034ceb1c3699f",
+  "e02fba8efa56b4e65914b80cdd3de517aa385c6220cbbfbe9b91ccf81a3a9176",
+  "1af57eafebb6523debca435b820f1f8b72cd28bc1825d48472db7a58a659e340",
+  "ac144c9f7f69ba605e78a41c601f115698265531880ec9a2150138f8d2ba51e0",
+  "1e9e434f0c8421e55ff413c685820beead1b0b0cc7f5faa65e07a50e1c28cd62",
+  "026a64dbb92e8bde7037910e869e153e78fa34a3eadcec26830abdc9cd4e45b4",
+  "c0d6e6e89dc17a5fb4f46f7e4a03bcb26e0f3e34df970e3799654244495242ad",
+  "c9d3bbfc14271b3a552c13f82160978822d348e7ad1ddb2f775b7e89b70a68f4",
+  "d1e6643da7d3439f20d193da6bbbb4a008305c4d85abab1545aa3b0a406e7eb5",
+  "79d2bf943b0036cb6670cdb14827b1b092825d6e32b555124c336bd9c5573696",
+  "f30bb9f8a864d12cbc9db0803dc72b339470c2ef862d70de031645a11a39b523",
+  "1b86c772bbd45228e622e995de7d2de9f75d78621674c39415f182e94d0320ba",
+  "7566f5feefa15b1f0bb7c6ca102c5d3f17adb54aec2d25530f48cb0e108231cb",
+  "0282ea1286affa9a3f2964b776412a3490316e46aeea160c70fb901b75479320",
+  "3633a61d71b9b19ed3d9b7672e7772b43362bbc62c42e5102c4c5c624adac7b9",
+  "04c675fb54af7eb2495995a8dbfc27cc1c2dbe11be4e7485ae82ed0c07cf7e3e",
+  "fbf66bb6c0f87c74396aeb8380e14657d59f9432b6b271e4a79c35c7095ead1f",
+  "cdcd64c6153d965da0225f9f1d3dc42bc50a5935dc676da96c51257c961fc92e",
+  "916073fadbf6984737b68cc5d18178f0e7825f126517a2261c92f0c1a5eb988e",
+  "e4f4b8a2d9ccdbb61586c60c53381a28916faf87a75ef904f394e331c3d5f8f1",
+  "350635f4caeeea8d4168a42d7d7c6b8c14a25cdee5dbd19f8635f534661e2d8d",
+  "edf36a7c28d02fe5a2725257492d4ea5d67f96dc6b6459ca62ba425ef7e8a3a0",
+  "d0506aa69a1f64f9cff56d03de933c290fac3a1d1cd2d49aca425c28e3394cc1",
+  "fa6d863eff03a4fabede36e3611762d251294ccae284cb0c99b0c51cc507642b",
+  "e23326b15c1eccb06cce213958f4425eccf20dd12e45a3b7cc07c2b02e1feeba",
+  "6bc89eaa47a2c29b6a1d03720c48f0035e3928990b12b92cd6bbfc6877f204f8",
+  "cb4c7ce2767360c9a03f05eff6b35aa3c15eda5b8d8f4a211080a2fc83b43b89",
+  "63c9738bbbc15f7b89888dd8b43289bc99d028d1d9d6c7daa55d188634bd3abd",
+  "7e0f06471c31029106dcf83d8c3051b21332a69e185b9568161446d4ef0f6b9f",
+  "4026ec8e9ae47ec7929d573f76c641c7d6d35342af0c38e4e4e6bdd42373a1f1",
+  "2bd00206469ad939b120fab3c332b8eabe2278727a08fc6c984e5aabff85b661",
+  "c91f4d99f75ca805db413086bf6bcbb79c90f24dc7935d9ed7d235585688e34e",
+  "1e3c9136fec4e40958a58dfedac0638ccfa4c187ad369cd060f870bb0c0ee657",
+  "75264fd8f364a19e8f615beabb79e41c034c4d9d7236fd435441f9030a47204f",
+  "eadff0c3a3fa6f33c88262ad5834e2e59ced4631dbad04672ea3a9d9555d4e4f",
+  "e604709068286a6afd17576d371d9ee77cd637c2b39e174b51ea8269202092fa",
+  "08482d13faea807c2283201b0cac314930f7fbc2b97b1735fdbe3cf555f97d21",
+  "cbb60045cdbc273a866a950b10a56ced1459069ebd0a8e47931d681e269bef90",
+  "c8bfb1a2a8c998c07d3a99b7026b2f320fcd5bd18345ce7539485934ab84d651",
+  "4b5ca6d32c970f162201705a7c2d9a974217d8e235c91aff72e3b5d48a8329a7",
+  "da5e0d93184cfd0c765608a12227b1f2b2b299aa0942948c028c8e658d3e72da",
+  "71d4c8bba951f0b595b54cb1e23f8658e6cbd7b50be5a007a6b6271c818eeba4",
+  "9468b9e1f425b166ab33449276c59f282f59687c5c120bad2126c53a1d8f0bf7",
+  "08a7b6fc16123b6dfd8e8aa7a331786254836ba860e16208eb70ba548459aae8",
+  "ffbcaea199636cb815902abac7bb9c932f53ed2e0219f78aa40baa1a3bb5599f",
+  "1bc8386c10ff90966a6b90f5b9112e0e48707a0cf41199dc1281921545ea398d",
+  "5b494af57acc5af82c27ce44761106de5be2fc7a00ca204c81a8b5a93f304d08",
+  "4629090cd794dcc57e5f5200dd57a72b93de69f1f43c3ae8d3736d6de1b75859",
+  "f0473318685ee74a3f3adc2ce7782bccb485760f18577821ebab3e30a3dffb26",
+  "bb4750dc91cd67e9d7e625ae97d5f3af4d8aca94288eaf4877512924eb391d5a",
+  "135e7a55290f5d9d291a0d6028dc41aade21a2bc49b4983aa2e876ef14551c77",
+  "3cd2858aaf1b8298978bb683c63d2cccc60582cf5dd47ace67b1a6643cb9e548",
+  "25b8a53a7b8b5e0fe3eda0dad3da7f04fa1b9438ab5b64f582dd192481bca5e6",
+  "bea71ebd53217373b129394db021ef59ba5036ce6d6ca22f7fe2f6d6f58acbdd",
+  "c13d32ada946ca54b2be00b707da66eb084f07abe7f0ebf7b3ce760ec28a5b2b",
+  "00b276da9d655ab1a472890a63c640d022e5b56698558972a52e9823e6a52350",
+  "7ca9efe92f156f5ba5b1ee28e7af3a28e7a5538e6b7ea3813cd0f8ff3d35292f",
+  "54dc3423fb87b8f4a137fe973d1652466e2fe724c00ba13ac90a3bf88c66a09c",
+  "3ae9261a164decbcc800b38d8f85255ee91e9c03eea88f7be19378bc9fd6c876",
+  "e92cc17f8537077fec05665631e2badcdc107b39f25092026742f5ba8298da43",
+  "9be9b81a21133483e535ae1bb3f41a76b8874910b7c31593e643cd71e25f82a9",
+  "e7ba48b50564caca959c06166a9caf4c6d7c12bf3d2c28e33e3d5bce25f108ea",
+  "bf3303bef53be43567362427c3efbbd960797bc3a577ad7f957b658c2ddf7872",
+  "98012ddc9c1bc7a12bd0a685ce4882baf3ee3f824090d01725dcd32f02375b02",
+  "1784566c9611400b60fa0dd802fa8f9fe0e1c3e2cc54b9a470df252cd6bc487d",
+  "4a435e607bd019cc4f7ddad61dc1f3bdf50ac95293dedba8f0db0df5212639f3",
+  "371b52996d9d34179f12e53da292fd062ec442cf44cf8870449f007c4aab2e4c",
+  "d22131a9647dd16cb81ebd203fe9da4c0dd43cb107cc454e3c3e67b24e86ea3f",
+  "329a6da6afbb04a0ec55bcc201f2dd21b3b9fb5cc4d05b1abfefd12cb9df7295",
+  "15d9275fbef1bfb2bd2a277b3c0107da4ff914db9b50f8d2536cb4f0e9521095",
+  "011cc6ebb11a90c8c9395a3e21a0708482ea6545f4b95e6ae6c19287fe1488c2",
+  "71530e5abfe425158e5843224d3e4e137c0ab6159d962d2adfb4504b53af9aca",
+  "9c13c43e83f473a4f3cbe5370ae565edb4fe54fdef44e7a2d7c5e39f6f8c2691",
+  "35c72f2ffd8b24bd10f8940c083a33c84dd56ba85c916d4416d8ff68f3afd654",
+  "5d91b9c9862d0dce7dfc0873064269c00ae9f8cd20e5e88278725c9d17c51e79",
+  "a0d9d99badb3ab1344ebbe8d50e7b975867ca16a2c9ca179746c06222aec0156",
+  "6e31ae1a6396c0785c354ad60830a5c74a4e925e4fa1f37621174d9a1a7fa965",
+  "58db79df172a2d15523a2bf376f851c2edfbb0e1175bdcea67cb6c5ae0625d38",
+  "3a517578ec20e0e4240e607950c640a2d939c1c6e4f312975ebc7cd88c4bd286",
+  "9a6522456d1cd994884b6e3fb27619d0f583bbfe6098d97127782582c6f92321",
+  "aff3319a07b2bb63ab2852ba17acebdc2d18ea661a6c7fe953fe6e41d3012754",
+  "bf4dfdf612a5a0bffc84154cd4b85c22ee3f7d3fcbb1fa88d9c597ae2eabfb02",
+  "f3862b35eb3575240f12eed210d7d6b9ead074cb1459d3380158ef43925ebaaf",
+  "d3151f8fad585f6ec0db41c63c987fc4a08fd858fcf2a28c1ca7682d9a9575aa",
+  "cb045c13dcb29b9e619617ccd2385f59ea4238fdd45249f4824e624299f22933",
+  "10955fe1340489a8f90a1f3afc513c02d6553fa0279930273c18794da97b7861",
+  "08b1d28a27e8ac65a5a1c4d79e2fd9fa07e1384401d0a3f78882ea13558ee826"
 ];
 async function sha256Hex(txt){
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(txt));
