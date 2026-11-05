@@ -1863,7 +1863,7 @@ function setupSeasonCompetition(){
     userEliminated:false,
     placementReached:null,
     placementLabel:null,
-    scorers:{}, // "<team>#<playerId>" -> {id,name,team,goals} — season-wide "Artilheiros"
+    scorers:{}, // "<playerId>" -> {id,name,team,goals} — season-wide "Artilheiros"
   };
 }
 
@@ -1891,15 +1891,30 @@ function compKeyForContext(ctx){
   if(ctx.type==="wc") return "wc";
   return undefined;
 }
+// Season stat tables are keyed by PLAYER (not by "club#player"), so a player who changes club mid-season keeps ONE
+// line with all his goals/assists, shown under the club he plays for now. Old saves (keys "Club#id") are merged on first touch.
+function migrateStatMap(map, field){
+  const keys = Object.keys(map||{});
+  if(!keys.some(k=>k.indexOf("#")>=0)) return map||{};
+  const out = {};
+  keys.forEach(k=>{
+    const e = map[k]; const id = String(e.id);
+    if(!out[id]) out[id] = Object.assign({}, e);
+    else { out[id][field] += e[field]; out[id].team = e.team; }
+  });
+  return out;
+}
 // records one goal for the season-wide top-scorers table.
 function addScorerGoal(teamName, playerId, compKey){
   const p = playerById(teamName, playerId);
   if(!p) return;
   const store = competitionStatsStore(compKey);
   if(!store) return;
+  if(!store.scorersV2){ store.scorers = migrateStatMap(store.scorers, "goals"); store.scorersV2 = true; }
   const scorers = store.scorers || (store.scorers = {});
-  const key = teamName+"#"+playerId;
+  const key = String(playerId);
   if(!scorers[key]) scorers[key] = {id:playerId, name:p.name, team:teamName, goals:0};
+  scorers[key].team = teamName;
   scorers[key].goals++;
 }
 // same idea, for the season-wide "Assistências" table (Desempenho tab).
@@ -1908,10 +1923,35 @@ function addAssistPoint(teamName, playerId, compKey){
   if(!p) return;
   const store = competitionStatsStore(compKey);
   if(!store) return;
+  if(!store.assistersV2){ store.assisters = migrateStatMap(store.assisters, "assists"); store.assistersV2 = true; }
   const assisters = store.assisters || (store.assisters = {});
-  const key = teamName+"#"+playerId;
+  const key = String(playerId);
   if(!assisters[key]) assisters[key] = {id:playerId, name:p.name, team:teamName, assists:0};
+  assisters[key].team = teamName;
   assisters[key].assists++;
+}
+// where every player plays RIGHT NOW (squads first, then the global/prelib markets) — so tables always show the new club after a transfer
+function currentClubIndex(){
+  const idx = new Map();
+  const w = ST.world;
+  if(!w) return idx;
+  (w.globalMarket||[]).forEach(p=>{ if(p.club) idx.set(String(p.id), p.club); });
+  (w.prelibMarket||[]).forEach(p=>{ if(p.club) idx.set(String(p.id), p.club); });
+  Object.values(w.teams||{}).forEach(t=>{ if(t.isNation) return; (t.players||[]).forEach(p=>idx.set(String(p.id), t.name)); });
+  return idx;
+}
+// rows of a season stat table (one per player, current club, sorted) — `field` is "goals" or "assists"
+function statRows(store, mapName, field, n){
+  if(!store) return [];
+  const flag = mapName+"V2";
+  if(!store[flag]){ store[mapName] = migrateStatMap(store[mapName], field); store[flag] = true; }
+  const isWc = ST.worldCup && store===ST.worldCup;   // national teams keep the nation as "club"
+  const idx = isWc ? null : currentClubIndex();
+  const rows = Object.values(store[mapName]||{}).map(e=>{
+    const club = idx && idx.get(String(e.id));
+    return club && club!=="Free Agents" ? Object.assign({}, e, {team:club}) : e;
+  });
+  return rows.sort((a,b)=>b[field]-a[field] || a.name.localeCompare(b.name)).slice(0, n||25);
 }
 
 // wraps the fast (AI-vs-AI) simulator so every match — not just the user's own —
@@ -1959,7 +1999,8 @@ function collectFastRatings(res, homeTeamName, awayTeamName){
 // never needs it (everyone in it only has 1 appearance that round anyway).
 function pickBestXIFromPool(pool, minApps){
   const slots = E.FORMATIONS["4-3-3"];
-  const candidates = Object.values(pool).filter(r=>r.ratingCount>=(minApps||1)).map(r=>({...r, avgRating: r.ratingSum/r.ratingCount}));
+  const clubNow = currentClubIndex();
+  const candidates = Object.values(pool).filter(r=>r.ratingCount>=(minApps||1)).map(r=>{ const c = clubNow.get(String(r.id)); return {...r, team: c && c!=="Free Agents" ? c : r.team, avgRating: r.ratingSum/r.ratingCount}; });
   const used = new Set();
   return slots.map(slot=>{
     let pool1 = candidates.filter(c=>!used.has(c.id) && c.pos===slot);
@@ -2201,8 +2242,7 @@ function maybeGenerateScoutMail(){
   if(!opp) return;
   const rng = E.makeRNG(nextSeed());
   const best = opp.players.slice().sort((a,b)=>b.ovr-a.ovr)[0];
-  const scorersStore = (ST.mode==="brasileirao" ? ST.brasileirao.scorers : ST.competition.scorers) || {};
-  const topScorer = Object.values(scorersStore).filter(s=>s.team===oppName).sort((a,b)=>b.goals-a.goals)[0];
+  const topScorer = statRows(ST.mode==="brasileirao" ? ST.brasileirao : ST.competition, "scorers", "goals", 400).filter(s=>s.team===oppName)[0];
   const avg = teamAvgOvr(opp);
   const lines = [
     SCOUT_OPENERS[Math.floor(rng()*SCOUT_OPENERS.length)],
@@ -4235,8 +4275,8 @@ function endOfSeason(){
 
   // Rei da América: the tournament's outright top scorer — only worth celebrating on the
   // championship screen when that player happens to be one of ours.
-  const scorersList = Object.values(comp.scorers || {});
-  const topScorer = scorersList.length ? scorersList.slice().sort((a,b)=>b.goals-a.goals)[0] : null;
+  const scorersList = statRows(comp, "scorers", "goals", 400);
+  const topScorer = scorersList.length ? scorersList[0] : null;
   const reiDaAmerica = (placement==="Campeão" && topScorer && topScorer.team===ST.teamId) ? topScorer : null;
   if(reiDaAmerica){
     ST.newsLog.unshift({title:"Rei da América", text:`${reiDaAmerica.name} termina a Libertadores como artilheiro da competição com ${reiDaAmerica.goals} gols e leva o Rei da América para o ${ST.teamId}.`});
@@ -6414,12 +6454,8 @@ function renderBrasaTable(rows, opts){
 // top scorers / top assisters, league-wide — used on the Desempenho tab (top 25 of each).
 // generic top-scorers/assisters readers — used for whichever competition the Desempenho tab's
 // filter currently has selected (see desempenhoAvailableComps()/renderDesempenhoTab()).
-function compTopScorersFull(store, n){
-  return Object.values((store&&store.scorers)||{}).sort((a,b)=>b.goals-a.goals).slice(0,n||25);
-}
-function compTopAssistersFull(store, n){
-  return Object.values((store&&store.assisters)||{}).sort((a,b)=>b.assists-a.assists).slice(0,n||25);
-}
+function compTopScorersFull(store, n){ return statRows(store, "scorers", "goals", n); }
+function compTopAssistersFull(store, n){ return statRows(store, "assisters", "assists", n); }
 function renderStatLeaderboard(title, rows, statKey, emptyMsg){
   if(rows.length===0){
     return `<div class="panel"><div class="panel-title">${esc(title)}</div><div class="faint tiny">${esc(emptyMsg||"Nenhum registro ainda nesta temporada.")}</div></div>`;
@@ -6699,7 +6735,7 @@ function renderUpcomingFixtures(g){
 }
 // season-wide top scorers, tallied from every match (yours and every AI-vs-AI result).
 function renderTopScorers(){
-  const scorers = Object.values(ST.competition.scorers||{}).sort((a,b)=>b.goals-a.goals).slice(0,5);
+  const scorers = statRows(ST.competition, "scorers", "goals", 5);
   if(scorers.length===0){
     return `<div class="panel"><div class="panel-title">Artilheiros</div><div class="faint tiny">Nenhum gol registrado ainda nesta temporada.</div></div>`;
   }
