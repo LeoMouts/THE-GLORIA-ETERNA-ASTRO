@@ -5957,11 +5957,11 @@ function renderCalendarStrip(oppName, compType, wide){
     // the match-day square carries the competition's own trophy — not the opponent's crest
     // (already shown up top in the VS header) and not a placeholder ball.
     if(isMatchDay) icon = competitionTrophyImg(compType, wide?74:54, 1);
-    else if(isTrainingDay) icon = `<img src="${TRAINING_ICON}" alt="Treino" style="width:100%;height:100%;object-fit:contain;"/>`;
+    else if(isTrainingDay) icon = `<img src="${TRAINING_ICON}" alt="Treino" style="height:${wide?74:54}px;width:auto;max-width:100%;object-fit:contain;"/>`;
     const matchClass = isMatchDay ? (compType==="copa" ? " cal-day-match cal-day-copa" : compType==="libertadores" ? " cal-day-match cal-day-liberta" : compType==="sulamericana" ? " cal-day-match cal-day-sula" : " cal-day-match") : "";
     cells += `<div class="cal-day${matchClass}${isTrainingDay?' cal-day-training':''}${i===0?' cal-day-today':''}">
       <div class="cal-day-label">${WEEKDAYS[wIdx]}</div>
-      <div class="cal-day-icon${isMatchDay?' cal-day-icon-trophy':''}">${icon}</div>
+      <div class="cal-day-icon${isMatchDay||isTrainingDay?' cal-day-icon-trophy':''}">${icon}</div>
     </div>`;
   }
   return `<div class="cal-panel mt16${wide?' cal-panel-wide':''}">
