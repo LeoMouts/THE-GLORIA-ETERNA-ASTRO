@@ -4,6 +4,7 @@
 // ============================================================
 import * as E from "./engine";
 import * as WC from "./worldcup";
+import NAT_FIX from "./data/natFix.json";
 import { decide as negDecide, newNegState, computeFlex, composeReply, moodBand, moodLine, moodSummary, NEG_CONFIG, roundMoney } from "./negotiation";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
@@ -5849,7 +5850,7 @@ function hubSubline(team){
   return `${team.flag} ${esc(team.country)} · ${ST.prelib ? `Pré-Libertadores ${ST.prelib.year}` : `Temporada ${ST.seasonYear} (${ST.seasonNum}/10)`}`;
 }
 function renderHub(){
-  if(ST.natDuty && (ST.hubTab==="transfers"||ST.hubTab==="scout"||ST.hubTab==="desempenho"||ST.hubTab==="clube")) ST.hubTab = "competicao";
+  if(ST.natDuty && (ST.hubTab==="transfers"||ST.hubTab==="scout"||ST.hubTab==="clube")) ST.hubTab = "competicao";
   const team = myTeam();
   const rep = ST.reputation;
   return `
@@ -5880,7 +5881,7 @@ function renderHub(){
     ${ST.natDuty?"":tabBtn("transfers","Transferências")}
     ${ST.natDuty?"":tabBtn("scout","Olheiro")}
     ${tabBtn("email",iconEnvelope(13)+" E-mail"+(unreadMailCount()?` <span class="badge-mail">${unreadMailCount()}</span>`:""))}
-    ${ST.mode==="brasileirao"&&!ST.natDuty?tabBtn("desempenho","Desempenho"):""}
+    ${ST.mode==="brasileirao"?tabBtn("desempenho","Desempenho"):""}
     ${ST.natDuty?"":tabBtn("clube","Meu Clube")}
   </div>
   <div class="tab-content">
@@ -6273,7 +6274,7 @@ function renderStatLeaderboard(title, rows, statKey, emptyMsg){
   ${rows.map((s,i)=>`<tr>
     <td class="dim" style="width:24px;">${i+1}</td>
     <td class="bold">${esc(s.name)} ${s.team===ST.teamId?'<span class="gold small">(você)</span>':''}</td>
-    <td class="dim">${esc(s.team)}</td>
+    <td class="dim">${wcFlagOf(s.team,16)} ${esc(s.team)}</td>
     <td class="tac gold bold">${s[statKey]}</td>
   </tr>`).join("")}
   </tbody></table></div>
@@ -6330,17 +6331,19 @@ function nextCompetitionStats(){
   if(t==="intercontinental" && ST.intercontinental) return {store:ST.intercontinental, title:"Mundial de Clubes"};
   return {store:ST.brasileirao, title:"Brasileirão"};
 }
-function renderWeekScorersCard(){
-  const info = nextCompetitionStats();
-  const rows = compTopScorersFull(info.store, 8);
+// scorers <-> assisters: one card, click to flip (shared by every competition's home screen and the World Cup)
+function renderStatFlipCard(store, title){
+  const assists = ST.compStatView==="assisters";
+  const rows = assists ? compTopAssistersFull(store, 8) : compTopScorersFull(store, 8);
   const head = `<div class="row" style="justify-content:space-between;align-items:baseline;">
-      <div class="panel-title" style="margin:0;">⚽ ARTILHEIROS</div>
-      <div class="tiny faint uc">${esc(info.title)}</div>
+      <div class="panel-title" style="margin:0;">${assists?"🎯 ASSISTÊNCIAS":"⚽ ARTILHEIROS"}</div>
+      <div class="tiny faint uc">${esc(title)} · clique para ${assists?"ver artilheiros":"ver assistências"}</div>
     </div>`;
+  const open = `<div class="panel stat-flip-panel" onclick="Game.toggleCompStat()" title="Clique para alternar entre artilheiros e assistências">`;
   if(!rows.length){
-    return `<div class="panel">${head}<div class="faint tiny mt8">Nenhum gol registrado ainda nesta competição. Os artilheiros aparecem aqui assim que a bola rolar.</div></div>`;
+    return `${open}${head}<div class="faint tiny mt8">${assists?"Nenhuma assistência registrada ainda nesta competição.":"Nenhum gol registrado ainda nesta competição. Os artilheiros aparecem aqui assim que a bola rolar."}</div></div>`;
   }
-  return `<div class="panel">${head}
+  return `${open}${head}
     <div class="comp-scorers-list">
     ${rows.map((r,i)=>{
       const pl = playerById(r.team, r.id) || {id:r.id, name:r.name};
@@ -6348,11 +6351,15 @@ function renderWeekScorersCard(){
         <span class="comp-scorer-rank">${i+1}</span>
         ${playerFaceImg(pl,30)}
         <div class="comp-scorer-body"><div class="bold">${esc(r.name)}</div><div class="tiny dim">${clubCrestImg(r.team,14,null)} ${esc(r.team)}</div></div>
-        <span class="comp-scorer-goals gold bold mono">${r.goals}</span>
+        <span class="comp-scorer-goals gold bold mono">${assists?r.assists:r.goals}</span>
       </div>`;
     }).join("")}
     </div>
   </div>`;
+}
+function renderWeekScorersCard(){
+  const info = nextCompetitionStats();
+  return renderStatFlipCard(info.store, info.title);
 }
 function renderBrasileiraoCompeticaoTab(){
   /* the home screen is deliberately static: a wide "próximo jogo" card on top, then three equal square boxes (Fabrizio Romano, the artilheiros of whichever competition the next match belongs to, last e-mail) - only the text inside changes. No tables or brackets here; those all live in the Desempenho tab. */
@@ -6387,7 +6394,9 @@ function brasaRecentForm(teamName, n){
 // season starts, Sul-Americana/Libertadores only exist at all when the club qualified for them —
 // see startSulamericanaIfEligible()/startLibertadoresCompletoIfEligible()).
 function desempenhoAvailableComps(){
+  if(ST.natDuty) return [{key:"wc", label:"Copa do Mundo"}]; // comandando uma seleção: só a Copa interessa
   const opts = [{key:"brasileirao", label:"Brasileirão"}];
+  if(ST.worldCup && ST.worldCup.year===ST.seasonYear) opts.unshift({key:"wc", label:"Copa do Mundo"});
   if(ST.copaDoBrasil) opts.push({key:"copa", label:"Copa do Brasil"});
   if(ST.sulamericana) opts.push({key:"sula", label:"Sul-Americana"});
   if(ST.libertadoresCompleto) opts.push({key:"lib", label:"Libertadores"});
@@ -6452,6 +6461,7 @@ function renderIcDesempenhoBlock(){
   </div>`;
 }
 function renderDesempenhoCompBlock(key){
+  if(key==="wc") return renderWcDesempenhoBlock();
   if(key==="ic") return renderIcDesempenhoBlock();
   const store = key==="copa" ? ST.copaDoBrasil : key==="sula" ? ST.sulamericana : ST.libertadoresCompleto;
   const title = key==="copa" ? `Copa do Brasil ${store.year}` : key==="sula" ? `Sul-Americana ${store.year}` : `Libertadores ${store.year}`;
@@ -6466,7 +6476,7 @@ function renderDesempenhoCompBlock(key){
 }
 function renderDesempenhoTab(){
   const opts = desempenhoAvailableComps();
-  if(!opts.some(o=>o.key===ST.desempenhoFilter)) ST.desempenhoFilter = "brasileirao"; // guards against a stale pick — e.g. the Sul-Americana campaign it pointed at is over and gone
+  if(!opts.some(o=>o.key===ST.desempenhoFilter)) ST.desempenhoFilter = opts[0].key; // guards against a stale pick — e.g. the Sul-Americana campaign it pointed at is over and gone
   const filter = ST.desempenhoFilter;
   const filterBar = renderDesempenhoFilterBar(opts, filter);
   const body = filter==="brasileirao" ? renderDesempenhoBrasileiraoBlock() : renderDesempenhoCompBlock(filter);
@@ -8599,6 +8609,7 @@ const Game = {
     scheduleSave(); render();
   },
   setWcView(v){ if(ST.worldCup) ST.worldCup.view = v; render(); },
+  toggleCompStat(){ ST.compStatView = ST.compStatView==="assisters" ? "scorers" : "assisters"; render(); },
   acceptNationalJob(id){ acceptNationalJob(id); render(); },
   declineNationalJob(id){ declineNationalJob(id); render(); },
   openCallup(){ wcOpenCallup(false); render(); },
@@ -8609,7 +8620,7 @@ const Game = {
   callupClear(){ const c = ST.wcCallup; if(!c) return; c.ids = []; c.msg = ""; render(); },
   callupConfirm(){ wcCallupConfirm(); render(); },
   callupClose(){ wcCallupClose(); render(); },
-  finishWcEnd(){ ST.stage = "hub"; ST.hubTab = "competicao"; ST.calendarDaysLeft = null; scheduleSave(); render(); },
+  finishWcEnd(){ ST.stage = "hub"; ST.hubTab = "competicao"; ST.calendarDaysLeft = null; ST.desempenhoFilter = "brasileirao"; scheduleSave(); render(); },
   forceEndSeason(){
     autoFinishBackgroundCups();
     scheduleSave();
@@ -8974,7 +8985,7 @@ function wcPoolIndex(){
   const add = (p, clubName)=>{
     if(!p || seen.has(p.id)) return;
     seen.add(p.id);
-    const nn = WC.nationOf(p.nat);
+    const nn = WC.nationOf((p.nat==="Brasil" && NAT_FIX[p.name]) || p.nat); // estrangeiros que jogam em clubes brasileiros não são brasileiros
     if(!nn) return;
     if(!byNat.has(nn.en)) byNat.set(nn.en, []);
     byNat.get(nn.en).push(p);
@@ -9212,6 +9223,7 @@ function beginWorldCup(){
     if(ST.hubTab==="transfers" || ST.hubTab==="scout" || ST.hubTab==="clube" || ST.hubTab==="desempenho") ST.hubTab = "competicao";
   }
   ST.stage = "hub"; ST.hubTab = "competicao"; ST.uiModal = null;
+  ST.desempenhoFilter = "wc";
   ST.calendarDaysLeft = null; ST.trainingPending = false;
   ST.newsLog.unshift({title:`Começa a Copa do Mundo ${year}!`, text: job ? `Todos os campeonatos pararam. Você comanda a seleção ${job.pt}: grupo ${Object.keys(groups).find(g=>groups[g].includes(ST.worldCup.userKey))}.` : `Todos os campeonatos pararam: 48 seleções disputam a Copa do Mundo ${year}.`});
   scheduleSave();
@@ -9570,10 +9582,10 @@ function renderWcGroupCard(letter){
     </tbody></table>
   </div>`;
 }
-function renderWcGroups(){
+function renderWcGroups(noFixtures){
   const wc = ST.worldCup;
   const letters = Object.keys(wc.groups);
-  const ug = wc.userKey ? letters.find(l=>wc.groups[l].includes(wc.userKey)) : null;
+  const ug = (wc.userKey && !noFixtures) ? letters.find(l=>wc.groups[l].includes(wc.userKey)) : null;
   const fx = ug ? `<div class="panel wc-panel mt16"><div class="panel-title">Jogos do Grupo ${ug}</div><div class="wc-results">${wc.fixtures[ug].map((md,i)=>md.map(m=>`<div class="wc-res${(m.home===wc.userKey||m.away===wc.userKey)?' is-user':''}">
       <span class="wc-res-g">R${i+1}</span><span class="wc-res-t wc-res-home">${esc(m.home)} ${wcFlagOf(m.home,18)}</span>
       <span class="wc-res-score">${m.played?`${m.hs} – ${m.as}`:"x"}</span><span class="wc-res-t wc-res-away">${wcFlagOf(m.away,18)} ${esc(m.away)}</span></div>`).join("")).join("")}</div></div>` : "";
@@ -9606,25 +9618,59 @@ function renderWcScorers(){
   return `<div class="panel wc-panel"><div class="panel-title">Artilharia da Copa</div>
     <div class="wc-scorers">${list.map((s,i)=>`<div class="wc-scorer"><span class="wc-scorer-rank">${i+1}</span>${wcFlagOf(s.team,20)}<span class="bold">${esc(s.name)}</span><span class="dim tiny">${esc(s.team)}</span><span class="wc-scorer-goals">${s.goals}</span></div>`).join("")}</div></div>`;
 }
+function wcFocusGroup(){
+  const wc = ST.worldCup;
+  const letters = Object.keys(wc.groups);
+  const mine = wc.userKey ? letters.find(l=>wc.groups[l].includes(wc.userKey)) : null;
+  if(mine) return mine;
+  const home = letters.find(l=>wc.groups[l].some(k=>wc.info[k] && wc.info[k].en==="Brazil"));   // sem seleção: grupo do Brasil
+  return home || letters[0];
+}
+function renderWcGroupFixtures(letter){
+  const wc = ST.worldCup;
+  return `<div class="wc-results wc-results-one">${wc.fixtures[letter].map((md,i)=>md.map(m=>`<div class="wc-res${(m.home===wc.userKey||m.away===wc.userKey)?' is-user':''}">
+      <span class="wc-res-g">R${i+1}</span><span class="wc-res-t wc-res-home">${esc(m.home)} ${wcFlagOf(m.home,18)}</span>
+      <span class="wc-res-score">${m.played?`${m.hs} – ${m.as}`:"x"}</span><span class="wc-res-t wc-res-away">${wcFlagOf(m.away,18)} ${esc(m.away)}</span></div>`).join("")).join("")}</div>`;
+}
 function renderWorldCupTab(){
   const wc = ST.worldCup;
-  const view = wc.view || "grupos";
-  const vb = (id, label)=>`<button class="btn btn-sm${view===id?' btn-gold':''}" onclick="Game.setWcView('${id}')">${label}</button>`;
-  const body = view==="mata" ? renderWcKnockout() : view==="artilharia" ? renderWcScorers() : renderWcGroups();
+  const g = wcFocusGroup();
+  const sub = `${esc(wcStageName((wcNextEvent()||{phase:wc.phase}).phase))} · 48 seleções${wc.hosts.length?` · Sede: ${wc.hosts.map(h=>wc.info[h]?esc(wc.info[h].pt):"").filter(Boolean).join(", ")}`:""}`;
   return `<div class="wc-wrap">
     <div class="wc-hero panel">
       <div class="wc-hero-trophy">${renderWcTrophy(78)}</div>
       <div class="wc-hero-text">
         <div class="faint tiny uc">Todos os campeonatos estão parados</div>
         <div class="wc-hero-title">COPA DO MUNDO ${wc.year}</div>
-        <div class="dim small">${esc(wcStageName((wcNextEvent()||{phase:wc.phase}).phase))} · 48 seleções · ${wc.hosts.length?`Sede: ${wc.hosts.map(h=>wc.info[h]?esc(wc.info[h].pt):"").filter(Boolean).join(", ")}`:""}</div>
+        <div class="dim small">${sub}</div>
       </div>
       ${wc.userKey ? `<div class="wc-hero-user">${wcFlagImg(wc.info[wc.userKey].code, 40)}<div><div class="faint tiny uc">Você comanda</div><div class="bold">${esc(wc.info[wc.userKey].pt)}</div></div></div>` : ""}
     </div>
     <div class="wc-next">${renderWcNextCard()}</div>
-    <div class="btn-row wc-views">${vb("grupos","Grupos")}${vb("mata","Mata-mata")}${vb("artilharia","Artilharia")}</div>
+    <div class="wc-bottom">
+      <div class="wc-bottom-l">
+        ${renderWcGroupCard(g)}
+        <div class="panel wc-panel mt16"><div class="panel-title">Jogos do Grupo ${g}</div>${renderWcGroupFixtures(g)}</div>
+      </div>
+      <div class="wc-bottom-r">${renderStatFlipCard(wc, "Copa do Mundo")}</div>
+    </div>
+    <div class="tiny faint tac">Os outros grupos, o mata-mata, os resultados e o Top 25 de artilheiros e assistências estão na aba <b>Desempenho</b>.</div>
+  </div>`;
+}
+// Desempenho › Copa do Mundo: everything the Competição tab leaves out
+function renderWcDesempenhoBlock(){
+  const wc = ST.worldCup;
+  if(!wc) return `<div class="panel"><p class="dim small">A Copa do Mundo ainda não começou.</p></div>`;
+  const scorers = compTopScorersFull(wc, 25);
+  const assisters = compTopAssistersFull(wc, 25);
+  return `<div class="wc-wrap">
     ${renderWcResultsPanel()}
-    <div class="mt16">${body}</div>
+    <div><div class="wc-sec-title">Fase de grupos</div>${renderWcGroups(true)}</div>
+    <div><div class="wc-sec-title">Mata-mata</div>${renderWcKnockout()}</div>
+    <div class="competicao-grid">
+      <div class="competicao-cell">${renderStatLeaderboard("Artilheiros — Top 25", scorers, "goals", "Nenhum gol registrado ainda nesta competição.")}</div>
+      <div class="competicao-cell">${renderStatLeaderboard("Assistências — Top 25", assisters, "assists", "Nenhuma assistência registrada ainda nesta competição.")}</div>
+    </div>
   </div>`;
 }
 
