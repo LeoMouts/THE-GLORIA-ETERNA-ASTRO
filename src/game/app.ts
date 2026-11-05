@@ -2279,6 +2279,7 @@ function negotiateOffer(mailId, askedAmountRaw){
   const mail = findMail(mailId);
   if(!mail || mail.type!=="offer" || mail.payload.status!=="pending") return;
   const pl = mail.payload;
+  if(myTeam().players.some(p=>p.id===pl.playerId && sellLocked(p))) return;
   const {minAsk, maxAsk} = offerAskRange(pl);
   const asked = Math.round(E.clamp(Number(askedAmountRaw)||minAsk, minAsk, maxAsk)/5000)*5000;
   runOfferNegotiation(mail, asked);
@@ -2322,7 +2323,7 @@ function acceptMailOffer(mailId){
   if(!mail || mail.type!=="offer" || mail.payload.status!=="pending") return;
   const pl = mail.payload;
   const t = myTeam();
-  if(!t.players.some(p=>p.id===pl.playerId)){ pl.status="void"; scheduleSave(); return; }
+  if(!t.players.some(p=>p.id===pl.playerId && !sellLocked(p))){ pl.status="void"; scheduleSave(); return; }
   t.players = t.players.filter(p=>p.id!==pl.playerId);
   ST.lineup = ST.lineup.map(id=> id===pl.playerId ? null : id);
   ST.budget += pl.offer;
@@ -2344,7 +2345,7 @@ function maybeGenerateOfferComeback(){
   for(const mail of candidates){
     if(rng() >= 0.25) continue;
     const pl = mail.payload;
-    if(!myTeam().players.some(p=>p.id===pl.playerId)) continue; // sold/gone since
+    if(!myTeam().players.some(p=>p.id===pl.playerId && !sellLocked(p))) continue; // sold/gone since
     const newOffer = Math.round(pl.offer*(1.12+rng()*0.18)/5000)*5000;
     pl.status = "superseded";
     addMail({
@@ -5012,6 +5013,9 @@ function runFreeAgentSigning(rng){
   p.club = dest; p.league = (TP.clubLeague&&TP.clubLeague[dest]) || "European League";
   recordTransferFeed({name:p.name, price:fee, fromClub:"Free Agents", toClub:dest, pos:p.pos, ovr:p.ovr});
 }
+// a free agent signed this season can't be flipped for cash: he is sellable (and draws offers) only from the next season on
+function sellLocked(p){ return !!p && p.faLockSeason!=null && p.faLockSeason===ST.seasonNum; }
+function sellLockMsg(p){ return `${p.name} foi contratado como free agent nesta temporada — só poderá ser vendido a partir da próxima.`; }
 function signFreeAgent(playerId){
   ensureGlobalMarket();
   const p = ST.world.globalMarket.find(x=>x.id===playerId);
@@ -5020,7 +5024,7 @@ function signFreeAgent(playerId){
   const c = freeAgentCost(p);
   if(c.total>ST.budget) return {ok:false, msg:"Orçamento insuficiente."};
   ST.world.globalMarket = ST.world.globalMarket.filter(x=>x.id!==playerId);
-  const joined = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0});
+  const joined = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0, faLockSeason:ST.seasonNum});
   delete joined.club; delete joined.league;
   myTeam().players.push(joined);
   ST.budget -= c.total;
@@ -5088,7 +5092,7 @@ function prelibMarketAskingPrice(p){
 function quickSell(playerId){
   const t = myTeam();
   const p = t.players.find(x=>x.id===playerId);
-  if(!p) return;
+  if(!p || sellLocked(p)) return;
   const price = Math.round(p.value*0.9/5000)*5000;
   t.players = t.players.filter(x=>x.id!==playerId);
   ST.lineup = ST.lineup.map(id=> id===playerId? null : id);
@@ -5270,7 +5274,7 @@ function pickPosture(rng){
 // popping a blocking modal — the manager reads and negotiates it on their own time from
 // the E-mail tab.
 function maybeIncomingOffer(baseChance){
-  const squad = myTeam().players.filter(p=>p.ovr>=70);
+  const squad = myTeam().players.filter(p=>p.ovr>=70 && !sellLocked(p));
   if(squad.length===0) return;
   // a squad playing well draws more attention from other clubs — recent match form (already
   // tracked per player, decaying back toward 0 over time) pushes the offer chance up, never down,
@@ -5952,7 +5956,7 @@ function renderCalendarStrip(oppName, compType, wide){
     let icon = "";
     // the match-day square carries the competition's own trophy — not the opponent's crest
     // (already shown up top in the VS header) and not a placeholder ball.
-    if(isMatchDay) icon = competitionTrophyImg(compType, 28, 1);
+    if(isMatchDay) icon = competitionTrophyImg(compType, wide?74:54, 1);
     else if(isTrainingDay) icon = `<img src="${TRAINING_ICON}" alt="Treino" style="width:100%;height:100%;object-fit:contain;"/>`;
     const matchClass = isMatchDay ? (compType==="copa" ? " cal-day-match cal-day-copa" : compType==="libertadores" ? " cal-day-match cal-day-liberta" : compType==="sulamericana" ? " cal-day-match cal-day-sula" : " cal-day-match") : "";
     cells += `<div class="cal-day${matchClass}${isTrainingDay?' cal-day-training':''}${i===0?' cal-day-today':''}">
@@ -6915,7 +6919,7 @@ function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
     <td class="tac mono">${fmtMoney(p.value)}</td>
     <td>${statusBadges(p)||'<span class="faint tiny">Disponível</span>'}</td>
     <td>
-      ${showSellBtn?`<button class="btn btn-sm btn-danger" onclick="Game.sellPlayer(${p.id})">Vender</button>`:""}
+      ${showSellBtn?(sellLocked(p)?`<button class="btn btn-sm" disabled title="${esc(sellLockMsg(p))}">🔒 Próx. temporada</button>`:`<button class="btn btn-sm btn-danger" onclick="Game.sellPlayer(${p.id})">Vender</button>`):""}
       ${showBuyBtn?`<button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(teamNameForBuy||p._team)}')">Propor</button>`:""}
     </td>
   </tr>`).join("")}
@@ -8602,6 +8606,7 @@ const Game = {
     const t = myTeam();
     const p = t.players.find(x=>x.id===id);
     if(!p) return;
+    if(sellLocked(p)) return;
     const price = Math.round(p.value*0.9/5000)*5000;
     ST.uiModal = {type:"confirm", message:`Vender ${p.name} agora por ${fmtMoney(price)} (90% do valor de mercado)?`, action:"quickSell", payload:id};
     render();
