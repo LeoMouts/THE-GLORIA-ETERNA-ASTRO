@@ -5,6 +5,7 @@
 import * as E from "./engine";
 import * as WC from "./worldcup";
 import NAT_FIX from "./data/natFix.json";
+import DUP_REMOVED from "./data/dupRemoved.json";
 import { decide as negDecide, newNegState, computeFlex, composeReply, moodBand, moodLine, moodSummary, NEG_CONFIG, roundMoney } from "./negotiation";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
@@ -1650,6 +1651,10 @@ async function initApp(){
   if(loaded && loaded.schemaVersion===SCHEMA_VERSION){
     ST = loaded;
     applyRealPositionsToWorld(ST.world);
+    if(ST.world && Array.isArray(ST.world.globalMarket)){ // carreiras salvas: tira do mercado os cadastros duplicados removidos da base
+      const dup = new Set(DUP_REMOVED);
+      ST.world.globalMarket = ST.world.globalMarket.filter(p=>!dup.has(p.id));
+    }
     // never resume into a transient pre-career setup screen (team pick / manager name / mode
     // pick) — only resume straight into the hub (or an in-progress Pré-Libertadores run) if
     // something was actually committed.
