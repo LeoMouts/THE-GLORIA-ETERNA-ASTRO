@@ -3,6 +3,7 @@
 // build marker: force-fresh-deploy-2026-09-04
 // ============================================================
 import * as E from "./engine";
+import * as WC from "./worldcup";
 import { decide as negDecide, newNegState, computeFlex, composeReply, moodBand, moodLine, moodSummary, NEG_CONFIG, roundMoney } from "./negotiation";
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
@@ -69,6 +70,8 @@ function crestInitials(name){
 }
 function crestSVG(teamName, size){
   size = size || 40;
+  const wcI = wcInfo(teamName);
+  if(wcI) return wcCrest(wcI.code, size); // seleções da Copa do Mundo: bandeira (sem emoji)
   const logo = TEAM_LOGOS[teamName];
   if(logo){
     return `<img src="${logo}" alt="${esc(teamName)}" width="${size}" height="${size}" loading="lazy" style="display:block;width:${size}px;height:${size}px;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45));"/>`;
@@ -217,6 +220,8 @@ const GLOBAL_TEAM_CRESTS = {
 let _globalCrestSeq = 0;
 function clubCrestImg(clubName, size, playerName){
   size = size || 22;
+  const wcI = wcInfo(clubName);
+  if(wcI) return wcCrest(wcI.code, size);
   const slug = GLOBAL_TEAM_CRESTS[clubName];
   const fallback = crestSVG(clubName, size);
   if(!slug) return fallback;
@@ -492,6 +497,7 @@ const COMPETITION_TROPHIES = {
   libertadores: {url:TROPHY_CDN+"LIB.png", alt:"Taça CONMEBOL Libertadores"},
   sulamericana: {url:TROPHY_CDN+"SUD.png", alt:"Taça CONMEBOL Sul-Americana"},
   intercontinental: {url:TROPHY_CDN+"ICC.png", alt:"Taça Intercontinental FIFA"},
+  worldcup: {url:TROPHY_CDN+"WC.png", alt:"Taça da Copa do Mundo"},
 };
 function competitionTrophyImg(compType, height, opacity){
   const t = COMPETITION_TROPHIES[compType] || COMPETITION_TROPHIES.brasileirao;
@@ -1035,6 +1041,7 @@ function finishBrasaRound(){
   const b = ST.brasileirao;
   closeRatingRound("brasileirao", "Brasileirão");
   b.currentRound++;
+  if(wcBreakDue()){ wcStartBreak(); return; } // ano de Copa do Mundo: o campeonato para aqui
   if(b.currentRound<b.rounds.length) return;
   // the league itself is done — zero any still-unfinished continental campaign's own countdown
   // right now, so the calendar/"próximo jogo" card picks it up on the very next render instead
@@ -1091,6 +1098,9 @@ function addSeasonPrize(compKey, amount){
 // narrative-only relegation/promotion note (the real Série B doesn't have squads in this game
 // yet, so nobody's roster actually changes hands; that's the next piece of this project).
 function finalizeBrasaSeason(){
+  // a competition finishing inside its own tick can reach this twice in a row (tick → dead-end check → tick's caller → dead-end check
+  // again): the second call must never close another year, or the calendar would skip a season (and a World Cup)
+  if(ST.stage==="season_end" && ST.lastSeasonSummary && ST.lastSeasonSummary.year===ST.seasonYear-1) return;
   const table = brasaSortedStandings();
   const pos = table.findIndex(r=>r.team===ST.teamId)+1;
   const prize = brasaPrizeForPosition(pos);
@@ -1130,7 +1140,9 @@ function finalizeBrasaSeason(){
   if(sulaResult) compCards.push({key:"sula", label:"Sul-Americana", trophyKey:"sulamericana", result:sulaResult, repChange:sulaRep, prize:prizeTotals.sula||0, won:sulaResult==="Campeão"});
   if(libResult) compCards.push({key:"lib", label:"Libertadores", trophyKey:"libertadores", result:libResult, repChange:libRep, prize:prizeTotals.lib||0, won:libResult==="Campeão"});
   if(icResult) compCards.push({key:"ic", label:"Mundial de Clubes", trophyKey:"intercontinental", result:icResult, repChange:icRep, prize:prizeTotals.ic||0, won:icResult==="Campeão"});
-  const totalRepChange = brasaRep + copaRep + sulaRep + libRep + icRep;
+  const wcr = (ST.wcSeasonResult && ST.wcSeasonResult.year===ST.seasonYear) ? ST.wcSeasonResult : null;
+  if(wcr) compCards.push({key:"wc", label:`Copa do Mundo · ${wcr.nation}`, trophyKey:"worldcup", result:wcr.label, repChange:wcr.rep, prize:wcr.prize, won:wcr.label==="Campeão"});
+  const totalRepChange = brasaRep + copaRep + sulaRep + libRep + icRep + (wcr ? wcr.rep : 0);
   ST.lastSeasonSummary = {
     year: ST.seasonYear,
     placement: pos===1 ? "Campeão" : `${pos}º lugar`,
@@ -1139,6 +1151,7 @@ function finalizeBrasaSeason(){
     champion, relegated, position: pos, zones, teamOfSeason, compCards,
   };
   ST.reputation = E.clamp(ST.reputation + totalRepChange, 5, 99);
+  if(wcr) ST.wcSeasonResult = null;
   ST.newsLog.unshift({title:"Fim de temporada — Brasileirão", text:`${champion} é o campeão. Você terminou em ${pos}º lugar e recebeu ${fmtMoney(prize)} em premiação.`});
   applyDynamicPotentialGrowth(wonAnyTrophy);
   ageWorld();
@@ -1854,6 +1867,7 @@ function competitionStatsStore(compKey){
   if(compKey==="sula") return ST.sulamericana;
   if(compKey==="lib") return ST.libertadoresCompleto;
   if(compKey==="ic") return ST.intercontinental;
+  if(compKey==="wc") return ST.worldCup;
   return ST.mode==="brasileirao" ? ST.brasileirao : ST.competition;
 }
 // derives that same compKey from a match's own context object (ST.pendingMatch.context) —
@@ -1865,6 +1879,7 @@ function compKeyForContext(ctx){
   if(ctx.type==="sula") return "sula";
   if(ctx.type==="lib") return "lib";
   if(ctx.type==="ic_semi"||ctx.type==="ic_final") return "ic";
+  if(ctx.type==="wc") return "wc";
   return undefined;
 }
 // records one goal for the season-wide top-scorers table.
@@ -2041,6 +2056,7 @@ function lineupIsValid(){
 let seedCounter = 1;
 function nextSeed(){ return (seedCounter = (seedCounter*48271 + Date.now()%97) % 2147483647); }
 
+const WC_LABELS = Object.fromEntries(Object.entries(WC.WC_STAGE_LABEL).map(([k,v])=>["wc_"+k, v]));
 function stageLabelFor(type){
   return {group:"Fase de Grupos", r16:"Oitavas de Final", qf:"Quartas de Final", sf:"Semifinal", final:"Final",
     prelib_qf:"Pré-Libertadores — Quartas de Final", prelib_sf:"Pré-Libertadores — Semifinal", prelib_final:"Pré-Libertadores — Final",
@@ -2051,7 +2067,7 @@ function stageLabelFor(type){
     lib_groups:"Libertadores — Fase de Grupos", lib_r16:"Libertadores — Oitavas de Final", lib_qf:"Libertadores — Quartas de Final",
     lib_sf:"Libertadores — Semifinal", lib_final:"Libertadores — Final", lib_done:"Libertadores — Encerrada",
     ic_semi:"Mundial de Clubes — Semifinal", ic_final:"Mundial de Clubes — Final", ic_done:"Mundial de Clubes — Encerrado",
-    brasileirao:"Brasileirão"}[type] || type;
+    brasileirao:"Brasileirão"}[type] || WC_LABELS[type] || type;
 }
 
 function decrementAvailability(){
@@ -2361,6 +2377,9 @@ function maybeGenerateOfferComeback(){
 }
 // runs once per "AVANÇAR DIA" click — everything that can land in the inbox on a given day.
 function generateDailyMail(){
+  if(wcActive()) return;
+  tickNationalOfferExpiry();
+  maybeNationalOffers();
   maybeGenerateScoutMail();
   tickPendingOfferReplies();
   tickPendingOfferExpiry();
@@ -2526,7 +2545,7 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
   const userIsAway = awayTeamName===ST.teamId;
   const myLineup = userIsHome ? homeLineup : awayLineup;
   const mySide = userIsHome ? "home" : "away";
-  const clubSeason = (userIsHome || userIsAway) ? ensureClubSeason() : null;
+  const clubSeason = (!ST.natDuty && (userIsHome || userIsAway)) ? ensureClubSeason() : null;
   if(clubSeason){
     myLineup.forEach(p=>{
       if(!p) return;
@@ -2549,7 +2568,7 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
         const assisterP = side.find(pp=>pp && pp.name===ev.assist);
         if(assisterP) addAssistPoint(scoringTeam, assisterP.id, compKey);
       }
-      if(scoringTeam===ST.teamId){
+      if(scoringTeam===ST.teamId && !ST.natDuty){
         recordCareerStat("goals", p.name);
         if(ev.assist) recordCareerStat("assists", ev.assist);
       }
@@ -2574,6 +2593,7 @@ function applyDetailedResultToWorld(homeTeamName, awayTeamName, homeLineup, away
 
 // -- advance the tournament by one step (called from "Avançar" button) --
 function advanceTournament(){
+  if(wcActive()){ advanceWorldCupStep(); return; } // Copa do Mundo: todos os campeonatos parados
   if(ST.mode==="brasileirao"){ advanceBrasileiraoStep(); return; }
   if(ST.prelib){ stepPreLib(); return; }
   const comp = ST.competition;
@@ -2903,6 +2923,8 @@ function applyShootoutResult(ctx, winner){
     if(winner===ST.teamId) payLibStagePrize("lib_final");
     ST.newsLog.unshift({title:"Campeão da Libertadores!", text:`${winner} conquista a Libertadores ${l.year} nos pênaltis.`});
     checkForPostSeasonDeadEnd(); // the Libertadores final itself may have been the last thing keeping the season open
+  } else if(ctx.type==="wcKO"){
+    wcAfterShootout(ctx, winner);
   } else if(ctx.type==="icSemi"){
     const ic = ST.intercontinental;
     ic.semis.sf1.winner = winner;
@@ -4124,6 +4146,8 @@ function finishPendingMatch(){
     } else {
       finishLibLeg();
     }
+  } else if(ctx.type==="wc"){
+    wcAfterUserMatch(pm);
   } else if(ctx.type==="ic_semi"){
     const ic = ST.intercontinental;
     const f = ic.semis.sf1;
@@ -4734,6 +4758,7 @@ function runSingleGlobalReshuffle(rng){
 // these three fires.
 function dailyTransferTick(){
   if(!ST.world || !ST.world.teams) return;
+  if(wcActive()) return; // mercado parado durante a Copa do Mundo
   // every calendar day gets its own tick of the day counter (see recordTransferFeed()) — this is
   // what lets the FABRIZIO ROMANO feed actually show "hoje"/"ontem"/"há N dias" per deal, instead
   // of every deal in a save just carrying the same season year. Ticks even on a quiet day (no
@@ -5274,6 +5299,7 @@ function pickPosture(rng){
 // popping a blocking modal — the manager reads and negotiates it on their own time from
 // the E-mail tab.
 function maybeIncomingOffer(baseChance){
+  if(wcActive()) return; // durante a Copa do Mundo o mercado fica parado
   const squad = myTeam().players.filter(p=>p.ovr>=70 && !sellLocked(p));
   if(squad.length===0) return;
   // a squad playing well draws more attention from other clubs — recent match form (already
@@ -5376,6 +5402,8 @@ function render(){
     else if(ST.stage==="copa_draw") html = renderCopaDraw();
     else if(ST.stage==="copa_qf_draw") html = renderCopaQfDraw();
     else if(ST.stage==="ic_announce") html = renderIcAnnounce();
+    else if(ST.stage==="wc_callup") html = renderWcCallup();
+    else if(ST.stage==="wc_end") html = renderWcEnd();
     else if(ST.stage==="job_offers") html = renderJobOffers();
     else if(ST.stage==="career_over") html = renderCareerOver();
     else if(ST.stage==="penaltyShootout") html = renderPenaltyShootoutScreen();
@@ -5815,7 +5843,13 @@ function renderPreLibChampion(){
 }
 
 // ---------------- HUB SHELL ----------------
+function hubSubline(team){
+  if(team.isNation) return `${wcFlagOf(team.name,16)} Seleção · Copa do Mundo ${ST.worldCup.year}`;
+  if(wcActive()) return `${team.flag} ${esc(team.country)} · Copa do Mundo ${ST.worldCup.year} (campeonatos parados)`;
+  return `${team.flag} ${esc(team.country)} · ${ST.prelib ? `Pré-Libertadores ${ST.prelib.year}` : `Temporada ${ST.seasonYear} (${ST.seasonNum}/10)`}`;
+}
 function renderHub(){
+  if(ST.natDuty && (ST.hubTab==="transfers"||ST.hubTab==="scout"||ST.hubTab==="desempenho"||ST.hubTab==="clube")) ST.hubTab = "competicao";
   const team = myTeam();
   const rep = ST.reputation;
   return `
@@ -5825,7 +5859,7 @@ function renderHub(){
         <div class="club-badge" style="background:none;border:none;">${clubCrestImg(team.name, 40, null)}</div>
         <div>
           <div class="bold" style="font-size:15px;">${esc(team.name)}</div>
-          <div class="faint tiny">${team.flag} ${esc(team.country)} · ${ST.prelib ? `Pré-Libertadores ${ST.prelib.year}` : `Temporada ${ST.seasonYear} (${ST.seasonNum}/10)`}</div>
+          <div class="faint tiny">${hubSubline(team)}</div>
         </div>
       </div>
       <div class="stat-pill">${fmtMoney(ST.budget)}</div>
@@ -5843,11 +5877,11 @@ function renderHub(){
   <div class="tabs">
     ${tabBtn("competicao","Competição")}
     ${tabBtn("elenco","Elenco")}
-    ${tabBtn("transfers","Transferências")}
-    ${tabBtn("scout","Olheiro")}
+    ${ST.natDuty?"":tabBtn("transfers","Transferências")}
+    ${ST.natDuty?"":tabBtn("scout","Olheiro")}
     ${tabBtn("email",iconEnvelope(13)+" E-mail"+(unreadMailCount()?` <span class="badge-mail">${unreadMailCount()}</span>`:""))}
-    ${ST.mode==="brasileirao"?tabBtn("desempenho","Desempenho"):""}
-    ${tabBtn("clube","Meu Clube")}
+    ${ST.mode==="brasileirao"&&!ST.natDuty?tabBtn("desempenho","Desempenho"):""}
+    ${ST.natDuty?"":tabBtn("clube","Meu Clube")}
   </div>
   <div class="tab-content">
     ${ST.hubTab==="competicao"?renderCompeticaoTab():""}
@@ -5941,13 +5975,13 @@ function getNextUserMatch(){
 // caption line below it still says exactly how many days remain).
 // the match-day cell shows the actual opponent's crest (not a generic ball icon) — a tiny
 // preview of who's up, right on the calendar itself.
-function renderCalendarStrip(oppName, compType, wide){
-  const days = ST.calendarDaysLeft;
+function renderCalendarStrip(oppName, compType, wide, opts){
+  const days = (opts && opts.days!=null) ? opts.days : ST.calendarDaysLeft;
   const todayIdx = ST.calendarWeekdayIdx;
   // how many more AVANÇAR DIA clicks until daysSinceTraining actually hits 2 and a training
   // day interrupts the calendar — maps 1:1 onto the strip's cell index, same as "days" does
   // for the match; never shown past the match day itself, since that resolves first.
-  const daysUntilTraining = 2 - (ST.daysSinceTraining||0);
+  const daysUntilTraining = (opts && opts.noTraining) ? 99 : 2 - (ST.daysSinceTraining||0);
   let cells = "";
   for(let i=0;i<5;i++){
     const wIdx = (todayIdx+i)%7;
@@ -5958,7 +5992,7 @@ function renderCalendarStrip(oppName, compType, wide){
     // (already shown up top in the VS header) and not a placeholder ball.
     if(isMatchDay) icon = competitionTrophyImg(compType, wide?74:54, 1);
     else if(isTrainingDay) icon = `<img src="${TRAINING_ICON}" alt="Treino" style="height:${wide?74:54}px;width:auto;max-width:100%;object-fit:contain;"/>`;
-    const matchClass = isMatchDay ? (compType==="copa" ? " cal-day-match cal-day-copa" : compType==="libertadores" ? " cal-day-match cal-day-liberta" : compType==="sulamericana" ? " cal-day-match cal-day-sula" : " cal-day-match") : "";
+    const matchClass = isMatchDay ? (compType==="copa" ? " cal-day-match cal-day-copa" : compType==="libertadores" ? " cal-day-match cal-day-liberta" : compType==="sulamericana" ? " cal-day-match cal-day-sula" : compType==="worldcup" ? " cal-day-match cal-day-wc" : " cal-day-match") : "";
     cells += `<div class="cal-day${matchClass}${isTrainingDay?' cal-day-training':''}${i===0?' cal-day-today':''}">
       <div class="cal-day-label">${WEEKDAYS[wIdx]}</div>
       <div class="cal-day-icon${isMatchDay||isTrainingDay?' cal-day-icon-trophy':''}">${icon}</div>
@@ -6323,7 +6357,7 @@ function renderWeekScorersCard(){
 function renderBrasileiraoCompeticaoTab(){
   /* the home screen is deliberately static: a wide "próximo jogo" card on top, then three equal square boxes (Fabrizio Romano, the artilheiros of whichever competition the next match belongs to, last e-mail) - only the text inside changes. No tables or brackets here; those all live in the Desempenho tab. */
   const card = renderNextMatchCard(false, true) || `<div class="panel" style="text-align:center;"><div class="faint tiny uc mb12">Temporada ${ST.seasonYear}</div><p class="dim small">Nenhuma partida marcada no momento.</p></div>`;
-  return `<div class="comp-home2">
+  return `${renderWcBanner()}<div class="comp-home2">
     <div class="comp-home2-match">${card}</div>
     <div class="comp-home2-boxes">
       <div class="comp-box">${renderFabrizioRomanoCard()}</div>
@@ -6439,6 +6473,7 @@ function renderDesempenhoTab(){
   return filterBar + body;
 }
 function renderCompeticaoTab(){
+  if(wcActive()) return renderWorldCupTab();
   if(ST.prelib) return renderPreLibCompeticaoTab();
   if(ST.mode==="brasileirao") return renderBrasileiraoCompeticaoTab();
   const comp = ST.competition;
@@ -7274,7 +7309,7 @@ function renderMeuClubeTab(){
 }
 
 // ---------------- E-MAIL TAB ----------------
-const MAIL_ICON = { offer: iconCoin(20), injury: iconMedical(20), scout: iconMagnifier(20), job: iconBriefcase(20) };
+const MAIL_ICON = { offer: iconCoin(20), injury: iconMedical(20), scout: iconMagnifier(20), job: iconBriefcase(20), nacional: iconBriefcase(20) };
 function renderEmailTab(){
   const open = ST.openMailId ? findMail(ST.openMailId) : null;
   if(open) return renderMailDetail(open);
@@ -7291,6 +7326,7 @@ function renderEmailTab(){
 function renderMailRow(m){
   const rowIcon = (m.type==="offer" && m.payload && m.payload.club)
     ? clubCrestImg(m.payload.club, 20, m.payload.playerName)
+    : (m.type==="nacional" && m.payload && m.payload.code) ? wcFlagImg(m.payload.code, 22)
     : (MAIL_ICON[m.type]||iconEnvelope(20));
   return `<div class="mail-row${m.read?"":" unread"}" onclick="Game.openMail('${m.id}')">
     <div class="mail-row-icon">${rowIcon}</div>
@@ -7310,6 +7346,7 @@ function renderMailDetail(m){
     </div>
   </div>`;
   if(m.type==="offer") return header + renderOfferMailBody(m);
+  if(m.type==="nacional") return header + renderNationalMailBody(m);
   if(m.type==="totw") return header + renderTotwMailBody(m.payload);
   return `${header}<div class="panel mt16">${m.body}</div>`;
 }
@@ -7509,8 +7546,8 @@ function eventText(ev, homeName, awayName){
 function renderMatch(){
   const pm = ST.pendingMatch;
   const home = pm.ref.home, away = pm.ref.away;
-  const stageLblType = (pm.context.type==="copa"||pm.context.type==="sula"||pm.context.type==="lib") ? pm.context.phase : pm.context.type;
-  const stageLbl = stageLabelFor(stageLblType) + (pm.context.legIndex!=null ? ` — jogo de ${pm.context.legIndex===0?'ida':'volta'}` : ((stageLblType==="final"||stageLblType==="copa_final"||stageLblType==="sula_final"||stageLblType==="lib_final"||stageLblType==="ic_semi"||stageLblType==="ic_final"||String(stageLblType).indexOf("prelib_")===0)?" — jogo único":""));
+  const stageLblType = (pm.context.type==="copa"||pm.context.type==="sula"||pm.context.type==="lib") ? pm.context.phase : pm.context.type==="wc" ? "wc_"+pm.context.evKey : pm.context.type;
+  const stageLbl = stageLabelFor(stageLblType) + (pm.context.legIndex!=null ? ` — jogo de ${pm.context.legIndex===0?'ida':'volta'}` : ((stageLblType==="final"||stageLblType==="copa_final"||stageLblType==="sula_final"||stageLblType==="lib_final"||stageLblType==="ic_semi"||stageLblType==="ic_final"||String(stageLblType).indexOf("wc_")===0||String(stageLblType).indexOf("prelib_")===0)?" — jogo único":""));
   if(!pm.result){
     const lp = lineupPlayers();
     const missing = lp.filter(p=>!p).length;
@@ -8523,6 +8560,7 @@ const Game = {
   // brings, and — once the countdown hits zero — swaps this card over to the match-day
   // buttons above instead of jumping into the match itself.
   advanceDay(){
+    if(wcActive()){ wcAdvanceDay(); scheduleSave(); render(); return; } // Copa do Mundo: um dia por clique
     ensureCalendarCountdown();
     if(ST.calendarDaysLeft>0) ST.calendarDaysLeft--;
     ST.calendarWeekdayIdx = (ST.calendarWeekdayIdx+1)%7;
@@ -8548,6 +8586,30 @@ const Game = {
   // left, then lands on the normal season-end recap (troféus, reputação, artilheiros, colocação em
   // cada campeonato). Only ever reachable when the Brasileirão itself is already done, so there's no
   // league round left to skip — this can't cut short anything the player hadn't already finished.
+  wcSimPhase(){
+    if(!wcActive()) return;
+    const ph = (wcNextEvent()||{}).phase;
+    let g = 0;
+    while(wcActive() && g++<60){ const ev = wcNextEvent(); if(!ev || ev.phase!==ph || wcMatchToday()) break; wcAdvanceDay(); }
+    scheduleSave(); render();
+  },
+  wcSimAll(){
+    let g = 0;
+    while(wcActive() && g++<80){ if(wcMatchToday()) break; wcAdvanceDay(); }
+    scheduleSave(); render();
+  },
+  setWcView(v){ if(ST.worldCup) ST.worldCup.view = v; render(); },
+  acceptNationalJob(id){ acceptNationalJob(id); render(); },
+  declineNationalJob(id){ declineNationalJob(id); render(); },
+  openCallup(){ wcOpenCallup(false); render(); },
+  callupToggle(id){ wcCallupToggle(Number(id)); render(); },
+  callupTab(id){ if(ST.wcCallup){ ST.wcCallup.tab = id; ST.wcCallup.more = false; } render(); },
+  callupMore(){ if(ST.wcCallup) ST.wcCallup.more = !ST.wcCallup.more; render(); },
+  callupAuto(){ const c = ST.wcCallup; if(!c) return; c.ids = WC.autoSelectSquad(wcCallupPool()).ids; c.msg = ""; render(); },
+  callupClear(){ const c = ST.wcCallup; if(!c) return; c.ids = []; c.msg = ""; render(); },
+  callupConfirm(){ wcCallupConfirm(); render(); },
+  callupClose(){ wcCallupClose(); render(); },
+  finishWcEnd(){ ST.stage = "hub"; ST.hubTab = "competicao"; ST.calendarDaysLeft = null; scheduleSave(); render(); },
   forceEndSeason(){
     autoFinishBackgroundCups();
     scheduleSave();
@@ -8876,6 +8938,781 @@ window.Game = Game;
 window.ST = null; // populated below after init for console/debug convenience
 
 // ============================================================
+// COPA DO MUNDO (formato 2026: 48 seleções, 12 grupos de 4, 16-avos → final)
+//
+// Em ano de Copa (2026, 2030, 2034...) o Brasileirão (e todas as copas) PARA depois da rodada
+// WC_BREAK_ROUND e o torneio inteiro é jogado dia a dia (jogos a cada 2/3 dias). O treinador só
+// recebe convite de seleção UM ANO ANTES (ver maybeNationalOffers): aceitando, convoca 26
+// jogadores nascidos no país e comanda a seleção durante a Copa — para isso o jogo troca
+// temporariamente ST.teamId pela seleção (ST.natDuty guarda o clube) e reaproveita TODO o fluxo de
+// partida/escalação/pênaltis dos clubes. Sem convite (ou recusando) a Copa é só acompanhada.
+// A lógica pura (nações, sorteio, chaveamento, convocação) está em worldcup.ts.
+// ============================================================
+const WC_NAME_POOLS = { // nomes de apoio para completar elencos de seleções com poucos jogadores na base
+  UEFA: IC_NAME_POOLS.euro, CONMEBOL: IC_NAME_POOLS.concacaf, CONCACAF: IC_NAME_POOLS.concacaf,
+  CAF: IC_NAME_POOLS.asia, AFC: IC_NAME_POOLS.asia, OFC: IC_NAME_POOLS.asia,
+};
+let wcPoolCache = null; // índice jogadores-por-país, montado sob demanda (a tela de convocação reusa)
+
+function wcActive(){ return !!(ST && ST.worldCup && ST.worldCup.active); }
+function wcInfo(key){ return (ST && ST.worldCup && ST.worldCup.info) ? (ST.worldCup.info[key] || null) : null; }
+function wcFlagImg(code, w){
+  w = w || 22;
+  const h = Math.round(w*0.75);
+  return `<img class="wc-flag" src="${WC.flagUrl(code)}" alt="" width="${w}" height="${h}" style="width:${w}px;height:${h}px;"/>`;
+}
+function wcFlagOf(key, w){ const i = wcInfo(key); return i ? wcFlagImg(i.code, w) : ""; }
+function wcCrest(code, size){
+  return `<span class="wc-crest" style="width:${size}px;height:${size}px;"><img src="${WC.flagUrl(code)}" alt="" width="${size}" height="${Math.round(size*0.75)}" style="width:${size}px;height:${Math.round(size*0.75)}px;"/></span>`;
+}
+function wcTeamLabel(key, w){ return `<span class="wc-team">${wcFlagOf(key, w||20)}<span class="wc-team-name">${esc(key)}</span></span>`; }
+
+// ---------- players by country ----------
+function wcPoolIndex(){
+  ensureGlobalMarket();
+  const byNat = new Map(), club = new Map(), seen = new Set();
+  const add = (p, clubName)=>{
+    if(!p || seen.has(p.id)) return;
+    seen.add(p.id);
+    const nn = WC.nationOf(p.nat);
+    if(!nn) return;
+    if(!byNat.has(nn.en)) byNat.set(nn.en, []);
+    byNat.get(nn.en).push(p);
+    club.set(p.id, clubName || p.club || "");
+  };
+  Object.values(ST.world.teams).forEach(t=>{ if(t.isNation) return; t.players.forEach(p=>add(p, t.name)); });
+  (ST.world.globalMarket||[]).forEach(p=>add(p, p.club));
+  (ST.world.prelibMarket||[]).forEach(p=>add(p, p.club));
+  return {byNat, club};
+}
+function wcNormalizePlayer(p){
+  if(p.injured==null) p.injured = false;
+  if(p.suspended==null) p.suspended = false;
+  if(p.form==null) p.form = 0;
+  if(!(p.suspendedMatches>0)) p.suspendedMatches = 0;
+  if(!(p.injuredMatches>0)) p.injuredMatches = 0;
+  if(!Array.isArray(p.altPos)) p.altPos = [p.pos];
+}
+function wcFiller(nat, pos, baseOvr, rng){
+  const pool = WC_NAME_POOLS[nat.conf] || WC_NAME_POOLS.CAF;
+  const age = 22 + Math.floor(rng()*10);
+  const isGk = pos==="GK";
+  const ovr = E.clamp(Math.round(baseOvr + (rng()-0.5)*8), 44, 78);
+  const j = spread => E.clamp(ovr + Math.floor((rng()-0.5)*spread), 30, 90);
+  return {id:nextId(), name:pick(rng,pool[0])+" "+pick(rng,pool[1]), nat:nat.en, age, pos, altPos:[pos], ovr, pot:ovr,
+    pac:j(16), sho:isGk?Math.floor(rng()*20)+15:j(14), pas:j(12), dri:isGk?j(18):j(12), de:j(14), phy:j(12), gk:isGk?j(12):Math.floor(rng()*20)+15,
+    value:E.calcValue(ovr,age,ovr), foot:rng()<0.78?"Right foot":"Left foot", club:"", generated:true,
+    injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0};
+}
+function wcStrengthOf(en, byNat){
+  const players = byNat.get(en) || [];
+  const sel = WC.autoSelectSquad(players);
+  const byId = new Map(players.map(p=>[p.id, p]));
+  const objs = sel.ids.map(id=>byId.get(id)).filter(Boolean);
+  const top = objs.slice().sort((a,b)=>b.ovr-a.ovr).slice(0, 11);
+  const base = Math.max(48, (top.length ? top.reduce((a,p)=>a+p.ovr,0)/top.length : 58) - 9);
+  return WC.squadStrength(objs.concat(sel.fillers.map(pos=>({pos, ovr:Math.round(base)}))));
+}
+// the 26-man squad of one nation (real players where they exist, local fillers otherwise)
+function wcBuildSquad(en, byNat, rng, keepIds){
+  const nat = WC.nationByEn(en);
+  const players = byNat.get(en) || [];
+  const sel = WC.autoSelectSquad(players, keepIds||[]);
+  const byId = new Map(players.map(p=>[p.id, p]));
+  const out = sel.ids.map(id=>byId.get(id)).filter(Boolean);
+  out.forEach(wcNormalizePlayer);
+  const top = out.slice().sort((a,b)=>b.ovr-a.ovr).slice(0, 11);
+  const base = Math.max(48, (top.length ? top.reduce((a,p)=>a+p.ovr,0)/top.length : 58) - 9);
+  sel.fillers.forEach(pos=> out.push(wcFiller(nat, pos, base, rng)));
+  return out;
+}
+// who qualifies for a given World Cup (computed once and remembered — the offers a year earlier
+// and the tournament itself must agree on the field)
+function wcPlanFor(year){
+  if(!ST.wcPlan) ST.wcPlan = {};
+  if(ST.wcPlan[year]) return ST.wcPlan[year];
+  const idx = wcPoolIndex();
+  const rng = E.makeRNG(nextSeed());
+  const strength = {}, cands = [];
+  WC.NATIONS.forEach(nn=>{
+    if(nn.banned) return;
+    const s = wcStrengthOf(nn.en, idx.byNat);
+    strength[nn.en] = Math.round(s*10)/10;
+    cands.push({en:nn.en, conf:nn.conf, strength:s});
+  });
+  const qualified = WC.qualify(year, cands, rng);
+  const ranking = qualified.slice().sort((a,b)=>strength[b]-strength[a]);
+  ST.wcPlan[year] = {year, qualified, ranking, strength:Object.fromEntries(qualified.map(en=>[en, strength[en]]))};
+  return ST.wcPlan[year];
+}
+
+// ---------- proposals (only the year BEFORE a World Cup) ----------
+function wcPerformanceScore(){
+  let s = ST.reputation || 50;
+  try{
+    const t = brasaSortedStandings();
+    const row = t.find(r=>r.team===ST.teamId);
+    if(row && row.played>=4){
+      const pos = t.findIndex(r=>r.team===ST.teamId)+1;
+      s += pos<=2 ? 12 : pos<=4 ? 8 : pos<=8 ? 3 : pos<=14 ? 0 : -8;
+    }
+  }catch(e){ /* standings not ready */ }
+  const last = ST.lastSeasonSummary;
+  if(last && last.compCards) last.compCards.forEach(c=>{ if(c.won) s += (c.key==="lib"||c.key==="ic") ? 8 : 5; });
+  return E.clamp(s, 0, 120);
+}
+function wcTierLabel(rank){
+  return rank<=4 ? "Candidata ao título" : rank<=12 ? "Favorita ao título" : rank<=24 ? "Seleção de bom nível" : rank<=36 ? "Zebra em potencial" : "Aposta de longo prazo";
+}
+function maybeNationalOffers(){
+  if(ST.mode!=="brasileirao" || ST.natDuty || wcActive() || ST.natJob) return;
+  const year = ST.seasonYear + 1;
+  if(!WC.isWorldCupYear(year)) return;           // seleção só convida no ANO ANTERIOR à Copa
+  const b = ST.brasileirao;
+  if(!b) return;
+  if(!ST.wcOffers) ST.wcOffers = {};
+  const rec = ST.wcOffers[year] || (ST.wcOffers[year] = {tries:0, sent:0});
+  const when = rec.tries===0 ? 10 : rec.tries===1 ? 26 : 99;
+  if(b.currentRound < when) return;
+  rec.tries++;
+  const plan = wcPlanFor(year);
+  const perf = wcPerformanceScore();
+  const rng = E.makeRNG(nextSeed());
+  let band, count;
+  if(perf>=90){ band=[1,8]; count = 2 + (rng()<0.5?1:0); }
+  else if(perf>=80){ band=[3,14]; count = 2 + (rng()<0.4?1:0); }
+  else if(perf>=70){ band=[8,24]; count = 1 + (rng()<0.5?1:0); }
+  else if(perf>=60){ band=[16,34]; count = 1 + (rng()<0.3?1:0); }
+  else if(perf>=48){ band=[28,46]; count = rng()<0.7 ? 1 : 0; }
+  else { band=[36,48]; count = rng()<0.3 ? 1 : 0; }   // mal nos resultados: seleções piores — ou nenhuma proposta
+  if(!count || rec.sent>0) return;
+  const pool = shuffled(rng, plan.ranking.slice(band[0]-1, band[1]));
+  pool.slice(0, count).forEach(en=>{
+    const nat = WC.nationByEn(en);
+    const rank = plan.ranking.indexOf(en)+1;
+    addMail({
+      type:"nacional",
+      subject:`Convite: seleção ${nat.pt} — Copa do Mundo ${year}`,
+      from:`Federação de Futebol — ${nat.pt}`,
+      preview:`A ${nat.pt} quer você no comando para a Copa do Mundo ${year}.`,
+      payload:{year, nation:en, pt:nat.pt, code:nat.code, rank, tier:wcTierLabel(rank), status:"pending", daysLeft:30},
+    });
+    rec.sent++;
+  });
+  ST.newsLog.unshift({title:"Convite de seleção!", text:`Você recebeu ${rec.sent>1?"propostas":"uma proposta"} para comandar uma seleção na Copa do Mundo ${year}. Veja no E-mail.`});
+}
+function tickNationalOfferExpiry(){
+  inboxList().filter(m=>m.type==="nacional" && m.payload.status==="pending").forEach(m=>{
+    m.payload.daysLeft--;
+    if(m.payload.daysLeft<=0) m.payload.status = "expired";
+  });
+}
+function acceptNationalJob(mailId){
+  const mail = findMail(mailId);
+  if(!mail || mail.type!=="nacional" || mail.payload.status!=="pending" || ST.natJob) return;
+  const pl = mail.payload;
+  pl.status = "accepted";
+  inboxList().forEach(m=>{ if(m.type==="nacional" && m!==mail && m.payload.status==="pending") m.payload.status = "withdrawn"; });
+  ST.natJob = {year:pl.year, nation:pl.nation, pt:pl.pt, code:pl.code, squadIds:[], done:false};
+  ST.newsLog.unshift({title:`Novo técnico da seleção ${pl.pt}!`, text:`Você aceitou comandar a ${pl.pt} na Copa do Mundo ${pl.year}. A convocação abre na temporada ${pl.year}.`});
+  scheduleSave();
+}
+function declineNationalJob(mailId){
+  const mail = findMail(mailId);
+  if(!mail || mail.type!=="nacional" || mail.payload.status!=="pending") return;
+  mail.payload.status = "declined";
+  scheduleSave();
+}
+function wcOfferStatusLabel(s){
+  return {pending:"Aguardando sua resposta", accepted:"Convite aceito", declined:"Convite recusado", expired:"Convite expirado", withdrawn:"Convite retirado (você aceitou outra seleção)"}[s] || s;
+}
+function renderNationalMailBody(m){
+  const pl = m.payload;
+  const pending = pl.status==="pending";
+  return `<div class="panel mt16 wc-offer">
+    <div class="wc-offer-head">
+      ${wcFlagImg(pl.code, 64)}
+      <div>
+        <div class="faint tiny uc">Convite oficial</div>
+        <div class="wc-offer-title">Seleção ${esc(pl.pt)}</div>
+        <div class="dim small">${esc(pl.tier)} · ${pl.rank}ª força entre as 48 seleções da Copa</div>
+      </div>
+      <div class="wc-offer-trophy">${competitionTrophyImg("worldcup", 70, 1)}</div>
+    </div>
+    <p class="small dim mt16">A federação acompanhou o seu trabalho e quer você no comando da seleção na <b>Copa do Mundo ${pl.year}</b>. Você continua no seu clube: a seleção só joga durante o torneio, quando todos os campeonatos fazem uma pausa.</p>
+    <ul class="wc-offer-list small">
+      <li>Convocação de <b>26 jogadores nascidos em ${esc(pl.pt)}</b> (3 goleiros, 4 zagueiros, 4 laterais, 3 volantes, 4 meias, 3 pontas, 3 atacantes e 2 vagas livres)</li>
+      <li>Formato 2026: 48 seleções, 12 grupos, os 2 melhores de cada + os 8 melhores terceiros avançam</li>
+      <li>Jogos a cada 2 ou 3 dias, em jogo único no mata-mata</li>
+    </ul>
+    ${pending ? `<div class="btn-row mt16">
+      <button class="btn btn-gold" onclick="Game.acceptNationalJob('${m.id}')">Aceitar a seleção ${esc(pl.pt)}</button>
+      <button class="btn" onclick="Game.declineNationalJob('${m.id}')">Recusar</button>
+    </div><div class="tiny faint mt8">O convite vale por mais ${pl.daysLeft} dia${pl.daysLeft===1?"":"s"}.</div>`
+    : `<div class="wc-offer-status mt16 ${pl.status==="accepted"?'green':'dim'} bold">${esc(wcOfferStatusLabel(pl.status))}</div>`}
+  </div>`;
+}
+
+// ---------- tournament setup ----------
+function wcKeyFor(nat){
+  let key = nat.pt;
+  if(ST.world.teams[key] && !ST.world.teams[key].isNation) key = nat.pt+" (Seleção)";
+  return key;
+}
+// the Brasileirão (and every cup) stops here — see finishBrasaRound()
+function wcBreakDue(){
+  return ST.mode==="brasileirao" && WC.isWorldCupYear(ST.seasonYear) && !wcActive()
+    && !(ST.wcDone && ST.wcDone[ST.seasonYear]) && ST.brasileirao && ST.brasileirao.currentRound===WC.WC_BREAK_ROUND;
+}
+function wcStartBreak(){
+  const job = ST.natJob;
+  if(job && job.year===ST.seasonYear && !job.done){ wcOpenCallup(true); return; }   // a convocação é obrigatória antes do apito inicial
+  beginWorldCup();
+}
+function beginWorldCup(){
+  const year = ST.seasonYear;
+  if(!ST.wcDone) ST.wcDone = {};
+  ST.wcDone[year] = true;
+  const idx = wcPoolIndex();
+  const plan = wcPlanFor(year);
+  const rng = E.makeRNG(nextSeed());
+  const job = (ST.natJob && ST.natJob.year===year && plan.qualified.includes(ST.natJob.nation)) ? ST.natJob : null;
+  const info = {}, keyOf = {}, strength = {};
+  plan.qualified.forEach(en=>{
+    const nat = WC.nationByEn(en);
+    const key = wcKeyFor(nat);
+    keyOf[en] = key;
+    info[key] = {en, pt:nat.pt, code:nat.code, conf:nat.conf};
+    const players = wcBuildSquad(en, idx.byNat, rng, job && job.nation===en ? job.squadIds : []);
+    strength[key] = WC.squadStrength(players);
+    ST.world.teams[key] = {name:key, country:nat.pt, flag:"", group:null, source:"wc", isNation:true, nationEn:en, players};
+  });
+  const drawn = WC.drawGroups(plan.qualified.map(en=>({en, conf:WC.nationByEn(en).conf, strength:plan.strength[en]})), WC.hostsOf(year), rng);
+  const groups = {}, fixtures = {};
+  let mid = 0;
+  Object.keys(drawn).forEach(g=>{
+    groups[g] = drawn[g].map(en=>keyOf[en]);
+    fixtures[g] = WC.groupMatchdays(groups[g]).map(md=>md.map(([h,a])=>({id:"G"+(++mid), group:g, home:h, away:a, hs:null, as:null, played:false})));
+  });
+  ST.worldCup = {
+    year, active:true, day:0, phase:"groups", view:"grupos",
+    info, groups, fixtures, table:{}, ko:{r32:[], r16:[], qf:[], sf:[], third:[], final:[]},
+    events: WC.WC_SCHEDULE.map(e=>Object.assign({}, e, {done:false})),
+    strength, reached:{}, userKey:null, userSettled:false, userResult:null,
+    champion:null, runnerUp:null, third:null, fourth:null,
+    scorers:{}, assisters:{}, lastEvent:null, thirdsQual:[], groupRank:{},
+    hosts: WC.hostsOf(year).map(en=>keyOf[en]).filter(Boolean),
+  };
+  if(job){
+    const key = keyOf[job.nation];
+    ST.worldCup.userKey = key;
+    ST.natDuty = {club:ST.teamId, lineup:ST.lineup, formation:ST.formation, captainId:ST.captainId, key, nation:job.nation, year};
+    ST.teamId = key; ST.formation = "4-3-3"; ST.lineup = []; ST.captainId = null;
+    autoFillLineup();
+    if(ST.hubTab==="transfers" || ST.hubTab==="scout" || ST.hubTab==="clube" || ST.hubTab==="desempenho") ST.hubTab = "competicao";
+  }
+  ST.stage = "hub"; ST.hubTab = "competicao"; ST.uiModal = null;
+  ST.calendarDaysLeft = null; ST.trainingPending = false;
+  ST.newsLog.unshift({title:`Começa a Copa do Mundo ${year}!`, text: job ? `Todos os campeonatos pararam. Você comanda a seleção ${job.pt}: grupo ${Object.keys(groups).find(g=>groups[g].includes(ST.worldCup.userKey))}.` : `Todos os campeonatos pararam: 48 seleções disputam a Copa do Mundo ${year}.`});
+  scheduleSave();
+}
+function wcEvent(key){ return ST.worldCup.events.find(e=>e.key===key); }
+function wcNextEvent(){ return ST.worldCup.events.find(e=>!e.done) || null; }
+function wcEventMatches(ev){
+  const wc = ST.worldCup;
+  if(ev.phase==="groups"){ const out = []; Object.keys(wc.fixtures).forEach(g=>wc.fixtures[g][ev.md].forEach(m=>out.push(m))); return out; }
+  return wc.ko[ev.phase] || [];
+}
+function wcUserMatchIn(ev){
+  const wc = ST.worldCup;
+  if(!wc.userKey || !ST.natDuty) return null;
+  return wcEventMatches(ev).find(m=>!m.played && (m.home===wc.userKey || m.away===wc.userKey)) || null;
+}
+// the user's next match, wherever it falls in the calendar
+function wcNextUserMatch(){
+  const wc = ST.worldCup;
+  if(!wc.userKey || !ST.natDuty) return null;
+  for(const ev of wc.events){
+    if(ev.done) continue;
+    const m = wcUserMatchIn(ev);
+    if(m) return {m, ev};
+  }
+  return null;
+}
+function wcMatchToday(){
+  const ev = wcNextEvent();
+  return !!(ev && ST.worldCup.day>=ev.day && wcUserMatchIn(ev));
+}
+function wcStageName(phase){
+  return {groups:"Fase de Grupos", r32:"16-avos de final", r16:"Oitavas de final", qf:"Quartas de final", sf:"Semifinal", third:"Disputa do 3º lugar", final:"Final"}[phase] || phase;
+}
+function wcWinnerOf(m){ return m.winner || (m.hs>m.as ? m.home : m.as>m.hs ? m.away : null); }
+function wcPenWinner(m){
+  const wc = ST.worldCup, rng = E.makeRNG(nextSeed());
+  const p = E.clamp(0.5 + ((wc.strength[m.home]||60) - (wc.strength[m.away]||60))/70, 0.38, 0.62);
+  return rng()<p ? m.home : m.away;
+}
+function wcNoteResult(m, ev){
+  const wc = ST.worldCup;
+  wc.reached[m.home] = wcStageName(ev.phase); wc.reached[m.away] = wcStageName(ev.phase);
+  if(!wc.lastEvent || wc.lastEvent.key!==ev.key) wc.lastEvent = {key:ev.key, label:ev.label, results:[]};
+  wc.lastEvent.results.push({home:m.home, away:m.away, hs:m.hs, as:m.as, pens:!!m.pens, winner:m.winner||null, group:m.group||null});
+}
+function wcSimMatch(m, ev){
+  const wc = ST.worldCup;
+  const res = simFast(m.home, m.away, "wc");
+  m.hs = res.homeScore; m.as = res.awayScore; m.played = true;
+  if(ev.phase==="groups") E.applyResultToStandings(wc.table, m.home, m.away, m.hs, m.as);
+  else { m.winner = m.hs>m.as ? m.home : m.as>m.hs ? m.away : wcPenWinner(m); if(m.hs===m.as) m.pens = true; }
+  wcNoteResult(m, ev);
+}
+function wcAdvanceDay(){
+  const wc = ST.worldCup;
+  if(!wc || !wc.active) return;
+  const ev = wcNextEvent();
+  if(!ev){ finishWorldCup(); return; }
+  if(wc.day < ev.day){
+    wc.day++;
+    ST.calendarWeekdayIdx = (ST.calendarWeekdayIdx+1)%7;
+    ST.dayCounter = (ST.dayCounter||0)+1;
+  }
+  if(wc.day>=ev.day && !wcUserMatchIn(ev)){
+    startRatingRound();
+    wcEventMatches(ev).forEach(m=>{ if(!m.played) wcSimMatch(m, ev); });
+    wcFinishEvent(ev);
+  }
+}
+// "match day" buttons (advanceSlow/Fast → advanceTournament): everyone else plays first, then the user's own match is handed to the normal match screen
+function advanceWorldCupStep(){
+  const wc = ST.worldCup;
+  const ev = wcNextEvent();
+  if(!ev){ finishWorldCup(); return; }
+  if(wc.day<ev.day){ wcAdvanceDay(); return; }
+  const um = wcUserMatchIn(ev);
+  startRatingRound();
+  wcEventMatches(ev).forEach(m=>{ if(!m.played && m!==um) wcSimMatch(m, ev); });
+  if(um){ goToMatchDay(um, {type:"wc", evKey:ev.key, phase:ev.phase, matchId:um.id}); return; }
+  wcFinishEvent(ev);
+}
+function wcFindMatch(id){
+  const wc = ST.worldCup;
+  for(const g of Object.keys(wc.fixtures)) for(const md of wc.fixtures[g]) for(const m of md) if(m.id===id) return m;
+  for(const k of Object.keys(wc.ko)) for(const m of wc.ko[k]) if(m.id===id) return m;
+  return null;
+}
+// called after the user's own match (finishPendingMatch) — or after its penalty shootout
+function wcAfterUserMatch(pm){
+  const wc = ST.worldCup, ctx = pm.context;
+  const ev = wcEvent(ctx.evKey), m = pm.ref;
+  wcNoteResult(m, ev);
+  if(ev.phase==="groups"){
+    E.applyResultToStandings(wc.table, m.home, m.away, m.hs, m.as);
+  } else {
+    if(m.hs===m.as){ startShootout(m.home, m.away, {type:"wcKO", matchId:m.id, evKey:ev.key}); return; }
+    m.winner = m.hs>m.as ? m.home : m.away;
+  }
+  wcFinishEvent(ev);
+}
+function wcAfterShootout(ctx, winner){
+  const m = wcFindMatch(ctx.matchId);
+  if(m){ m.winner = winner; m.pens = true; }
+  ST.stage = "hub"; ST.hubTab = "competicao";
+  wcFinishEvent(wcEvent(ctx.evKey));
+}
+function wcRank(letter){
+  const wc = ST.worldCup;
+  return E.sortedStandings(wc.table, wc.groups[letter]).map(r=>r.team);
+}
+function wcMk(id, label, home, away){ return {id, label, home, away, hs:null, as:null, played:false, winner:null, pens:false}; }
+function wcBuildR32(){
+  const wc = ST.worldCup;
+  const letters = Object.keys(wc.groups);
+  const rank = {}; letters.forEach(l=>{ rank[l] = wcRank(l); });
+  wc.groupRank = rank;
+  const thirds = letters.map(l=>{ const r = wc.table[rank[l][2]] || {pts:0, gd:0, gf:0}; return {l, pts:r.pts||0, gd:r.gd||0, gf:r.gf||0}; })
+    .sort((a,b)=>b.pts-a.pts || b.gd-a.gd || b.gf-a.gf).slice(0, 8);
+  wc.thirdsQual = thirds.map(t=>t.l);
+  const assign = WC.assignThirds(wc.thirdsQual);
+  const ref = (code, slotId)=>{
+    if(code.startsWith("3:")) return rank[assign[slotId]][2];
+    return rank[code[1]][Number(code[0])-1];
+  };
+  wc.ko.r32 = WC.R32_SLOTS.map(s=>wcMk("M"+s.id, "16-avos", ref(s.a, s.id), ref(s.b, s.id)));
+  letters.forEach(l=>{ rank[l].forEach((t, i)=>{ const advanced = i<2 || (i===2 && wc.thirdsQual.includes(l)); if(!advanced) wc.reached[t] = "Fase de Grupos"; }); });
+}
+function wcBuildNext(phase){
+  const wc = ST.worldCup;
+  const all = {}; Object.keys(wc.ko).forEach(k=>wc.ko[k].forEach(m=>{ all[m.id] = m; }));
+  const label = {r16:"Oitavas", qf:"Quartas", sf:"Semifinal", final:"Final"}[phase];
+  wc.ko[phase] = WC.KO_TREE[phase].map(([id, a, b])=>wcMk("M"+id, label, wcWinnerOf(all["M"+a]), wcWinnerOf(all["M"+b])));
+  if(phase==="final"){
+    const loser = m => wcWinnerOf(m)===m.home ? m.away : m.home;
+    wc.ko.third = [wcMk("M"+WC.THIRD_MATCH_ID, "3º lugar", loser(all["M101"]), loser(all["M102"]))];
+  }
+}
+function wcUserAlive(){
+  const wc = ST.worldCup;
+  if(!wc.userKey) return false;
+  return wc.events.some(ev=>!ev.done && wcEventMatches(ev).some(m=>!m.played && (m.home===wc.userKey || m.away===wc.userKey)));
+}
+function wcFinishEvent(ev){
+  const wc = ST.worldCup;
+  ev.done = true;
+  wc.phase = ev.phase;
+  if(ev.key==="g3") wcBuildR32();
+  else if(ev.key==="r32") wcBuildNext("r16");
+  else if(ev.key==="r16") wcBuildNext("qf");
+  else if(ev.key==="qf") wcBuildNext("sf");
+  else if(ev.key==="sf") wcBuildNext("final");
+  else if(ev.key==="third"){ const m = wc.ko.third[0]; wc.third = wcWinnerOf(m); wc.fourth = wc.third===m.home ? m.away : m.home; }
+  else if(ev.key==="final"){ const m = wc.ko.final[0]; wc.champion = wcWinnerOf(m); wc.runnerUp = wc.champion===m.home ? m.away : m.home; }
+  if(wc.userKey && !wc.userSettled && !wcUserAlive() && !(ev.key==="final")) wcSettleUser();
+  if(!wcNextEvent()) finishWorldCup();
+  scheduleSave();
+}
+function wcUserLabel(){
+  const wc = ST.worldCup, u = wc.userKey;
+  if(wc.champion===u) return "Campeão";
+  if(wc.runnerUp===u) return "Vice-campeão";
+  const t = wc.ko.third[0];
+  if(t && t.played && (t.home===u || t.away===u)) return wcWinnerOf(t)===u ? "3º lugar" : "4º lugar";
+  return wc.reached[u] || "Fase de Grupos";
+}
+// pays the federation's bonus, books the reputation swing for the season-end card and hands the club back
+function wcSettleUser(){
+  const wc = ST.worldCup;
+  if(!wc.userKey || wc.userSettled) return;
+  wc.userSettled = true;
+  const label = wcUserLabel();
+  const rep = WC.WC_REP[label] || 0, prize = WC.WC_PRIZE[label] || 0;
+  wc.userResult = {label, rep, prize};
+  if(prize){ ST.budget += prize; addSeasonPrize("wc", prize); }
+  ST.wcSeasonResult = {year:wc.year, nation:wc.info[wc.userKey].pt, code:wc.info[wc.userKey].code, label, rep, prize};
+  const pt = wc.info[wc.userKey].pt;
+  ST.newsLog.unshift({title: label==="Campeão" ? `Campeão do Mundo com a ${pt}!` : `Fim da Copa para a ${pt}`, text: label==="Campeão" ? `Você levou a ${pt} ao título da Copa do Mundo ${wc.year}!` : `A ${pt} terminou a Copa do Mundo ${wc.year} em: ${label}.`});
+  wcEndNatDuty();
+}
+function wcEndNatDuty(){
+  const d = ST.natDuty;
+  if(!d) return;
+  ST.teamId = d.club; ST.lineup = d.lineup; ST.formation = d.formation; ST.captainId = d.captainId;
+  ST.natDuty = null;
+  ST.natJob = null;
+  if(ST.hubTab==="elenco" || ST.hubTab==="email") { /* stays */ }
+}
+function finishWorldCup(){
+  const wc = ST.worldCup;
+  if(!wc.champion){ const f = wc.ko.final[0]; if(f && f.played){ wc.champion = wcWinnerOf(f); wc.runnerUp = wc.champion===f.home ? f.away : f.home; } }
+  if(wc.userKey && !wc.userSettled) wcSettleUser();
+  wc.active = false; wc.phase = "done";
+  Object.keys(ST.world.teams).forEach(k=>{ if(ST.world.teams[k].isNation) delete ST.world.teams[k]; });
+  if(!ST.wcHistory) ST.wcHistory = [];
+  ST.wcHistory.push({year:wc.year, champion:wc.champion, runnerUp:wc.runnerUp, third:wc.third, fourth:wc.fourth, user:wc.userResult||null});
+  ST.lastUserMatchType = null; ST.calendarDaysLeft = null; ST.pendingMatch = null; ST.matchLineupOverride = null;
+  ST.newsLog.unshift({title:`${wc.champion} é campeão do mundo!`, text:`${wc.champion} vence a Copa do Mundo ${wc.year}. Os campeonatos voltam.`});
+  ST.stage = "wc_end";
+  scheduleSave();
+}
+function wcTopScorers(n){
+  const wc = ST.worldCup;
+  return Object.values(wc.scorers||{}).sort((a,b)=>b.goals-a.goals || a.name.localeCompare(b.name)).slice(0, n||10);
+}
+
+// ---------- call-up ----------
+function wcOpenCallup(fromBreak){
+  const job = ST.natJob;
+  if(!job) return;
+  wcPoolCache = wcPoolIndex();
+  const pool = wcPoolCache.byNat.get(job.nation) || [];
+  const ids = job.squadIds.length ? job.squadIds.slice() : WC.autoSelectSquad(pool).ids;
+  ST.wcCallup = {ids, tab:"gk", more:false, fromBreak:!!fromBreak, msg:""};
+  ST.stage = "wc_callup";
+}
+function wcCallupPool(){
+  const job = ST.natJob;
+  if(!wcPoolCache) wcPoolCache = wcPoolIndex();
+  return (wcPoolCache.byNat.get(job.nation) || []).slice().sort((a,b)=>b.ovr-a.ovr || (b.pot||0)-(a.pot||0));
+}
+function wcCallupToggle(id){
+  const c = ST.wcCallup; if(!c) return;
+  const pool = wcCallupPool();
+  const p = pool.find(x=>x.id===id);
+  if(!p) return;
+  c.msg = "";
+  if(c.ids.includes(id)){ c.ids = c.ids.filter(x=>x!==id); return; }
+  if(c.ids.length>=WC.SQUAD_SIZE){ c.msg = `A lista já tem ${WC.SQUAD_SIZE} jogadores — remova alguém antes.`; return; }
+  const sel = c.ids.map(i=>pool.find(x=>x.id===i)).filter(Boolean);
+  const cnt = WC.countByGroup(sel);
+  const g = WC.POS_GROUPS.find(x=>x.id===WC.posGroupOf(p.pos));
+  const extras = WC.POS_GROUPS.reduce((a,x)=>a+Math.max(0, cnt[x.id]-x.need), 0);
+  if(cnt[g.id]>=g.need && extras>=WC.FREE_SLOTS){ c.msg = `${g.label}: as ${g.need} vagas e as ${WC.FREE_SLOTS} vagas livres já foram usadas.`; return; }
+  c.ids.push(id);
+}
+function wcCallupConfirm(){
+  const c = ST.wcCallup, job = ST.natJob; if(!c || !job) return;
+  const pool = wcCallupPool();
+  const sel = c.ids.map(i=>pool.find(x=>x.id===i)).filter(Boolean);
+  const problems = WC.callupProblems(sel, pool);
+  if(problems.length){ c.msg = problems.join(" · "); return; }
+  job.squadIds = sel.map(p=>p.id);
+  job.done = true;
+  const fromBreak = c.fromBreak;
+  ST.wcCallup = null; wcPoolCache = null;
+  if(fromBreak){ beginWorldCup(); }
+  else { ST.stage = "hub"; ST.hubTab = "competicao"; }
+  ST.newsLog.unshift({title:"Convocação fechada!", text:`Você convocou os ${sel.length} jogadores da seleção ${job.pt}.`});
+  scheduleSave();
+}
+function wcCallupClose(){
+  const c = ST.wcCallup;
+  if(c && c.fromBreak) return;       // na pausa da Copa a convocação é obrigatória
+  ST.wcCallup = null; wcPoolCache = null;
+  ST.stage = "hub"; ST.hubTab = "competicao";
+}
+
+// ============================================================
+// COPA DO MUNDO — telas
+// ============================================================
+function renderWcTrophy(h, op){ return competitionTrophyImg("worldcup", h, op==null?1:op); }
+
+// banner at the top of the league's Competição tab
+function renderWcBanner(){
+  const job = ST.natJob;
+  const year = ST.seasonYear;
+  if(job){
+    const open = job.year===year;
+    return `<div class="panel wc-banner">
+      <div class="wc-banner-flag">${wcFlagImg(job.code, 46)}</div>
+      <div class="wc-banner-body">
+        <div class="faint tiny uc">Seleção · Copa do Mundo ${job.year}</div>
+        <div class="bold">Você é o técnico da seleção ${esc(job.pt)}</div>
+        <div class="dim small">${!open ? `A convocação abre na temporada ${job.year}.` : job.done ? `Convocação fechada (${job.squadIds.length} jogadores). O Brasileirão para após a rodada ${WC.WC_BREAK_ROUND}.` : `Convoque seus 26 jogadores antes da pausa do Brasileirão (após a rodada ${WC.WC_BREAK_ROUND}).`}</div>
+      </div>
+      ${open ? `<button class="btn btn-gold btn-sm" onclick="Game.openCallup()">${job.done?"Rever convocação":"Convocar"}</button>` : ""}
+    </div>`;
+  }
+  if(WC.isWorldCupYear(year) && !(ST.wcDone && ST.wcDone[year])){
+    return `<div class="panel wc-banner wc-banner-soft">
+      <div class="wc-banner-flag">${renderWcTrophy(44)}</div>
+      <div class="wc-banner-body">
+        <div class="faint tiny uc">Copa do Mundo ${year}</div>
+        <div class="dim small">Todos os campeonatos param após a rodada ${WC.WC_BREAK_ROUND} do Brasileirão para a Copa do Mundo.</div>
+      </div>
+    </div>`;
+  }
+  return "";
+}
+
+function wcDaysTo(){
+  const wc = ST.worldCup;
+  const nu = wcNextUserMatch();
+  const ev = nu ? nu.ev : wcNextEvent();
+  return ev ? {ev, days:Math.max(0, ev.day - wc.day), nu} : null;
+}
+function renderWcNextCard(){
+  const wc = ST.worldCup;
+  const t = wcDaysTo();
+  if(!t) return "";
+  const {ev, days, nu} = t;
+  const timeConfigBtn = `<div class="btn-row center mt8"><button class="btn btn-sm" onclick="Game.openTimeConfig()">CONFIGURAÇÃO DE TEMPO</button></div>`;
+  const opp = nu ? (nu.m.home===wc.userKey ? nu.m.away : nu.m.home) : null;
+  const matchDay = nu && days<=0;
+  let action;
+  if(matchDay){
+    action = `<div class="gold bold uc tac mt16" style="letter-spacing:.06em;">⚽ Dia do jogo!</div>
+      <div class="btn-row center mt16">
+        <button class="btn btn-gold" onclick="Game.advanceSlow()">▶ Partida Completa</button>
+        <button class="btn" onclick="Game.advanceFast()">⏭ Ir para o Resultado</button>
+      </div>${timeConfigBtn}`;
+  } else {
+    action = `${renderCalendarStrip(opp, "worldcup", true, {days:Math.max(days,1), noTraining:true})}
+      <div class="tac dim small mt8">${nu ? `Próximo jogo da ${esc(wc.info[wc.userKey].pt)} em ${days} dia${days===1?"":"s"}` : `${esc(ev.label)} em ${days} dia${days===1?"":"s"}`}</div>
+      <div class="btn-row center mt16">
+        <button class="btn btn-gold btn-lg" onclick="Game.advanceDay()">AVANÇAR DIA</button>
+        ${nu ? "" : `<button class="btn" onclick="Game.wcSimPhase()">⏩ Simular fase</button><button class="btn" onclick="Game.wcSimAll()">⏭ Simular Copa inteira</button>`}
+      </div>${nu ? timeConfigBtn : ""}`;
+  }
+  const head = nu
+    ? `<div class="faint tiny uc mb12">${esc(ev.label)} · Dia ${wc.day}</div>
+       <div class="row center" style="gap:clamp(28px,9vw,120px);">
+         <div style="width:118px;"><div style="margin:0 auto;width:92px;">${clubCrestImg(nu.m.home,92,null)}</div><div class="bold small mt8">${esc(nu.m.home)}</div></div>
+         <div class="faint" style="font-family:var(--font-display);font-size:38px;font-weight:800;">VS</div>
+         <div style="width:118px;"><div style="margin:0 auto;width:92px;">${clubCrestImg(nu.m.away,92,null)}</div><div class="bold small mt8">${esc(nu.m.away)}</div></div>
+       </div>`
+    : `<div class="faint tiny uc mb12">Copa do Mundo ${wc.year} · Dia ${wc.day}</div>
+       <div class="row center" style="gap:18px;">${renderWcTrophy(96)}<div style="text-align:left;"><div class="wc-big">${esc(ev.label)}</div><div class="dim small">${wc.userKey||ST.worldCup.userResult ? "Sua seleção já está fora da Copa." : "Você acompanha o torneio como espectador."}</div></div></div>`;
+  return `<div class="panel next-match-wide" style="text-align:center;">${head}${action}</div>`;
+}
+
+function renderWcResultsPanel(){
+  const wc = ST.worldCup, le = wc.lastEvent;
+  if(!le || !le.results.length) return `<div class="panel wc-panel"><div class="panel-title">Resultados</div><p class="dim small">Os jogos começam no dia 1. Clique em AVANÇAR DIA.</p></div>`;
+  return `<div class="panel wc-panel"><div class="panel-title">Resultados — ${esc(le.label)}</div>
+    <div class="wc-results">${le.results.map(r=>`<div class="wc-res${(wc.userKey && (r.home===wc.userKey||r.away===wc.userKey))?' is-user':''}">
+      <span class="wc-res-g">${r.group||""}</span>
+      <span class="wc-res-t wc-res-home">${esc(r.home)} ${wcFlagOf(r.home,18)}</span>
+      <span class="wc-res-score">${r.hs} – ${r.as}${r.pens?'<small> (pên.)</small>':''}</span>
+      <span class="wc-res-t wc-res-away">${wcFlagOf(r.away,18)} ${esc(r.away)}</span>
+    </div>`).join("")}</div></div>`;
+}
+function renderWcGroupCard(letter){
+  const wc = ST.worldCup;
+  const rows = E.sortedStandings(wc.table, wc.groups[letter]);
+  const done = wc.groupRank && wc.groupRank[letter];
+  return `<div class="wc-group panel">
+    <div class="wc-group-title">Grupo ${letter}</div>
+    <table class="wc-tbl"><thead><tr><th></th><th>Seleção</th><th>J</th><th>V</th><th>E</th><th>D</th><th>SG</th><th>Pts</th></tr></thead><tbody>
+    ${rows.map((r,i)=>{
+      const adv = done ? (i<2 || (i===2 && wc.thirdsQual.includes(letter))) : false;
+      const cls = (wc.userKey===r.team?"is-user ":"") + (done ? (adv?"adv ":"out ") : (i<2 && r.played>0?"lead ":""));
+      return `<tr class="${cls}"><td class="pos">${i+1}</td><td class="nm">${wcTeamLabel(r.team,20)}</td><td>${r.played}</td><td>${r.w}</td><td>${r.d}</td><td>${r.l}</td><td>${r.gd>0?'+':''}${r.gd}</td><td class="pts">${r.pts}</td></tr>`;
+    }).join("")}
+    </tbody></table>
+  </div>`;
+}
+function renderWcGroups(){
+  const wc = ST.worldCup;
+  const letters = Object.keys(wc.groups);
+  const ug = wc.userKey ? letters.find(l=>wc.groups[l].includes(wc.userKey)) : null;
+  const fx = ug ? `<div class="panel wc-panel mt16"><div class="panel-title">Jogos do Grupo ${ug}</div><div class="wc-results">${wc.fixtures[ug].map((md,i)=>md.map(m=>`<div class="wc-res${(m.home===wc.userKey||m.away===wc.userKey)?' is-user':''}">
+      <span class="wc-res-g">R${i+1}</span><span class="wc-res-t wc-res-home">${esc(m.home)} ${wcFlagOf(m.home,18)}</span>
+      <span class="wc-res-score">${m.played?`${m.hs} – ${m.as}`:"x"}</span><span class="wc-res-t wc-res-away">${wcFlagOf(m.away,18)} ${esc(m.away)}</span></div>`).join("")).join("")}</div></div>` : "";
+  return `<div class="wc-groups">${letters.map(renderWcGroupCard).join("")}</div>${fx}
+    <div class="tiny faint mt8">Avançam os 2 primeiros de cada grupo e os 8 melhores terceiros colocados (32 seleções).</div>`;
+}
+function wcBracketBox(m, fallback){
+  const wc = ST.worldCup;
+  if(!m) return `<div class="wc-bm wc-bm-empty">${fallback||"A definir"}</div>`;
+  const row = (t, s)=>{
+    const win = m.played && wcWinnerOf(m)===t;
+    return `<div class="wc-bm-row${win?' win':''}${wc.userKey===t?' is-user':''}"><span class="wc-bm-t">${t?wcTeamLabel(t,18):'<span class="dim">A definir</span>'}</span><span class="wc-bm-s">${m.played?s:""}</span></div>`;
+  };
+  return `<div class="wc-bm">${row(m.home, m.hs+(m.pens?(wcWinnerOf(m)===m.home?" ✓":""):""))}${row(m.away, m.as+(m.pens?(wcWinnerOf(m)===m.away?" ✓":""):""))}</div>`;
+}
+function renderWcKnockout(){
+  const wc = ST.worldCup;
+  if(!wc.ko.r32.length) return `<div class="panel wc-panel"><p class="dim small">O mata-mata começa depois da fase de grupos: 32 seleções, jogo único.</p></div>`;
+  // each column lists its matches in the order their feeders appear in the column before, so the tree reads left to right
+  const ORDER = {r32:[74,77,73,75,83,84,81,82,76,78,79,80,86,88,85,87], r16:[89,90,93,94,91,92,95,96], qf:[97,98,99,100], sf:[101,102]};
+  const col = (title, arr, key)=>`<div class="wc-col"><div class="wc-col-title">${title}</div><div class="wc-col-body">${ORDER[key].map(id=>wcBracketBox(arr.find(m=>m.id==="M"+id))).join("")}</div></div>`;
+  return `<div class="wc-bracket">
+    ${col("16-avos", wc.ko.r32, "r32")}${col("Oitavas", wc.ko.r16, "r16")}${col("Quartas", wc.ko.qf, "qf")}${col("Semifinais", wc.ko.sf, "sf")}
+    <div class="wc-col"><div class="wc-col-title">Final</div><div class="wc-col-body">${wcBracketBox(wc.ko.final[0])}<div class="wc-col-title mt16">3º lugar</div>${wcBracketBox(wc.ko.third[0])}</div></div>
+  </div>`;
+}
+function renderWcScorers(){
+  const list = wcTopScorers(12);
+  if(!list.length) return `<div class="panel wc-panel"><p class="dim small">Nenhum gol ainda.</p></div>`;
+  return `<div class="panel wc-panel"><div class="panel-title">Artilharia da Copa</div>
+    <div class="wc-scorers">${list.map((s,i)=>`<div class="wc-scorer"><span class="wc-scorer-rank">${i+1}</span>${wcFlagOf(s.team,20)}<span class="bold">${esc(s.name)}</span><span class="dim tiny">${esc(s.team)}</span><span class="wc-scorer-goals">${s.goals}</span></div>`).join("")}</div></div>`;
+}
+function renderWorldCupTab(){
+  const wc = ST.worldCup;
+  const view = wc.view || "grupos";
+  const vb = (id, label)=>`<button class="btn btn-sm${view===id?' btn-gold':''}" onclick="Game.setWcView('${id}')">${label}</button>`;
+  const body = view==="mata" ? renderWcKnockout() : view==="artilharia" ? renderWcScorers() : renderWcGroups();
+  return `<div class="wc-wrap">
+    <div class="wc-hero panel">
+      <div class="wc-hero-trophy">${renderWcTrophy(78)}</div>
+      <div class="wc-hero-text">
+        <div class="faint tiny uc">Todos os campeonatos estão parados</div>
+        <div class="wc-hero-title">COPA DO MUNDO ${wc.year}</div>
+        <div class="dim small">${esc(wcStageName((wcNextEvent()||{phase:wc.phase}).phase))} · 48 seleções · ${wc.hosts.length?`Sede: ${wc.hosts.map(h=>wc.info[h]?esc(wc.info[h].pt):"").filter(Boolean).join(", ")}`:""}</div>
+      </div>
+      ${wc.userKey ? `<div class="wc-hero-user">${wcFlagImg(wc.info[wc.userKey].code, 40)}<div><div class="faint tiny uc">Você comanda</div><div class="bold">${esc(wc.info[wc.userKey].pt)}</div></div></div>` : ""}
+    </div>
+    <div class="wc-next">${renderWcNextCard()}</div>
+    <div class="btn-row wc-views">${vb("grupos","Grupos")}${vb("mata","Mata-mata")}${vb("artilharia","Artilharia")}</div>
+    ${renderWcResultsPanel()}
+    <div class="mt16">${body}</div>
+  </div>`;
+}
+
+function renderWcEnd(){
+  const wc = ST.worldCup;
+  const ur = wc.userResult;
+  const podium = [[wc.champion,"Campeão",1],[wc.runnerUp,"Vice-campeão",2],[wc.third,"3º lugar",3],[wc.fourth,"4º lugar",4]];
+  return `<div class="hero wc-end" style="min-height:80vh;position:relative;z-index:1;">
+    <div class="mb16">${renderWcTrophy(170)}</div>
+    <div class="hero-badge">COPA DO MUNDO ${wc.year}</div>
+    <h1 class="hero-title" style="font-size:clamp(30px,6vw,54px);">${esc((wc.champion||"").toUpperCase())}</h1>
+    <div class="wc-champ-flag">${wcFlagOf(wc.champion, 96)}</div>
+    <p class="hero-sub">${esc(wc.champion)} é campeão do mundo.</p>
+    <div class="wc-podium">${podium.map(([t,l,n])=>`<div class="wc-podium-item p${n}"><div class="tiny faint uc">${l}</div>${wcFlagOf(t,40)}<div class="bold small">${esc(t||"—")}</div></div>`).join("")}</div>
+    ${ur ? `<div class="panel mt24" style="max-width:420px;">
+      <div class="panel-title">Sua seleção — ${esc(wc.info[wc.userKey].pt)}</div>
+      <div class="kv"><span>Campanha</span><span class="${ur.label==='Campeão'?'gold':''} bold">${esc(ur.label)}</span></div>
+      <div class="kv"><span>Reputação</span><span class="${ur.rep>=0?'green':'red'} bold">${ur.rep>=0?'+':''}${ur.rep} (entra no fechamento da temporada)</span></div>
+      <div class="kv"><span>Bônus da federação</span><span class="gold bold">${fmtMoney(ur.prize)}</span></div>
+    </div>` : ""}
+    ${wcTopScorers(5).length ? `<div class="panel mt16" style="max-width:420px;"><div class="panel-title">Artilharia</div>
+      ${wcTopScorers(5).map((s,i)=>`<div class="wc-scorer"><span class="wc-scorer-rank">${i+1}</span>${wcFlagOf(s.team,20)}<span class="bold">${esc(s.name)}</span><span class="wc-scorer-goals">${s.goals}</span></div>`).join("")}</div>` : ""}
+    <button class="btn btn-gold btn-lg mt24" onclick="Game.finishWcEnd()">Retomar o Brasileirão →</button>
+  </div>`;
+}
+
+function renderWcCallup(){
+  const c = ST.wcCallup, job = ST.natJob;
+  const pool = wcCallupPool();
+  const club = (wcPoolCache && wcPoolCache.club) || new Map();
+  const sel = c.ids.map(i=>pool.find(x=>x.id===i)).filter(Boolean);
+  const cnt = WC.countByGroup(sel);
+  const extras = WC.POS_GROUPS.reduce((a,x)=>a+Math.max(0, cnt[x.id]-x.need), 0);
+  const problems = WC.callupProblems(sel, pool);
+  const tabG = WC.POS_GROUPS.find(g=>g.id===c.tab) || WC.POS_GROUPS[0];
+  const inGroup = pool.filter(p=>WC.posGroupOf(p.pos)===tabG.id);
+  const shown = inGroup.slice(0, c.more ? 160 : 40);
+  const chip = g => {
+    const have = cnt[g.id], need = g.need;
+    const st = have>=need ? "ok" : "low";
+    return `<button class="wc-chip ${st}${c.tab===g.id?' on':''}" onclick="Game.callupTab('${g.id}')"><span class="wc-chip-s">${g.short}</span><span class="wc-chip-n">${have}/${need}${have>need?` <small>+${have-need}</small>`:""}</span></button>`;
+  };
+  const row = p=>{
+    const on = c.ids.includes(p.id);
+    const cl = club.get(p.id) || p.club || "";
+    return `<div class="wc-prow${on?' on':''}">
+      <span class="wc-prow-face">${playerFaceImg(p,30)}</span>
+      <div class="wc-prow-main"><div class="bold">${esc(p.name)}${p.injured?' <span class="red tiny">lesionado</span>':''}</div><div class="tiny faint">${esc(!cl||cl==="Free Agents"?"Sem clube":cl)} · ${p.age} anos</div></div>
+      <span class="wc-prow-pos">${posBadges(p)}</span>
+      <span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span>
+      <button class="btn btn-sm${on?' btn-danger':' btn-gold'}" onclick="Game.callupToggle(${p.id})">${on?"Remover":"Convocar"}</button>
+    </div>`;
+  };
+  const selByGroup = WC.POS_GROUPS.map(g=>({g, list:sel.filter(p=>WC.posGroupOf(p.pos)===g.id).sort((a,b)=>b.ovr-a.ovr)}));
+  return `<div class="wc-callup">
+    <div class="wc-callup-head">
+      ${wcFlagImg(job.code, 64)}
+      <div>
+        <div class="faint tiny uc">Convocação · Copa do Mundo ${job.year}</div>
+        <div class="wc-callup-title">Seleção ${esc(job.pt)}</div>
+        <div class="dim small">Só jogadores nascidos em ${esc(job.pt)} · ${WC.SQUAD_SIZE} convocados: ${WC.POS_GROUPS.map(g=>`${g.need} ${g.label.toLowerCase()}`).join(", ")} e ${WC.FREE_SLOTS} vagas livres.</div>
+      </div>
+      <div class="wc-callup-count ${sel.length===Math.min(WC.SQUAD_SIZE,pool.length)?'ok':''}"><b>${sel.length}</b>/${Math.min(WC.SQUAD_SIZE,pool.length)}<small>${extras}/${WC.FREE_SLOTS} livres</small></div>
+    </div>
+    <div class="wc-chips">${WC.POS_GROUPS.map(chip).join("")}</div>
+    <div class="wc-callup-grid">
+      <div class="panel wc-callup-list">
+        <div class="panel-title">${tabG.label} <span class="dim tiny">(${inGroup.length} disponíveis)</span></div>
+        ${shown.length ? shown.map(row).join("") : `<p class="dim small">Nenhum jogador dessa posição na base de dados — completaremos com jogadores locais.</p>`}
+        ${inGroup.length>40 ? `<div class="tac mt8"><button class="btn btn-sm" onclick="Game.callupMore()">${c.more?"Mostrar menos":`Mostrar mais (${Math.min(160,inGroup.length)})`}</button></div>` : ""}
+      </div>
+      <div class="panel wc-callup-sel">
+        <div class="panel-title">Convocados</div>
+        ${selByGroup.map(({g,list})=>`<div class="wc-sel-g"><div class="tiny faint uc">${g.label} ${list.length}/${g.need}</div>${list.length?list.map(p=>`<div class="wc-sel-p"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span><span>${esc(p.name)}</span><span class="faint tiny">${p.pos}</span><button class="wc-x" onclick="Game.callupToggle(${p.id})" aria-label="Remover">×</button></div>`).join(""):'<div class="dim tiny">—</div>'}</div>`).join("")}
+      </div>
+    </div>
+    ${c.msg || problems.length ? `<div class="wc-callup-msg red small">${esc(c.msg || problems.join(" · "))}</div>` : ""}
+    <div class="btn-row wc-callup-actions">
+      <button class="btn" onclick="Game.callupAuto()">✨ Convocação automática</button>
+      <button class="btn" onclick="Game.callupClear()">Limpar lista</button>
+      ${c.fromBreak ? "" : `<button class="btn" onclick="Game.callupClose()">← Voltar</button>`}
+      <button class="btn btn-gold btn-lg" ${problems.length?'disabled':''} onclick="Game.callupConfirm()">Confirmar convocação</button>
+    </div>
+    ${c.fromBreak ? `<div class="tac faint tiny mt8">A Copa do Mundo vai começar — feche a lista para apitar o início.</div>` : ""}
+  </div>`;
+}
+
+// ============================================================
 // ACCESS GATE — a simple client-side login so the site isn't playable by
 // anyone who just stumbles on the URL. Asked fresh on every single visit/reload
 // (nothing is remembered between page loads, on purpose). This is NOT real
@@ -8930,5 +9767,5 @@ if(typeof document !== "undefined"){
   else startBoot();
 }
 
-window.__APP_INTERNALS__ = { startBrasileiraoCareer, submitBuyProposal, buyContext, buyNegSession, negotiateOffer, queueOfferMail, findMail, runOfferNegotiation, offerNegCeiling, newCareerState, startCareer, advanceTournament, render, tierOf, buildJobOffers, teamAvgOvr, globalMarketAskingPrice, isKeyMarketPlayer, dailyTransferTick, runEuropeanPoaching, runSingleAISigning, runSingleGlobalReshuffle, nextSeed, E, get ST(){return ST;}, set ST(v){ST=v;} };
+window.__APP_INTERNALS__ = { wcActive, wcPlanFor, wcPoolIndex, beginWorldCup, wcAdvanceDay, wcNextEvent, wcUserMatchIn, wcOpenCallup, wcCallupConfirm, maybeNationalOffers, acceptNationalJob, wcPerformanceScore, wcBuildSquad, wcStrengthOf, finishWorldCup, renderWorldCupTab, renderWcCallup, renderWcEnd, renderHub, renderWcBanner, inboxList, startBrasileiraoCareer, submitBuyProposal, buyContext, buyNegSession, negotiateOffer, queueOfferMail, findMail, runOfferNegotiation, offerNegCeiling, newCareerState, startCareer, advanceTournament, render, tierOf, buildJobOffers, teamAvgOvr, globalMarketAskingPrice, isKeyMarketPlayer, dailyTransferTick, runEuropeanPoaching, runSingleAISigning, runSingleGlobalReshuffle, nextSeed, E, get ST(){return ST;}, set ST(v){ST=v;} };
 
