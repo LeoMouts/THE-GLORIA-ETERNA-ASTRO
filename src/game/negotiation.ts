@@ -15,13 +15,15 @@
 
 export const NEG_CONFIG = {
   startMood: 70,          // every negotiation opens with the director at 70/100
-  maxRounds: 8,           // counter-offer rounds before the club makes a final call (configurable)
+  maxRounds: 5,           // the club makes at most 4 counter-offers; a 5th proposal that still does not close ends the talks
   nearFraction: 0.004,    // |x - target| below this share of the price is "the same number"
   nearMin: 15000,         // ...and never less than this many dollars of slack
-  absurdGap: 0.4,         // past-the-limit gap that counts as an absurd lowball / overreach
+  absurdGap: 0.4,         // a number this far (share of the club's standing position) from what the club holds is outrageous: talks end at once
+  absurdPastLimit: 0.3,   // ...as is a number this far past the club's limit
 };
 
 export type Role = "seller" | "buyer";     // role of the AI club in this negotiation
+export type EndReason = "absurd" | "rounds" | "patience";
 export type Verdict = "accept" | "accept_conditions" | "counter_small" | "counter_moderate" | "counter_high" | "refuse" | "end";
 
 export interface NegState {
@@ -103,6 +105,7 @@ export interface Decision {
   mood: number; moodDelta: number;
   u: number; e: number;
   ended: boolean;
+  endReason: EndReason | null;
   state: NegState;
 }
 
@@ -138,6 +141,8 @@ export function decide(inp: DecideInput, st0: NegState): Decision {
   // movement of the user's number since last round, toward what the AI wants
   const moved = st.prevX == null ? 0 : sign * (x - st.prevX) / Math.max(1, T);
   const absurd = e > cfg.absurdGap;
+  const gapNow = (inp.role === "seller" ? st.now - x : x - st.now) / Math.max(1, st.now);   // how far the number sits from the club's standing position, against the club
+  const outrageous = e >= cfg.absurdPastLimit || gapNow >= cfg.absurdGap;
 
   // ---- mood ----
   let d: number;
@@ -159,13 +164,15 @@ export function decide(inp: DecideInput, st0: NegState): Decision {
   if (absurd) st.absurd += 1;
 
   // ---- ending: only for a real reason ----
-  let ended = false;
-  if ((st.mood <= 8 && st.absurd >= 3) || (st.mood <= 4 && st.stalled >= 3 && verdict !== "accept" && verdict !== "accept_conditions")) ended = true;
-  else if (st.round > maxRounds && verdict !== "accept" && verdict !== "accept_conditions") {
-    // last round: a close number still closes; a far one ends the talks politely
-    if (u >= -0.35 || e <= 0.03) verdict = "accept_conditions"; else ended = true;
+  let ended = false, endReason: EndReason | null = null;
+  const closing = verdict === "accept" || verdict === "accept_conditions";
+  if (outrageous && !closing) { ended = true; endReason = "absurd"; }                 // an outrageous number cancels the negotiation on the spot
+  else if (!closing && ((st.mood <= 8 && st.absurd >= 3) || (st.mood <= 4 && st.stalled >= 3))) { ended = true; endReason = "patience"; }
+  else if (!closing && st.round >= maxRounds) { ended = true; endReason = "rounds"; }   // 4 counter-offers and still no deal: the club walks away
+  if (ended) {
+    verdict = "end";
+    if (endReason === "absurd") { d += Math.min(0, 5 - st.mood); st.mood = Math.min(st.mood, 5); }   // the bar drops to the red
   }
-  if (ended) verdict = "end";
 
   // ---- the club's new position ----
   const round5 = roundMoney;
@@ -191,7 +198,7 @@ export function decide(inp: DecideInput, st0: NegState): Decision {
   st.lastVerdict = verdict;
   st.lastClosePrice = closePrice;
   st.ended = ended;
-  return { verdict, accepted: verdict === "accept", price, counter, closePrice, mood: st.mood, moodDelta: d, u, e, ended, state: st };
+  return { verdict, accepted: verdict === "accept", price, counter, closePrice, mood: st.mood, moodDelta: d, u, e, ended, endReason, state: st };
 }
 
 // ---------- director's words — only ever a rendering of the decision ----------
@@ -235,6 +242,8 @@ export function composeReply(dec: Decision, c: ReplyCtx): string {
     case "refuse":
       return pick([`${ml} Esse valor é incompatível com o que consideramos razoável — apresente algo mais sério.`, `Não conseguimos trabalhar com esse número. Faça uma nova proposta.`], n);
     default:
+      if (dec.endReason === "absurd") return pick([`Esse valor é um absurdo. Encerramos a negociação por ${c.player}.`, `Isso é inaceitável. A diretoria cancelou a negociação por ${c.player}.`], n);
+      if (dec.endReason === "rounds") return pick([`Já fizemos várias contrapropostas e não chegamos a um acordo. Encerramos a negociação por ${c.player}.`, `Foram propostas demais sem acordo. A diretoria cancelou a negociação por ${c.player}.`], n);
       return pick([`${ml} Encerramos as conversas por aqui.`, `A diretoria decidiu encerrar a negociação por ${c.player}.`], n);
   }
 }
