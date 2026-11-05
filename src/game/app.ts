@@ -10,6 +10,7 @@ import { decide as negDecide, newNegState, computeFlex, composeReply, moodBand, 
 import { GAME_DATA as DATA } from "./teams";
 import { GLOBAL_MARKET as GLOBAL_MARKET_SRC } from "./market";
 import { PRELIB_DATA } from "./prelib"; import FACE_RAW from "./data/faces.json"; import FACE_ALT_RAW from "./data/faces_alt.json"; import TP_RAW from "./data/transferProfile.json"; import POSX_RAW from "./data/positions.json";
+import { SERIE_B_2026, SERIE_C_POOL, EXTRA_CREST_SLUGS, serieBTeamsFromData, isSerieBSeedPlayer } from "./serieB";
 import { SERIE_A_EXTRA_TEAMS, SERIE_A_2026 } from "./serieA"; import { SULAMERICANA_EXTRA_TEAMS, SULAMERICANA_2026 } from "./sulamericana";
 
 const GOAT_MASCOT_URI = "/images/image-1787868287812.webp";
@@ -70,11 +71,13 @@ function crestInitials(name){
   if(words.length===1) return words[0].slice(0,3).toUpperCase();
   return words.slice(0,3).map(w=>w[0]).join("").toUpperCase();
 }
+// Série B / Série C clubs: badges from the SMF crest repository (same CDN as the global-market crests)
+function extraCrestUrl(name){ const sl = EXTRA_CREST_SLUGS[name]; return sl ? FENOMENO_CREST_CDN + sl + ".webp" : null; }
 function crestSVG(teamName, size){
   size = size || 40;
   const wcI = wcInfo(teamName);
   if(wcI) return wcCrest(wcI.code, size); // seleções da Copa do Mundo: bandeira (sem emoji)
-  const logo = TEAM_LOGOS[teamName];
+  const logo = TEAM_LOGOS[teamName] || extraCrestUrl(teamName);
   if(logo){
     return `<img src="${logo}" alt="${esc(teamName)}" width="${size}" height="${size}" loading="lazy" style="display:block;width:${size}px;height:${size}px;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,.45));"/>`;
   }
@@ -495,6 +498,7 @@ function trophyImg(height, opacity){
 const TROPHY_CDN = "https://cdn.jsdelivr.net/gh/TheSMF-Group/thefenomeno-assets@main/trophies/";
 const COMPETITION_TROPHIES = {
   brasileirao: {url:TROPHY_CDN+"LG_BRA1.png", alt:"Taça Brasileirão"},
+  brasileiraoB: {url:TROPHY_CDN+"LG_BRA2.png", alt:"Taça Brasileirão Série B"},
   copa: {url:TROPHY_CDN+"DOM_BRA.png", alt:"Taça Copa do Brasil"},
   libertadores: {url:TROPHY_CDN+"LIB.png", alt:"Taça CONMEBOL Libertadores"},
   sulamericana: {url:TROPHY_CDN+"SUD.png", alt:"Taça CONMEBOL Sul-Americana"},
@@ -502,6 +506,7 @@ const COMPETITION_TROPHIES = {
   worldcup: {url:TROPHY_CDN+"WC.png", alt:"Taça da Copa do Mundo"},
 };
 function competitionTrophyImg(compType, height, opacity){
+  if(compType==="brasileirao" && ST && ST.mode==="brasileirao" && ST.brasileirao && ST.brasileirao.division==="B") compType = "brasileiraoB";
   const t = COMPETITION_TROPHIES[compType] || COMPETITION_TROPHIES.brasileirao;
   height = height || 120;
   opacity = opacity==null ? 1 : opacity;
@@ -628,8 +633,103 @@ function freshBrasaWorld(){
     if(maxId>nextIdCounter) nextIdCounter = maxId;
     teams[name] = { name, country:"Brasil", flag:"🇧🇷", group:null, source:t.source||"gen", players };
   });
+  // the 20 Série B clubs play for real too: their squads (the real ones that sat in the market data) become teams of the world
+  const bTeams = serieBTeamsFromData();
+  SERIE_B_2026.forEach(name=>{
+    const t = bTeams[name];
+    t.players.forEach(p=>{ if(p.id>nextIdCounter) nextIdCounter = p.id; });
+    teams[name] = t;
+  });
   GLOBAL_MARKET_SRC.forEach(p=>{ if(p.id>nextIdCounter) nextIdCounter=p.id; });
-  return { groups:null, teams, globalMarket: GLOBAL_MARKET_SRC.map(p=>Object.assign({}, p)) };
+  return { groups:null, teams, globalMarket: GLOBAL_MARKET_SRC.filter(p=>!isSerieBSeedPlayer(p)).map(p=>Object.assign({}, p)) };
+}
+// ---------- the Brazilian pyramid: Série A + Série B play every season; 4 go down, 4 come up ----------
+function serieANames(){ return (ST.divisions && ST.divisions.A) || SERIE_A_2026; }
+function serieBNames(){ return (ST.divisions && ST.divisions.B) || SERIE_B_2026; }
+function divisionLabel(d){ return d==="B" ? "Série B" : "Série A"; }
+function buildLeague(division, names, year){
+  const order = shuffled(E.makeRNG(nextSeed()), names);
+  return { year, division, teams: names.slice(), rounds: E.doubleRoundRobin(order), currentRound: 0, standings: {}, scorers: {}, assisters: {} };
+}
+// the league the user is NOT in still plays every round alongside (quiet fast sims) so promotion/relegation is real
+function playOtherLeagueRound(){
+  const b = ST.brasileirao;
+  if(b) playOtherRoundsUpTo(b.currentRound+1);
+}
+function playOtherRoundsUpTo(limit){
+  const o = ST.otherLeague;
+  if(!o) return;
+  while(o.currentRound < limit && o.currentRound < o.rounds.length){
+    o.rounds[o.currentRound].forEach(m=>{
+      if(m.played) return;
+      const res = simFast(m.home, m.away, "other", true);
+      m.hs = res.homeScore; m.as = res.awayScore; m.played = true;
+      E.applyResultToStandings(o.standings, m.home, m.away, m.hs, m.as);
+    });
+    o.currentRound++;
+  }
+}
+// careers saved before the Série B existed: build the 20 Série B squads from what is still in the saved market (the real
+// players tagged with their club), complete thin squads with the original rosters, and catch the Série B up to the current round
+function ensureDivisions(){
+  if(ST.mode!=="brasileirao" || !ST.world || !ST.brasileirao) return;
+  const b = ST.brasileirao;
+  if(!b.division) b.division = "A";
+  if(!b.teams) b.teams = SERIE_A_2026.slice();
+  if(ST.divisions && ST.otherLeague) return;
+  const world = ST.world;
+  const seed = serieBTeamsFromData();
+  const used = new Set();
+  Object.values(world.teams).forEach(t=>t.players.forEach(p=>used.add(p.id)));
+  const byClub = {};
+  (world.globalMarket||[]).forEach(p=>{ if(p.league==="Brazilian 2nd Division" && SERIE_B_2026.includes(p.club)) (byClub[p.club]=byClub[p.club]||[]).push(p); });
+  const taken = new Set();
+  SERIE_B_2026.forEach(name=>{
+    if(world.teams[name]) return;
+    const clean = p=>{ const c = Object.assign({}, p, {injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0}); delete c.club; delete c.league; return c; };
+    const players = (byClub[name]||[]).map(p=>{ taken.add(p.id); return clean(p); });
+    if(players.length<24){
+      seed[name].players.forEach(p=>{ if(players.length<28 && !used.has(p.id) && !taken.has(p.id) && !players.some(x=>x.id===p.id)){ players.push(p); taken.add(p.id); } });
+    }
+    world.teams[name] = { name, country:"Brasil", flag:"🇧🇷", group:null, source:"real", players };
+  });
+  if(Array.isArray(world.globalMarket)) world.globalMarket = world.globalMarket.filter(p=>!taken.has(p.id));
+  ST.divisions = { A: SERIE_A_2026.slice(), B: SERIE_B_2026.slice() };
+  ST.serieCPool = SERIE_C_POOL.slice();
+  ST.otherLeague = buildLeague("B", ST.divisions.B, b.year || ST.seasonYear);
+  playOtherRoundsUpTo(b.currentRound);
+}
+// squad for a Série C club that has just come up (there are no real rosters for them): ~26 generated players around Série B level
+function ensureSerieCTeam(name){
+  if(ST.world.teams[name]) return;
+  const rng = E.makeRNG(nextSeed());
+  const layout = ["GK","GK","GK","CB","CB","CB","CB","CB","LB","LB","RB","RB","DMF","DMF","DMF","CM","CM","CM","AM","AM","LW","LW","RW","RW","ST","ST","ST","ST"];
+  const pool = NAME_POOLS["Brasil"];
+  const players = layout.map(pos=>{
+    const age = 19 + Math.floor(rng()*15);
+    const ovr = E.clamp(54 + Math.floor(rng()*13) - (pos==="GK"?1:0), 46, 68);
+    const pot = E.clamp(ovr + (age<=22 ? 4+Math.floor(rng()*10) : Math.floor(rng()*3)), ovr, 80);
+    const isGk = pos==="GK";
+    const j = spread => E.clamp(ovr + Math.floor((rng()-0.5)*spread), 30, 90);
+    return {id:nextId(), name:pick(rng,pool[0])+" "+pick(rng,pool[1]), nat:"Brasil", age, pos, altPos:[pos], ovr, pot,
+      pac:j(18), sho:isGk?Math.floor(rng()*20)+15:j(16), pas:j(14), dri:isGk?j(20):j(14), de:j(16), phy:j(14), gk:isGk?j(14):Math.floor(rng()*20)+15,
+      value:E.calcValue(ovr, age, pot), foot:rng()<0.78?"Right foot":"Left foot", injured:false, suspended:false, form:0, suspendedMatches:0, injuredMatches:0};
+  });
+  ST.world.teams[name] = { name, country:"Brasil", flag:"🇧🇷", group:null, source:"gen", players };
+}
+// moves clubs between the divisions at the end of a season (4 down from A, 4 up from B, 4 down from B to the Série C pool, 4 up from it)
+function applyDivisionMovement(tableA, tableB){
+  const rel = tableA.slice(16).map(r=>r.team), prom = tableB.slice(0,4).map(r=>r.team), drop = tableB.slice(16).map(r=>r.team);
+  const rng = E.makeRNG(nextSeed());
+  const pool = (ST.serieCPool || SERIE_C_POOL.slice()).filter(n=>!(ST.world.teams[n] && (ST.divisions.A.includes(n)||ST.divisions.B.includes(n))));
+  const risen = shuffled(rng, pool).slice(0,4);
+  ST.divisions = {
+    A: ST.divisions.A.filter(n=>!rel.includes(n)).concat(prom),
+    B: ST.divisions.B.filter(n=>!prom.includes(n) && !drop.includes(n)).concat(rel, risen),
+  };
+  ST.serieCPool = pool.filter(n=>!risen.includes(n)).concat(drop);
+  risen.forEach(ensureSerieCTeam);
+  return {rel, prom, drop, risen};
 }
 // prize money by final league position — champion earns roughly what a season-long Libertadores
 // run pays out; last place still gets something (real broadcast-revenue floor), so a rough year
@@ -688,15 +788,10 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.transferFeed = [];
   ST.dayCounter = 0;
   ST.xferFilter = {pos:"ALL", team:"ALL", q:"", source:"libertadores", priceMax:null, ageMin:null, ageMax:null, mode:"buy", sort:"ovr", page:1};
-  const order = shuffled(E.makeRNG(nextSeed()), SERIE_A_2026);
-  ST.brasileirao = {
-    year: 2026,
-    rounds: E.doubleRoundRobin(order),
-    currentRound: 0,
-    standings: {},
-    scorers: {},
-    assisters: {},
-  };
+  ST.divisions = { A: SERIE_A_2026.slice(), B: SERIE_B_2026.slice() };
+  ST.serieCPool = SERIE_C_POOL.slice();
+  ST.brasileirao = buildLeague("A", ST.divisions.A, 2026);
+  ST.otherLeague = buildLeague("B", ST.divisions.B, 2026);
   ST.brasaStandingsHistory = {};
   ST.brasaZonesHistory = {};
   ST.sulamericana = null;
@@ -712,7 +807,11 @@ function startBrasileiraoCareer(teamId, managerName){
   scheduleSave();
 }
 function brasaSortedStandings(){
-  return E.sortedStandings(ST.brasileirao.standings, SERIE_A_2026);
+  return E.sortedStandings(ST.brasileirao.standings, ST.brasileirao.teams || SERIE_A_2026);
+}
+function otherLeagueTable(){
+  const o = ST.otherLeague;
+  return o ? E.sortedStandings(o.standings, o.teams) : [];
 }
 // true once the Brasileirão itself has no rounds left to play — the point past which a cup's
 // own "roundsUntilNextLeg" pacing (spaced out across Brasileirão rounds so legs don't all land
@@ -1021,6 +1120,7 @@ function advanceBrasileiraoStep(){
     return;
   }
   const round = b.rounds[b.currentRound];
+  playOtherLeagueRound(); // the other division plays this same round in the background
   startRatingRound();
   let pendingUser = null;
   round.forEach(m=>{
@@ -1099,33 +1199,48 @@ function addSeasonPrize(compKey, amount){
 // season wrap-up: prize money by final position, a news item, and — for now — a simplified,
 // narrative-only relegation/promotion note (the real Série B doesn't have squads in this game
 // yet, so nobody's roster actually changes hands; that's the next piece of this project).
+function brasaPrizeForPositionB(pos){
+  const top = 9000000, bottom = 1500000;
+  const frac = (20-pos)/19;
+  return Math.round((bottom + (top-bottom)*frac)/50000)*50000;
+}
 function finalizeBrasaSeason(){
   // a competition finishing inside its own tick can reach this twice in a row (tick → dead-end check → tick's caller → dead-end check
   // again): the second call must never close another year, or the calendar would skip a season (and a World Cup)
   if(ST.stage==="season_end" && ST.lastSeasonSummary && ST.lastSeasonSummary.year===ST.seasonYear-1) return;
-  const table = brasaSortedStandings();
-  const pos = table.findIndex(r=>r.team===ST.teamId)+1;
-  const prize = brasaPrizeForPosition(pos);
+  const division = ST.brasileirao.division || "A";
+  const tableMine = brasaSortedStandings();
+  const tableOther = ST.otherLeague ? otherLeagueTable() : null;
+  const tableA = division==="A" ? tableMine : tableOther;
+  const tableB = division==="B" ? tableMine : tableOther;
+  const pos = tableMine.findIndex(r=>r.team===ST.teamId)+1;
+  const prize = division==="A" ? brasaPrizeForPosition(pos) : brasaPrizeForPositionB(pos);
   ST.budget += prize;
   addSeasonPrize("brasileirao", prize);
-  const champion = table[0].team;
-  const relegated = table.slice(16).map(r=>r.team);
+  const champion = tableMine[0].team;
+  const relegated = (tableA||tableMine).slice(16).map(r=>r.team);   // Série A -> Série B
+  const promotedUp = tableB ? tableB.slice(0,4).map(r=>r.team) : [];   // Série B -> Série A
+  const droppedC = tableB ? tableB.slice(16).map(r=>r.team) : [];      // Série B -> Série C
+  const championA = tableA ? tableA[0].team : champion, championB = tableB ? tableB[0].team : null;
   if(!ST.brasaStandingsHistory) ST.brasaStandingsHistory = {};
-  ST.brasaStandingsHistory[ST.seasonYear] = table.map(r=>r.team); // feeds next year's Copa do Brasil seeding
+  if(tableA) ST.brasaStandingsHistory[ST.seasonYear] = tableA.map(r=>r.team); // feeds next year's Copa do Brasil seeding (always the Série A table)
   const copaChampion = (ST.copaDoBrasil && ST.copaDoBrasil.phase==="copa_done") ? ST.copaDoBrasil.champion : null;
   const sulaChampion = (ST.sulamericana && ST.sulamericana.phase==="sula_done" && ST.sulamericana.year===ST.seasonYear) ? ST.sulamericana.champion : null;
   const libChampion = (ST.libertadoresCompleto && ST.libertadoresCompleto.phase==="lib_done" && ST.libertadoresCompleto.year===ST.seasonYear) ? ST.libertadoresCompleto.champion : null;
   const wonAnyTrophy = champion===ST.teamId || copaChampion===ST.teamId || sulaChampion===ST.teamId || libChampion===ST.teamId;
-  const zones = computeNextSeasonZones(table, copaChampion, sulaChampion);
+  const zones = tableA ? computeNextSeasonZones(tableA, copaChampion, sulaChampion) : null;
   if(!ST.brasaZonesHistory) ST.brasaZonesHistory = {};
-  ST.brasaZonesHistory[ST.seasonYear] = zones; // feeds next year's Sul-Americana (and, eventually, Libertadores) qualification
+  if(zones) ST.brasaZonesHistory[ST.seasonYear] = zones; // feeds next year's Sul-Americana (and, eventually, Libertadores) qualification
   // minApps:10 keeps a single-cameo outlier (a youth-team debutant who happened to score once)
   // out of the season XI — by round 38 every real regular has cleared that bar many times over.
   const teamOfSeason = pickBestXIFromPool(ST.brasileirao.seasonRatings||{}, 10);
   // one card per competition actually played this season — each with its own trophy, result,
   // reputation swing and prize money, instead of one pooled reputation number that never said
   // which competition it actually came from (see the SEASON-END COMPETITION CARDS block above).
-  const brasaRep = pos===1 ? 6 : pos<=6 ? 3 : pos<=13 ? 0 : -3;
+  const brasaRep = division==="A"
+    ? (pos===1 ? 6 : pos<=6 ? 3 : pos<=13 ? 0 : pos<=16 ? -3 : -6)
+    : (pos===1 ? 5 : pos<=4 ? 3 : pos<=12 ? 0 : pos<=16 ? -2 : -6);
+  const userRelegated = division==="A" && pos>=17, userPromoted = division==="B" && pos<=4, userDroppedC = division==="B" && pos>=17;
   const copaResult = copaSeasonResult();
   const sulaResult = sulaSeasonResult();
   const libResult = libSeasonResult();
@@ -1135,8 +1250,9 @@ function finalizeBrasaSeason(){
   const libRep = cupRepReward(libResult);
   const icRep = icRepReward(icResult);
   const prizeTotals = ST.seasonPrizeTotals || {brasileirao:0, copa:0, sula:0, lib:0};
+  const placeTxt = (pos===1 ? "Campeão" : `${pos}º lugar`) + (userPromoted ? " · Promovido" : userRelegated||userDroppedC ? " · Rebaixado" : "");
   const compCards = [
-    {key:"brasileirao", label:"Brasileirão", trophyKey:"brasileirao", result: pos===1?"Campeão":`${pos}º lugar`, repChange:brasaRep, prize:prizeTotals.brasileirao||0, won: pos===1},
+    {key:"brasileirao", label: division==="A" ? "Brasileirão" : "Brasileirão Série B", trophyKey: division==="A" ? "brasileirao" : "brasileiraoB", result: placeTxt, repChange:brasaRep, prize:prizeTotals.brasileirao||0, won: pos===1},
   ];
   if(copaResult) compCards.push({key:"copa", label:"Copa do Brasil", trophyKey:"copa", result:copaResult, repChange:copaRep, prize:prizeTotals.copa||0, won:copaResult==="Campeão"});
   if(sulaResult) compCards.push({key:"sula", label:"Sul-Americana", trophyKey:"sulamericana", result:sulaResult, repChange:sulaRep, prize:prizeTotals.sula||0, won:sulaResult==="Campeão"});
@@ -1150,14 +1266,28 @@ function finalizeBrasaSeason(){
     placement: pos===1 ? "Campeão" : `${pos}º lugar`,
     repChange: totalRepChange,
     isBrasileirao: true,
-    champion, relegated, position: pos, zones, teamOfSeason, compCards,
+    division, champion, championA, championB, relegated, promotedUp, droppedC, position: pos, zones, teamOfSeason, compCards,
+    userMove: userPromoted ? "promoted" : userRelegated ? "relegated" : userDroppedC ? "droppedC" : null,
   };
   ST.reputation = E.clamp(ST.reputation + totalRepChange, 5, 99);
   if(wcr) ST.wcSeasonResult = null;
-  ST.newsLog.unshift({title:"Fim de temporada — Brasileirão", text:`${champion} é o campeão. Você terminou em ${pos}º lugar e recebeu ${fmtMoney(prize)} em premiação.`});
+  ST.newsLog.unshift({title:`Fim de temporada — Brasileirão ${divisionLabel(division)}`, text:`${champion} é o campeão. Você terminou em ${pos}º lugar e recebeu ${fmtMoney(prize)} em premiação.`});
   applyDynamicPotentialGrowth(wonAnyTrophy);
   ageWorld();
   ST.lastSeasonSummary.development = ST.lastDevelopmentReport; // who leveled up / retired — feeds the season-end screen's animated reveal
+  // the real movement between divisions: 4 down from Série A, 4 up from Série B, 4 down to Série C, 4 up from it
+  if(tableA && tableB && ST.divisions){
+    const mv = applyDivisionMovement(tableA, tableB);
+    ST.lastSeasonSummary.risenC = mv.risen;
+    if(userRelegated) ST.newsLog.unshift({title:"Rebaixamento", text:`O ${ST.teamId} foi rebaixado para a Série B.`});
+    if(userPromoted) ST.newsLog.unshift({title:"Acesso!", text:`O ${ST.teamId} está de volta à Série A.`});
+    if(userDroppedC){
+      // there is no playable Série C: the board lets the manager go and other clubs call
+      ST.fired = true;
+      ST.lastSeasonSummary.firedForRelegation = true;
+      ST.newsLog.unshift({title:"Demitido", text:`O ${ST.teamId} caiu para a Série C e a diretoria encerrou seu contrato.`});
+    }
+  }
   // bump year/num here (not in startNewBrasaSeason) so the season-end screen itself already
   // shows the upcoming season — same order the Libertadores flow's endOfSeason() uses.
   ST.seasonNum += 1;
@@ -1165,12 +1295,18 @@ function finalizeBrasaSeason(){
   ST.stage = "season_end";
   scheduleSave();
 }
-// next Série A season — fresh double round-robin, clean table. No real Série B squads exist in
-// this game yet, so relegation/promotion stays a news-item for now rather than an actual squad
-// swap; the same 20 clubs carry over season to season until that piece is built.
+// next season — both divisions get a fresh double round-robin and a clean table, built from the NEW division lists
+// (the clubs that went up/down already moved), and the user's league becomes whichever division the club is in now.
 function startNewBrasaSeason(){
-  const order = shuffled(E.makeRNG(nextSeed()), SERIE_A_2026);
-  ST.brasileirao = { year: ST.seasonYear, rounds: E.doubleRoundRobin(order), currentRound: 0, standings: {}, scorers: {}, assisters: {} };
+  const divs = ST.divisions;
+  const myDiv = divs && divs.B.includes(ST.teamId) ? "B" : "A";
+  if(divs){
+    ST.brasileirao = buildLeague(myDiv, myDiv==="A" ? divs.A : divs.B, ST.seasonYear);
+    ST.otherLeague = buildLeague(myDiv==="A" ? "B" : "A", myDiv==="A" ? divs.B : divs.A, ST.seasonYear);
+  } else {
+    const order = shuffled(E.makeRNG(nextSeed()), SERIE_A_2026);
+    ST.brasileirao = { year: ST.seasonYear, rounds: E.doubleRoundRobin(order), currentRound: 0, standings: {}, scorers: {}, assisters: {} };
+  }
   ST.seasonPrizeTotals = {brasileirao:0, copa:0, sula:0, lib:0}; // reset now that last season's totals have already been folded into its season-end cards
   ST.stage = "hub";
   ST.hubTab = "competicao";
@@ -1651,6 +1787,7 @@ async function initApp(){
   if(loaded && loaded.schemaVersion===SCHEMA_VERSION){
     ST = loaded;
     applyRealPositionsToWorld(ST.world);
+    try{ ensureDivisions(); }catch(err){ console.warn("ensureDivisions failed", err); }
     if(ST.world && Array.isArray(ST.world.globalMarket)){ // carreiras salvas: tira do mercado os cadastros duplicados removidos da base
       const dup = new Set(DUP_REMOVED);
       ST.world.globalMarket = ST.world.globalMarket.filter(p=>!dup.has(p.id));
@@ -1877,6 +2014,7 @@ function competitionStatsStore(compKey){
   if(compKey==="lib") return ST.libertadoresCompleto;
   if(compKey==="ic") return ST.intercontinental;
   if(compKey==="wc") return ST.worldCup;
+  if(compKey==="other") return ST.otherLeague;
   return ST.mode==="brasileirao" ? ST.brasileirao : ST.competition;
 }
 // derives that same compKey from a match's own context object (ST.pendingMatch.context) —
@@ -1958,13 +2096,13 @@ function statRows(store, mapName, field, n){
 // still feeds real goalscorers (and assisters) into the "Artilheiros"/"Assistências" tables.
 // compKey routes a Copa/Sul-Americana/Libertadores match's stats into that competition's own
 // table instead of the Brasileirão one — see competitionStatsStore().
-function simFast(homeTeamName, awayTeamName, compKey){
+function simFast(homeTeamName, awayTeamName, compKey, quiet){
   const res = E.simulateFastMatch(ST.world.teams[homeTeamName], ST.world.teams[awayTeamName], nextSeed());
   (res.scorersHome||[]).forEach(id=>addScorerGoal(homeTeamName, id, compKey));
   (res.scorersAway||[]).forEach(id=>addScorerGoal(awayTeamName, id, compKey));
   (res.assistsHome||[]).forEach(id=>{ if(id!=null) addAssistPoint(homeTeamName, id, compKey); });
   (res.assistsAway||[]).forEach(id=>{ if(id!=null) addAssistPoint(awayTeamName, id, compKey); });
-  collectFastRatings(res, homeTeamName, awayTeamName);
+  if(!quiet) collectFastRatings(res, homeTeamName, awayTeamName);
   return res;
 }
 
@@ -3091,7 +3229,7 @@ function startCopaDoBrasil(){
     phase: "copa_r16",
     knockout: { copa_r16:{ties, legIndex:0}, copa_qf:null, copa_sf:null, copa_final:null },
     champion: null,
-    userEliminated: false,
+    userEliminated: !teams.includes(ST.teamId), // a club outside this year's Copa (e.g. a Série B side) just watches it run in the background
     placementReached: null,
     drawRevealed: 0,
     pendingQfWinners: null,
@@ -4462,6 +4600,7 @@ const LEGACY_PLACEHOLDER_CLUBS = new Set([
   "Sunderland RWB","Los Angeles BY","Roma GR","Vasco Gipuzkoa AB","Sevilla Triana VB","Nottingham RW",
   "Atlanta RB","Pamplona RA","Bologna RB","Bournemouth RB","Beşiktaş JK","Besiktas",
 ]);
+SERIE_B_2026.concat(SERIE_C_POOL).forEach(n=>LEGACY_PLACEHOLDER_CLUBS.add(n)); // Série B/C clubs are real teams of the world now, never "global market" destinations
 const AI_SIGNING_POS = ["GK","CB","LB","RB","DMF","CM","AM","LW","RW","ST"];
 function shuffled(rng, arr){
   const out = arr.slice();
@@ -4972,6 +5111,14 @@ function startGroupDrawAnimation(){
   }, 550);
 }
 
+// clubs that call a manager let go after a drop to Série C: Série B clubs and the weaker Série A ones
+function buildBrasaJobOffers(){
+  const rng = E.makeRNG(nextSeed());
+  const bNames = serieBNames().filter(n=>n!==ST.teamId && ST.world.teams[n]);
+  const aWeak = serieANames().filter(n=>n!==ST.teamId && ST.world.teams[n]).sort((a,b)=>teamAvgOvr(ST.world.teams[a])-teamAvgOvr(ST.world.teams[b])).slice(0,4);
+  const strongB = bNames.sort((a,b)=>teamAvgOvr(ST.world.teams[b])-teamAvgOvr(ST.world.teams[a])).slice(0,8);
+  return shuffled(rng, aWeak.concat(strongB)).slice(0,3);
+}
 function selectNewJob(teamName){
   ST.teamId = teamName;
   if(ST.fired) ST.reputation = 42;
@@ -4984,6 +5131,14 @@ function selectNewJob(teamName){
   const carry = ST.budget * 0.15;
   ST.budget = Math.round(E.clamp(carry + baseByTier, 500000, 140000000) / 10000) * 10000;
   ST.newsLog.unshift({title:"Nova jornada", text:`${mgrName(ST.managerName)} assume o comando do ${teamName}.`});
+  if(ST.mode==="brasileirao"){
+    ST.formation = "4-3-3";
+    ST.lineup = [];
+    autoFillLineup();
+    startNewBrasaSeason();
+    scheduleSave();
+    return;
+  }
   setupSeasonCompetition();
   ST.formation = "4-3-3";
   autoFillLineup();
@@ -5000,7 +5155,13 @@ function stayAtCurrentJob(){
 }
 
 function continueFromSeasonEnd(){
-  if(ST.mode==="brasileirao"){ startNewBrasaSeason(); scheduleSave(); return; }
+  if(ST.mode==="brasileirao"){
+    if(ST.fired){ // dropped to a division that doesn't exist for the player: other clubs call
+      ST.jobOffers = buildBrasaJobOffers();
+      ST.stage = "job_offers"; scheduleSave(); return;
+    }
+    startNewBrasaSeason(); scheduleSave(); return;
+  }
   maybeEnterGroupDraw();
   scheduleSave();
 }
@@ -5578,6 +5739,56 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;"
 
 let tickTimer = null;
 
+// ---- flicker-free re-rendering for the screens that redraw on a timer (match minutes/events, shootouts, draws):
+// instead of swapping the whole page (which re-creates every image and flashes), the new markup is diffed against
+// the current DOM and only what actually changed is touched. Elements with data-k are matched by key (feed rows). ----
+function morphNode(o, n){
+  if(o.nodeType!==1){ if(o.nodeValue!==n.nodeValue) o.nodeValue = n.nodeValue; return; }
+  const names = new Set();
+  for(const a of Array.from(n.attributes)){ names.add(a.name); if(o.getAttribute(a.name)!==a.value) o.setAttribute(a.name, a.value); }
+  for(const a of Array.from(o.attributes)){ if(!names.has(a.name)) o.removeAttribute(a.name); }
+  morphChildren(o, n);
+}
+function morphChildren(oldP, newP){
+  const nk = Array.from(newP.childNodes);
+  if(nk.some(c=>c.nodeType===1 && c.hasAttribute("data-k"))){
+    const olds = new Map();
+    Array.from(oldP.children).forEach(c=>{ const k = c.getAttribute("data-k"); if(k!=null) olds.set(k, c); });
+    let ref = oldP.firstChild;
+    nk.forEach(n=>{
+      const k = n.nodeType===1 ? n.getAttribute("data-k") : null;
+      let node = k!=null ? olds.get(k) : null;
+      if(node){ olds.delete(k); morphNode(node, n); } else node = document.importNode(n, true);
+      if(node===ref) ref = ref.nextSibling; else oldP.insertBefore(node, ref);
+    });
+    olds.forEach(c=>{ if(c.parentNode===oldP) oldP.removeChild(c); });
+    while(ref){ const nx = ref.nextSibling; if(ref.parentNode===oldP) oldP.removeChild(ref); ref = nx; }
+    return;
+  }
+  const ok = Array.from(oldP.childNodes);
+  nk.forEach((n,i)=>{
+    const o = ok[i];
+    if(!o){ oldP.appendChild(document.importNode(n, true)); return; }
+    if(o.nodeType!==n.nodeType || o.nodeName!==n.nodeName){ oldP.replaceChild(document.importNode(n, true), o); return; }
+    morphNode(o, n);
+  });
+  for(let j=nk.length; j<ok.length; j++) oldP.removeChild(ok[j]);
+}
+const MORPH_STAGES = new Set(["match","penaltyShootout","group_draw","copa_draw","copa_qf_draw","wc_draw"]);
+function paintApp(app, html){
+  const stage = ST && ST.stage;
+  if(stage && MORPH_STAGES.has(stage) && app.dataset.rs===stage && app.firstChild){
+    try{
+      const tpl = document.createElement("template");
+      tpl.innerHTML = html;
+      morphChildren(app, tpl.content);
+      return;
+    }catch(e){ console.warn("morph failed, full repaint", e); }
+  }
+  app.innerHTML = html;
+  app.dataset.rs = stage || "";
+}
+
 function render(){
   const app = document.getElementById("app");
   if(!app) return;
@@ -5608,7 +5819,7 @@ function render(){
     else if(ST.stage==="prelib_manager_name") html = renderPreLibManagerName();
     else if(ST.stage==="prelib_champion") html = renderPreLibChampion();
     else html = `<div class="empty-state">Estado desconhecido: ${esc(ST.stage)}</div>`;
-    app.innerHTML = html + renderModal();
+    paintApp(app, html + renderModal());
     animateMoodBars();
     const tickerEl = document.getElementById("ticker");
     if(tickerEl) tickerEl.scrollTop = tickerEl.dataset.rev ? 0 : tickerEl.scrollHeight;
@@ -6139,7 +6350,7 @@ function getNextUserBrasaMatch(){
   if(!b || b.currentRound>=b.rounds.length) return null;
   const round = b.rounds[b.currentRound];
   const m = round.find(x=>x.home===ST.teamId||x.away===ST.teamId);
-  return m ? {home:m.home, away:m.away, label:`Brasileirão · Rodada ${b.currentRound+1}/${b.rounds.length}`, compType:"brasileirao"} : null;
+  return m ? {home:m.home, away:m.away, label:`Brasileirão${b.division==="B"?" Série B":""} · Rodada ${b.currentRound+1}/${b.rounds.length}`, compType:"brasileirao"} : null;
 }
 function getNextUserMatch(){
   if(ST.prelib) return getNextUserPrelibMatch();
@@ -6403,7 +6614,12 @@ function renderFabrizioRomanoCard(){
 // ---------------- BRASILEIRÃO TAB ----------------
 // zone stripe by final table position — real Série A convention: top 6 go straight into next
 // year's Libertadores, 7-13 into the Sul-Americana (7 real 2026 Brazilian entrants), 17-20 get relegated.
-function brasaZoneClass(pos){
+function brasaZoneClass(pos, division){
+  if(division==="B"){ // Série B: 4 clubs go up, 4 go down
+    if(pos<=4) return "brasa-zone-liberta";
+    if(pos>=17) return "brasa-zone-rebaixamento";
+    return "";
+  }
   if(pos<=6) return "brasa-zone-liberta";
   if(pos<=13) return "brasa-zone-sula";
   if(pos>=17) return "brasa-zone-rebaixamento";
@@ -6414,12 +6630,13 @@ function brasaZoneClass(pos){
 // that cut, its row gets pinned right below the fade instead of just vanishing off-screen.
 function renderBrasaTable(rows, opts){
   opts = opts || {};
+  const division = opts.division || (ST.brasileirao && ST.brasileirao.division) || "A";
   const cap = opts.cap;
   const capped = !!(cap && rows.length>cap);
   const shown = capped ? rows.slice(0, cap) : rows;
   const userIdx = rows.findIndex(r=>r.team===ST.teamId);
   const pinnedUser = capped && userIdx>=cap ? {row:rows[userIdx], pos:userIdx+1} : null;
-  const rowHtml = (r,pos)=>`<tr class="${brasaZoneClass(pos)} ${r.team===ST.teamId?'brasa-row-user':''}">
+  const rowHtml = (r,pos)=>`<tr class="${brasaZoneClass(pos, division)} ${r.team===ST.teamId?'brasa-row-user':''}">
     <td class="dim">${pos}</td>
     <td class="bold"><span class="standings-team"><span class="standings-crest">${clubCrestImg(r.team,18,null)}</span><span>${esc(r.team)}</span>${r.team===ST.teamId?' <span class="brasa-you">(você)</span>':''}</span></td>
     <td class="tac bold brasa-pts">${r.pts}</td>
@@ -6429,8 +6646,8 @@ function renderBrasaTable(rows, opts){
   return `<div class="brasa-table-card">
     <div class="brasa-table-head">
       <img src="/images/brasileirao-logo.png" alt="" class="brasa-logo" onerror="this.style.display='none';"/>
-      <div class="brasa-table-title">Tabela Série A</div>
-      <div class="brasa-table-sub">Brasileirão · ${ST.seasonYear}ª edição</div>
+      <div class="brasa-table-title">Tabela ${divisionLabel(division)}</div>
+      <div class="brasa-table-sub">Brasileirão ${divisionLabel(division)} · ${ST.seasonYear}</div>
     </div>
     <div class="brasa-table-scroll${capped?' is-capped':''}">
       <div class="scroll-x"><table class="data brasa-table">
@@ -6445,9 +6662,9 @@ function renderBrasaTable(rows, opts){
     ${pinnedUser?`<div class="scroll-x"><table class="data brasa-table brasa-table-pinned"><tbody>${rowHtml(pinnedUser.row,pinnedUser.pos)}</tbody></table></div>`:''}
     ${capped?`<div class="tac mt8"><button class="btn btn-sm btn-ghost" onclick="Game.setTab('desempenho')">Ver tabela completa →</button></div>`:''}
     <div class="brasa-legend">
-      <span><i class="brasa-dot brasa-zone-liberta"></i> Libertadores</span>
-      <span><i class="brasa-dot brasa-zone-sula"></i> Sul-Americana</span>
-      <span><i class="brasa-dot brasa-zone-rebaixamento"></i> Rebaixamento</span>
+      ${division==="B"
+        ? `<span><i class="brasa-dot brasa-zone-liberta"></i> Acesso à Série A</span><span><i class="brasa-dot brasa-zone-rebaixamento"></i> Rebaixamento</span>`
+        : `<span><i class="brasa-dot brasa-zone-liberta"></i> Libertadores</span><span><i class="brasa-dot brasa-zone-sula"></i> Sul-Americana</span><span><i class="brasa-dot brasa-zone-rebaixamento"></i> Rebaixamento</span>`}
     </div>
   </div>`;
 }
@@ -6521,7 +6738,7 @@ function nextCompetitionStats(){
   if(t==="libertadores" && ST.libertadoresCompleto) return {store:ST.libertadoresCompleto, title:"Libertadores"};
   if(t==="sulamericana" && ST.sulamericana) return {store:ST.sulamericana, title:"Sul-Americana"};
   if(t==="intercontinental" && ST.intercontinental) return {store:ST.intercontinental, title:"Mundial de Clubes"};
-  return {store:ST.brasileirao, title:"Brasileirão"};
+  return {store:ST.brasileirao, title: ST.brasileirao && ST.brasileirao.division==="B" ? "Brasileirão Série B" : "Brasileirão"};
 }
 // scorers <-> assisters: one card, click to flip (shared by every competition's home screen and the World Cup)
 function renderStatFlipCard(store, title){
@@ -6587,7 +6804,8 @@ function brasaRecentForm(teamName, n){
 // see startSulamericanaIfEligible()/startLibertadoresCompletoIfEligible()).
 function desempenhoAvailableComps(){
   if(ST.natDuty) return [{key:"wc", label:"Copa do Mundo"}]; // comandando uma seleção: só a Copa interessa
-  const opts = [{key:"brasileirao", label:"Brasileirão"}];
+  const opts = [{key:"brasileirao", label: ST.brasileirao && ST.brasileirao.division==="B" ? "Brasileirão Série B" : "Brasileirão"}];
+  if(ST.otherLeague) opts.push({key:"other", label: `Brasileirão ${divisionLabel(ST.otherLeague.division)}`});
   if(ST.worldCup && ST.worldCup.year===ST.seasonYear) opts.unshift({key:"wc", label:"Copa do Mundo"});
   if(ST.copaDoBrasil) opts.push({key:"copa", label:"Copa do Brasil"});
   if(ST.sulamericana) opts.push({key:"sula", label:"Sul-Americana"});
@@ -6652,7 +6870,20 @@ function renderIcDesempenhoBlock(){
     ${ic.champion?`<div class="tac gold bold mt16">Campeão: ${esc(ic.champion)}</div>`:""}
   </div>`;
 }
+// the division the user is not in: its table and its own top scorers/assisters
+function renderDesempenhoOtherBlock(){
+  const o = ST.otherLeague;
+  const table = otherLeagueTable();
+  const scorers = compTopScorersFull(o, 25);
+  const assisters = compTopAssistersFull(o, 25);
+  return `<div class="desempenho-grid"><div class="desempenho-col desempenho-col-wide">${renderBrasaTable(table, {division:o.division})}</div></div>
+  <div class="competicao-grid mt16">
+    <div class="competicao-cell">${renderStatLeaderboard("Artilheiros — Top 25", scorers, "goals", "Nenhum gol registrado ainda nesta competição.")}</div>
+    <div class="competicao-cell">${renderStatLeaderboard("Assistências — Top 25", assisters, "assists", "Nenhuma assistência registrada ainda nesta competição.")}</div>
+  </div>`;
+}
 function renderDesempenhoCompBlock(key){
+  if(key==="other") return renderDesempenhoOtherBlock();
   if(key==="wc") return renderWcDesempenhoBlock();
   if(key==="ic") return renderIcDesempenhoBlock();
   const store = key==="copa" ? ST.copaDoBrasil : key==="sula" ? ST.sulamericana : ST.libertadoresCompleto;
@@ -7244,12 +7475,18 @@ function renderPotCell(teamKey, p){
   if(q) return `<span class="tiny faint">🔎 ${q.daysLeft}d</span>`;
   return `<button class="btn btn-sm" onclick="Game.observePlayer(${p.id},'${escJs(teamKey)}')">🔒 Observar</button>`;
 }
+// a club of the Brazilian pyramid (squad in the world with country "Brasil", or listed in the Brazilian data sets)
+function isBrazilianClubName(name){
+  const t = ST.world && ST.world.teams && ST.world.teams[name];
+  if(t) return t.country==="Brasil";
+  return SERIE_A_2026.indexOf(name)>=0;
+}
 function renderXferBuySubTab(f){
   const source = f.source || "libertadores";
   const posOptions = ["GK","CB","LB","RB","DMF","CM","AM","LM","RM","LW","RW","ST"];
   const toggle = `<div class="btn-row xfer-source-toggle">
     <button class="btn btn-sm ${source==='libertadores'?'btn-gold':''}" onclick="Game.setXferFilter('source','libertadores')">${ST.mode==="brasileirao"?"Times do Brasileirão":"Times da Libertadores"}</button>
-    <button class="btn btn-sm ${source==='global'?'btn-gold':''}" onclick="Game.setXferFilter('source','global')">Mercado Global</button>
+    <button class="btn btn-sm ${source==='global'?'btn-gold':''}" onclick="Game.setXferFilter('source','global')">${ST.mode==="brasileirao"?"Mercado Internacional":"Mercado Global"}</button>
     <button class="btn btn-sm ${source==='fa'?'btn-gold':''}" onclick="Game.setXferFilter('source','fa')">Free Agents</button>
   </div>`;
 
@@ -7290,6 +7527,14 @@ function renderXferBuySubTab(f){
 
   if(source==="global"){
     let list = ST.world.globalMarket.filter(p=>!isFreeAgent(p));
+    if(ST.mode==="brasileirao"){
+      // the foreign Libertadores / Sul-Americana clubs (and the Pré-Libertadores pool) are INTERNATIONAL market: they live here, not under "Times do Brasileirão"
+      ensurePrelibMarket();
+      const foreign = [];
+      Object.values(ST.world.teams).forEach(t=>{ if(t.isNation || t.country==="Brasil" || t.name===ST.teamId) return; t.players.forEach(p=>foreign.push(Object.assign({}, p, {club:t.name, _team:t.name}))); });
+      (ST.world.prelibMarket||[]).forEach(p=>{ if(!isBrazilianClubName(p.club)) foreign.push(Object.assign({}, p, {_team:p.club})); });
+      list = list.concat(foreign);
+    }
     if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
     if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
     if(f.ageMin!=null) list = list.filter(p=>p.age>=f.ageMin);
@@ -7307,7 +7552,7 @@ function renderXferBuySubTab(f){
         ${renderXferSidebar(f, posOptions, null)}
       </aside>
       <div class="xfer-main">
-        <div class="dim tiny mb8">${iconGlobe(13)} Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados. Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
+        <div class="dim tiny mb8">${iconGlobe(13)} ${ST.mode==="brasileirao"?"Clubes e jogadores de fora do Brasil — inclui os times da Libertadores e da Sul-Americana.":"Jogadores de fora da Libertadores — não disputam a competição, mas podem ser contratados."} Mostrando ${shown.length} de ${list.length}. Orçamento: <span class="gold bold">${fmtMoney(ST.budget)}</span></div>
         <div class="scroll-x"><table class="data data-fit"><thead><tr>
           <th>Jogador</th><th>Clube</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">Potencial</th><th class="tac">Valor</th><th></th>
         </tr></thead><tbody>
@@ -7319,7 +7564,7 @@ function renderXferBuySubTab(f){
           <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
           <td class="tac">${renderPotCell("global",p)}</td>
           <td class="tac mono">${fmtMoney(p.value)}</td>
-          <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'global')">Propor</button></td>
+          <td><button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${p._team?escJs(p._team):"global"}')">Propor</button></td>
         </tr>`).join("")}
         </tbody></table></div>
         ${renderXferPagination(page, totalPages)}
@@ -7328,10 +7573,12 @@ function renderXferBuySubTab(f){
     `;
   }
 
-  const teamOptions = Array.from(new Set(Object.keys(ST.world.teams).concat(PRELIB_MARKET_TEAM_NAMES))).sort();
   ensurePrelibMarket();
-  let list = allPlayersList(ST.teamId).map(x=>Object.assign({}, x.p, {_team:x.team}))
-    .concat(ST.world.prelibMarket.map(p=>Object.assign({}, p, {_team:p.club})));
+  const brMode = ST.mode==="brasileirao";
+  // in a Brasileirão career this tab is the BRAZILIAN market only; the foreign clubs are under "Mercado Internacional"
+  const teamOptions = (brMode ? Object.keys(ST.world.teams).filter(n=>isBrazilianClubName(n)) : Array.from(new Set(Object.keys(ST.world.teams).concat(PRELIB_MARKET_TEAM_NAMES)))).sort();
+  let list = allPlayersList(ST.teamId).filter(x=>!brMode || isBrazilianClubName(x.team)).map(x=>Object.assign({}, x.p, {_team:x.team}))
+    .concat(brMode ? [] : ST.world.prelibMarket.map(p=>Object.assign({}, p, {_team:p.club})));
   if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
   if(f.team!=="ALL") list = list.filter(p=>p._team===f.team);
   if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
@@ -7915,7 +8162,7 @@ function renderMatch(){
     </div>
     <ol class="mx-feed" id="ticker" data-rev="1">
       ${visibleEvents.length===0?`<li class="idle"><span class="dim">Bola rolando...</span></li>`:""}
-      ${visibleEvents.slice().reverse().map(ev=>`<li class="${ev.type==='goal'?'gol':''} ${ev.type==='red'?'red':''} ${ev.side==='away'?'o':''}">
+      ${visibleEvents.map((ev,ei)=>({ev,ei})).reverse().map(({ev,ei})=>`<li data-k="e${ei}" class="${ev.type==='goal'?'gol':''} ${ev.type==='red'?'red':''} ${ev.side==='away'?'o':''}">
         <span class="mn">${ev.minute}'</span><span class="ic">${ev.penalty?"🎯":(EVENT_ICON[ev.type]||"•")}</span>
         <span class="tx">${eventText(ev, home, away)}</span>
       </li>`).join("")}
@@ -8452,10 +8699,25 @@ function renderSeasonEndScreen(){
     </div>
     ${s.isBrasileirao ? `<div class="panel mt16" style="max-width:420px;">
       <div class="panel-title">Campeão — ${esc(s.champion)}</div>
-      <div class="faint tiny uc mt8">Rebaixados para a Série B</div>
+      ${s.userMove==="promoted" ? `<div class="gold bold mt8">🎉 Acesso! Você sobe para a Série A.</div>` : s.userMove==="relegated" ? `<div class="red bold mt8">Rebaixado — você disputa a Série B em ${ST.seasonYear}.</div>` : s.userMove==="droppedC" ? `<div class="red bold mt8">Rebaixado para a Série C — a diretoria encerrou seu contrato.</div>` : ""}
+      ${s.division==="B" && s.championA ? `<div class="faint tiny uc mt8">Campeão da Série A</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(s.championA,20,null)}<span class="bold">${esc(s.championA)}</span></div>` : ""}
+      ${s.division==="A" && s.championB ? `<div class="faint tiny uc mt8">Campeão da Série B</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(s.championB,20,null)}<span class="bold">${esc(s.championB)}</span></div>` : ""}
+      <div class="faint tiny uc mt8">Rebaixados da Série A para a Série B</div>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;">
         ${s.relegated.map(name=>`<span class="row" style="gap:5px;align-items:center;">${clubCrestImg(name,18,null)}<span class="tiny red bold">${esc(name)}</span></span>`).join("")}
       </div>
+      ${(s.promotedUp||[]).length ? `<div class="faint tiny uc mt8">Sobem da Série B para a Série A</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;">
+        ${s.promotedUp.map(name=>`<span class="row" style="gap:5px;align-items:center;">${clubCrestImg(name,18,null)}<span class="tiny bold" style="color:#3ddc84;">${esc(name)}</span></span>`).join("")}
+      </div>` : ""}
+      ${(s.droppedC||[]).length ? `<div class="faint tiny uc mt8">Rebaixados da Série B para a Série C</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;">
+        ${s.droppedC.map(name=>`<span class="row" style="gap:5px;align-items:center;">${clubCrestImg(name,18,null)}<span class="tiny red bold">${esc(name)}</span></span>`).join("")}
+      </div>` : ""}
+      ${(s.risenC||[]).length ? `<div class="faint tiny uc mt8">Sobem da Série C para a Série B</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;">
+        ${s.risenC.map(name=>`<span class="row" style="gap:5px;align-items:center;">${clubCrestImg(name,18,null)}<span class="tiny bold">${esc(name)}</span></span>`).join("")}
+      </div>` : ""}
       ${ST.copaDoBrasil && ST.copaDoBrasil.champion ? `<div class="faint tiny uc mt12">Campeão da Copa do Brasil ${ST.copaDoBrasil.year}</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(ST.copaDoBrasil.champion,20,null)}<span class="bold gold">${esc(ST.copaDoBrasil.champion)}</span></div>` : ""}
       ${ST.sulamericana && ST.sulamericana.champion ? `<div class="faint tiny uc mt12">Campeão da Sul-Americana ${ST.sulamericana.year}</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(ST.sulamericana.champion,20,null)}<span class="bold gold">${esc(ST.sulamericana.champion)}</span></div>` : ""}
       ${ST.libertadoresCompleto && ST.libertadoresCompleto.champion ? `<div class="faint tiny uc mt12">Campeão da Libertadores ${ST.libertadoresCompleto.year}</div><div class="row" style="gap:8px;align-items:center;margin-top:4px;">${clubCrestImg(ST.libertadoresCompleto.champion,20,null)}<span class="bold gold">${esc(ST.libertadoresCompleto.champion)}</span></div>` : ""}
@@ -8669,7 +8931,7 @@ function renderJobOffers(){
     <div class="hero-badge">${ST.fired? "VOCÊ FOI DEMITIDO" : "PROPOSTAS DE GRANDES CLUBES"}</div>
     <h1 class="hero-title" style="font-size:clamp(26px,5vw,44px);">${ST.fired? "Hora de reconstruir" : "Sua reputação chamou atenção"}</h1>
     <p class="hero-sub">${ST.fired
-      ? `Após uma temporada abaixo do esperado no ${ST.teamId}, sua reputação caiu para ${ST.reputation}. A diretoria optou por uma mudança. Escolha seu próximo desafio:`
+      ? (ST.mode==="brasileirao" ? `O ${ST.teamId} caiu para a Série C e a diretoria optou por uma mudança. Alguns clubes ligaram — escolha seu próximo desafio:` : `Após uma temporada abaixo do esperado no ${ST.teamId}, sua reputação caiu para ${ST.reputation}. A diretoria optou por uma mudança. Escolha seu próximo desafio:`)
       : `Clubes maiores estão de olho no seu trabalho. Você pode aceitar uma proposta mais ambiciosa ou permanecer no ${ST.teamId}.`}</p>
     <div class="group-grid" style="max-width:760px;">
       ${ST.jobOffers.map(name=>{
@@ -9332,6 +9594,7 @@ function wcPlanFor(year){
 // ---------- proposals (only the year BEFORE a World Cup) ----------
 function wcPerformanceScore(){
   let s = ST.reputation || 50;
+  if(ST.brasileirao && ST.brasileirao.division==="B") s -= 10; // a Série B manager is a harder sell to a national team
   try{
     const t = brasaSortedStandings();
     const row = t.find(r=>r.team===ST.teamId);
@@ -10221,5 +10484,5 @@ if(typeof document !== "undefined"){
   else startBoot();
 }
 
-window.__APP_INTERNALS__ = { wcActive, wcPlanFor, wcPoolIndex, beginWorldCup, wcAdvanceDay, wcNextEvent, wcUserMatchIn, wcOpenCallup, wcCallupConfirm, maybeNationalOffers, acceptNationalJob, wcPerformanceScore, wcBuildSquad, wcStrengthOf, finishWorldCup, renderWorldCupTab, renderWcCallup, renderWcEnd, renderHub, renderWcBanner, inboxList, startBrasileiraoCareer, submitBuyProposal, buyContext, buyNegSession, negotiateOffer, queueOfferMail, findMail, runOfferNegotiation, offerNegCeiling, newCareerState, startCareer, advanceTournament, render, tierOf, buildJobOffers, teamAvgOvr, globalMarketAskingPrice, isKeyMarketPlayer, dailyTransferTick, runEuropeanPoaching, runSingleAISigning, runSingleGlobalReshuffle, nextSeed, E, get ST(){return ST;}, set ST(v){ST=v;} };
+window.__APP_INTERNALS__ = { startNewBrasaSeason, autoFillLineup, ensureDivisions, selectNewJob, buildBrasaJobOffers, otherLeagueTable, brasaSortedStandings, wcActive, wcPlanFor, wcPoolIndex, beginWorldCup, wcAdvanceDay, wcNextEvent, wcUserMatchIn, wcOpenCallup, wcCallupConfirm, maybeNationalOffers, acceptNationalJob, wcPerformanceScore, wcBuildSquad, wcStrengthOf, finishWorldCup, renderWorldCupTab, renderWcCallup, renderWcEnd, renderHub, renderWcBanner, inboxList, startBrasileiraoCareer, submitBuyProposal, buyContext, buyNegSession, negotiateOffer, queueOfferMail, findMail, runOfferNegotiation, offerNegCeiling, newCareerState, startCareer, advanceTournament, render, tierOf, buildJobOffers, teamAvgOvr, globalMarketAskingPrice, isKeyMarketPlayer, dailyTransferTick, runEuropeanPoaching, runSingleAISigning, runSingleGlobalReshuffle, nextSeed, E, get ST(){return ST;}, set ST(v){ST=v;} };
 
