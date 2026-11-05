@@ -8623,10 +8623,11 @@ const Game = {
   declineNationalJob(id){ declineNationalJob(id); render(); },
   openCallup(){ wcOpenCallup(false); render(); },
   callupToggle(id){ wcCallupToggle(Number(id)); render(); },
+  callupSlot(id){ wcCallupSlot(Number(id)); render(); },
   callupTab(id){ if(ST.wcCallup){ ST.wcCallup.tab = id; ST.wcCallup.more = false; } render(); },
   callupMore(){ if(ST.wcCallup) ST.wcCallup.more = !ST.wcCallup.more; render(); },
-  callupAuto(){ const c = ST.wcCallup; if(!c) return; c.ids = WC.autoSelectSquad(wcCallupPool()).ids; c.msg = ""; render(); },
-  callupClear(){ const c = ST.wcCallup; if(!c) return; c.ids = []; c.msg = ""; render(); },
+  callupAuto(){ const c = ST.wcCallup; if(!c) return; const a = WC.autoSelectSquad(wcCallupPool()); c.ids = a.ids; c.slots = a.slots; c.msg = ""; render(); },
+  callupClear(){ const c = ST.wcCallup; if(!c) return; c.ids = []; c.slots = {}; c.msg = ""; render(); },
   callupConfirm(){ wcCallupConfirm(); render(); },
   callupClose(){ wcCallupClose(); render(); },
   skipWcDraw(){
@@ -9502,8 +9503,10 @@ function wcOpenCallup(fromBreak){
   if(!job) return;
   wcPoolCache = wcPoolIndex();
   const pool = wcPoolCache.byNat.get(job.nation) || [];
-  const ids = job.squadIds.length ? job.squadIds.slice() : WC.autoSelectSquad(pool).ids;
-  ST.wcCallup = {ids, tab:"gk", more:false, fromBreak:!!fromBreak, msg:""};
+  const auto = job.squadIds.length ? null : WC.autoSelectSquad(pool);
+  const ids = auto ? auto.ids : job.squadIds.slice();
+  const slots = auto ? auto.slots : Object.assign({}, job.squadSlots||{});
+  ST.wcCallup = {ids, slots, tab:"gk", more:false, fromBreak:!!fromBreak, msg:""};
   ST.stage = "wc_callup";
 }
 function wcCallupPool(){
@@ -9511,28 +9514,59 @@ function wcCallupPool(){
   if(!wcPoolCache) wcPoolCache = wcPoolIndex();
   return (wcPoolCache.byNat.get(job.nation) || []).slice().sort((a,b)=>b.ovr-a.ovr || (b.pot||0)-(a.pot||0));
 }
+// room left in a group: its quota plus the shared free places
+function wcGroupRoom(sel, slots, gid, ignoreId){
+  const rest = sel.filter(x=>x.id!==ignoreId);
+  const cnt = WC.countByGroup(rest, slots);
+  const extras = WC.POS_GROUPS.reduce((a,x)=>a+Math.max(0, cnt[x.id]-x.need), 0);
+  const g = WC.POS_GROUPS.find(x=>x.id===gid);
+  return cnt[gid] < g.need || extras < WC.FREE_SLOTS;
+}
 function wcCallupToggle(id){
   const c = ST.wcCallup; if(!c) return;
   const pool = wcCallupPool();
   const p = pool.find(x=>x.id===id);
   if(!p) return;
   c.msg = "";
-  if(c.ids.includes(id)){ c.ids = c.ids.filter(x=>x!==id); return; }
+  if(!c.slots) c.slots = {};
+  if(c.ids.includes(id)){ c.ids = c.ids.filter(x=>x!==id); delete c.slots[id]; return; }
   if(c.ids.length>=WC.SQUAD_SIZE){ c.msg = `A lista já tem ${WC.SQUAD_SIZE} jogadores — remova alguém antes.`; return; }
   const sel = c.ids.map(i=>pool.find(x=>x.id===i)).filter(Boolean);
-  const cnt = WC.countByGroup(sel);
-  const g = WC.POS_GROUPS.find(x=>x.id===WC.posGroupOf(p.pos));
-  const extras = WC.POS_GROUPS.reduce((a,x)=>a+Math.max(0, cnt[x.id]-x.need), 0);
-  if(cnt[g.id]>=g.need && extras>=WC.FREE_SLOTS){ c.msg = `${g.label}: as ${g.need} vagas e as ${WC.FREE_SLOTS} vagas livres já foram usadas.`; return; }
-  c.ids.push(id);
+  // the tab being looked at wins when the player can play there; otherwise any group he can fill
+  const elig = WC.eligibleGroups(p);
+  const order = (elig.includes(c.tab) ? [c.tab] : []).concat(elig.filter(g=>g!==c.tab));
+  const gid = order.find(g=>wcGroupRoom(sel, c.slots, g, -1));
+  if(!gid){
+    const g = WC.POS_GROUPS.find(x=>x.id===order[0]);
+    c.msg = `${g.label}: as ${g.need} vagas e as ${WC.FREE_SLOTS} vagas livres já foram usadas.`; return;
+  }
+  c.ids.push(id); c.slots[id] = gid;
+}
+// move a called-up player to another position he can play (LAT ⇄ ZAG, MEI ⇄ VOL...)
+function wcCallupSlot(id){
+  const c = ST.wcCallup; if(!c || !c.ids.includes(id)) return;
+  const pool = wcCallupPool();
+  const p = pool.find(x=>x.id===id); if(!p) return;
+  if(!c.slots) c.slots = {};
+  const sel = c.ids.map(i=>pool.find(x=>x.id===i)).filter(Boolean);
+  const elig = WC.eligibleGroups(p);
+  if(elig.length<2) return;
+  const cur = WC.slotOf(p, c.slots);
+  const start = elig.indexOf(cur);
+  for(let k=1;k<=elig.length;k++){
+    const g = elig[(start+k)%elig.length];
+    if(g!==cur && wcGroupRoom(sel, c.slots, g, id)){ c.slots[id] = g; c.msg = ""; return; }
+  }
+  c.msg = "Não há vaga em outra posição desse jogador.";
 }
 function wcCallupConfirm(){
   const c = ST.wcCallup, job = ST.natJob; if(!c || !job) return;
   const pool = wcCallupPool();
   const sel = c.ids.map(i=>pool.find(x=>x.id===i)).filter(Boolean);
-  const problems = WC.callupProblems(sel, pool);
+  const problems = WC.callupProblems(sel, pool, c.slots);
   if(problems.length){ c.msg = problems.join(" · "); return; }
   job.squadIds = sel.map(p=>p.id);
+  job.squadSlots = Object.assign({}, c.slots||{});
   job.done = true;
   const fromBreak = c.fromBreak;
   ST.wcCallup = null; wcPoolCache = null;
@@ -9768,11 +9802,13 @@ function renderWcCallup(){
   const pool = wcCallupPool();
   const club = (wcPoolCache && wcPoolCache.club) || new Map();
   const sel = c.ids.map(i=>pool.find(x=>x.id===i)).filter(Boolean);
-  const cnt = WC.countByGroup(sel);
+  const slots = c.slots || {};
+  const cnt = WC.countByGroup(sel, slots);
   const extras = WC.POS_GROUPS.reduce((a,x)=>a+Math.max(0, cnt[x.id]-x.need), 0);
-  const problems = WC.callupProblems(sel, pool);
+  const problems = WC.callupProblems(sel, pool, slots);
   const tabG = WC.POS_GROUPS.find(g=>g.id===c.tab) || WC.POS_GROUPS[0];
-  const inGroup = pool.filter(p=>WC.posGroupOf(p.pos)===tabG.id);
+  // everyone who can play the position (main or secondary), best overall first (pool is already sorted)
+  const inGroup = pool.filter(p=>WC.eligibleGroups(p).includes(tabG.id));
   const shown = inGroup.slice(0, c.more ? 160 : 40);
   const chip = g => {
     const have = cnt[g.id], need = g.need;
@@ -9782,15 +9818,17 @@ function renderWcCallup(){
   const row = p=>{
     const on = c.ids.includes(p.id);
     const cl = club.get(p.id) || p.club || "";
+    const sec = WC.posGroupOf(p.pos)!==tabG.id;
+    const elsewhere = on && WC.slotOf(p, slots)!==tabG.id ? (WC.POS_GROUPS.find(g=>g.id===WC.slotOf(p, slots))||{}).short : "";
     return `<div class="wc-prow${on?' on':''}">
       <span class="wc-prow-face">${playerFaceImg(p,30)}</span>
-      <div class="wc-prow-main"><div class="bold">${esc(p.name)}${p.injured?' <span class="red tiny">lesionado</span>':''}</div><div class="tiny faint">${esc(!cl||cl==="Free Agents"?"Sem clube":cl)} · ${p.age} anos</div></div>
+      <div class="wc-prow-main"><div class="bold">${esc(p.name)}${p.injured?' <span class="red tiny">lesionado</span>':''}</div><div class="tiny faint">${esc(!cl||cl==="Free Agents"?"Sem clube":cl)} · ${p.age} anos${sec?' · <span class="gold">posição secundária</span>':''}${elsewhere?` · <span class="gold">convocado como ${elsewhere}</span>`:''}</div></div>
       <span class="wc-prow-pos">${posBadges(p)}</span>
       <span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span>
       <button class="btn btn-sm${on?' btn-danger':' btn-gold'}" onclick="Game.callupToggle(${p.id})">${on?"Remover":"Convocar"}</button>
     </div>`;
   };
-  const selByGroup = WC.POS_GROUPS.map(g=>({g, list:sel.filter(p=>WC.posGroupOf(p.pos)===g.id).sort((a,b)=>b.ovr-a.ovr)}));
+  const selByGroup = WC.POS_GROUPS.map(g=>({g, list:sel.filter(p=>WC.slotOf(p, slots)===g.id).sort((a,b)=>b.ovr-a.ovr)}));
   return `<div class="wc-callup">
     <div class="wc-callup-head">
       ${wcFlagImg(job.code, 64)}
@@ -9810,7 +9848,7 @@ function renderWcCallup(){
       </div>
       <div class="panel wc-callup-sel">
         <div class="panel-title">Convocados</div>
-        ${selByGroup.map(({g,list})=>`<div class="wc-sel-g"><div class="tiny faint uc">${g.label} ${list.length}/${g.need}</div>${list.length?list.map(p=>`<div class="wc-sel-p"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span><span>${esc(p.name)}</span><span class="faint tiny">${p.pos}</span><button class="wc-x" onclick="Game.callupToggle(${p.id})" aria-label="Remover">×</button></div>`).join(""):'<div class="dim tiny">—</div>'}</div>`).join("")}
+        ${selByGroup.map(({g,list})=>`<div class="wc-sel-g"><div class="tiny faint uc">${g.label} ${list.length}/${g.need}</div>${list.length?list.map(p=>`<div class="wc-sel-p"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span><span>${esc(p.name)}</span><span class="faint tiny">${p.pos}</span>${WC.eligibleGroups(p).length>1?`<button class="wc-swap" onclick="Game.callupSlot(${p.id})" title="Trocar de posição" aria-label="Trocar de posição">⇄</button>`:""}<button class="wc-x" onclick="Game.callupToggle(${p.id})" aria-label="Remover">×</button></div>`).join(""):'<div class="dim tiny">—</div>'}</div>`).join("")}
       </div>
     </div>
     ${c.msg || problems.length ? `<div class="wc-callup-msg red small">${esc(c.msg || problems.join(" · "))}</div>` : ""}

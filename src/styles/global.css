@@ -1394,6 +1394,9 @@ table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2
 .wc-sel-p{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;}
 .wc-x{margin-left:auto;background:none;border:none;color:var(--text-faint);font-size:18px;line-height:1;cursor:pointer;padding:0 4px;}
 .wc-x:hover{color:var(--red);}
+.wc-swap{margin-left:auto;background:none;border:1px solid var(--line,#3a3a30);border-radius:6px;color:var(--marigold);font-size:12px;line-height:1;cursor:pointer;padding:3px 6px;}
+.wc-swap + .wc-x{margin-left:0;}
+.wc-swap:hover{background:rgba(255,210,31,.12);}
 .wc-callup-msg{margin-top:12px;text-align:center;}
 .wc-callup-actions{justify-content:center;margin-top:18px;}
 .btn[disabled]{opacity:.45;cursor:not-allowed;}

@@ -243,50 +243,73 @@ export function posGroupOf(pos: string): string {
   const g = POS_GROUPS.find(x => x.pos.includes(pos));
   return g ? g.id : "mid";
 }
-export function countByGroup(players: any[]): Record<string, number> {
+// every group a player can fill: his main position plus the secondary ones (altPos)
+export function eligibleGroups(p: any): string[] {
+  const out: string[] = [];
+  const add = (pos: string) => { if (!pos) return; const g = POS_GROUPS.find(x => x.pos.includes(pos)); if (g && !out.includes(g.id)) out.push(g.id); };
+  add(p.pos);
+  if (p.pos !== "GK") (p.altPos || []).forEach((c: string) => { if (c !== "GK") add(c); });
+  if (!out.length) out.push("mid");
+  return out;
+}
+// the group a selected player is counted in: the one the manager chose (slots) when it is still valid, else his main one
+export type Slots = Record<number, string>;
+export function slotOf(p: any, slots?: Slots): string {
+  const s = slots && slots[p.id];
+  if (s && eligibleGroups(p).includes(s)) return s;
+  return posGroupOf(p.pos);
+}
+export function countByGroup(players: any[], slots?: Slots): Record<string, number> {
   const c: Record<string, number> = {}; POS_GROUPS.forEach(g => c[g.id] = 0);
-  players.forEach(p => { c[posGroupOf(p.pos)]++; });
+  players.forEach(p => { c[slotOf(p, slots)]++; });
   return c;
 }
 // the call-up is valid when every position group has at least its quota (or every available
 // player of that group) and the list has 26 players (or the whole pool, for tiny nations)
-export function callupProblems(selected: any[], pool: any[]): string[] {
+export function callupProblems(selected: any[], pool: any[], slots?: Slots): string[] {
   const out: string[] = [];
-  const have = countByGroup(selected), avail = countByGroup(pool);
+  const have = countByGroup(selected, slots);
+  const avail: Record<string, number> = {}; POS_GROUPS.forEach(g => avail[g.id] = 0);
+  pool.forEach(p => eligibleGroups(p).forEach(g => avail[g]++));
   POS_GROUPS.forEach(g => { const need = Math.min(g.need, avail[g.id]); if (have[g.id] < need) out.push(`${g.label}: faltam ${need - have[g.id]}`); });
   const total = Math.min(SQUAD_SIZE, pool.length);
   if (selected.length < total) out.push(`Faltam ${total - selected.length} jogador(es) para fechar os ${total}`);
   if (selected.length > SQUAD_SIZE) out.push(`Máximo de ${SQUAD_SIZE} convocados`);
   return out;
 }
-// best squad from a pool: quotas first (best of each group — keeping the laterais balanced between
-// left and right), then the best remaining outfield players for the free places. `keep` = players
-// already picked by the manager. `fillers` lists the positions the pool couldn't cover.
-export function autoSelectSquad(pool: any[], keep: number[] = []): { ids: number[]; fillers: string[] } {
+// best squad from a pool: quotas first (best of each group — main position first, then players who
+// can also play there — keeping the laterais balanced between left and right), then the best
+// remaining outfield players for the free places. `keep` = players already picked by the manager
+// (with the group they were picked for in `keepSlots`). `fillers` lists the positions the pool
+// couldn't cover; `slots` the group every chosen player was counted in.
+export function autoSelectSquad(pool: any[], keep: number[] = [], keepSlots: Slots = {}): { ids: number[]; fillers: string[]; slots: Slots } {
   const byOvr = (a: any, b: any) => (b.ovr - a.ovr) || ((b.pot || 0) - (a.pot || 0));
   const sorted = pool.slice().sort(byOvr);
   const chosen: any[] = [];
   const has = new Set<number>();
-  const take = (p: any) => { if (p && !has.has(p.id) && chosen.length < SQUAD_SIZE) { chosen.push(p); has.add(p.id); } };
+  const slots: Slots = {};
+  const take = (p: any, g?: string) => { if (p && !has.has(p.id) && chosen.length < SQUAD_SIZE) { chosen.push(p); has.add(p.id); slots[p.id] = g || slotOf(p, keepSlots); } };
   keep.forEach(id => take(sorted.find(p => p.id === id)));
   const fillers: string[] = [];
+  const inGroup = (g: PosGroup) => chosen.filter(p => slots[p.id] === g.id);
   POS_GROUPS.forEach(g => {
-    let have = chosen.filter(p => posGroupOf(p.pos) === g.id).length;
+    let have = inGroup(g).length;
     while (have < g.need) {
-      const cands = sorted.filter(p => !has.has(p.id) && posGroupOf(p.pos) === g.id);
+      let cands = sorted.filter(p => !has.has(p.id) && posGroupOf(p.pos) === g.id);
+      if (!cands.length) cands = sorted.filter(p => !has.has(p.id) && eligibleGroups(p).includes(g.id));
       let pick = cands[0];
       if (g.id === "fb" && cands.length) {   // balance LB / RB
-        const lb = chosen.filter(p => p.pos === "LB").length, rb = chosen.filter(p => p.pos === "RB").length;
+        const lb = inGroup(g).filter(p => p.pos === "LB").length, rb = inGroup(g).filter(p => p.pos === "RB").length;
         const want = lb <= rb ? "LB" : "RB";
         pick = cands.find(p => p.pos === want) || cands[0];
       }
-      if (!pick) { fillers.push(g.id === "fb" ? (chosen.filter(p => p.pos === "LB").length <= chosen.filter(p => p.pos === "RB").length ? "LB" : "RB") : g.pos[0]); have++; continue; }
-      take(pick); have++;
+      if (!pick) { fillers.push(g.id === "fb" ? (inGroup(g).filter(p => p.pos === "LB").length <= inGroup(g).filter(p => p.pos === "RB").length ? "LB" : "RB") : g.pos[0]); have++; continue; }
+      take(pick, g.id); have++;
     }
   });
   sorted.filter(p => !has.has(p.id) && p.pos !== "GK").forEach(p => take(p));
   while (chosen.length + fillers.length < SQUAD_SIZE) fillers.push("CM");   // pool too small: pad with local players
-  return { ids: chosen.map(p => p.id), fillers };
+  return { ids: chosen.map(p => p.id), fillers, slots };
 }
 // strength of a 26-man list: the number one goalkeeper + the ten best outfielders
 export function squadStrength(players: any[]): number {
