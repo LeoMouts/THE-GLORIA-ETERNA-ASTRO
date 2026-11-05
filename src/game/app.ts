@@ -9870,35 +9870,55 @@ function renderWcCallup(){
 // straight to boot()) — it's just a lightweight "only people I gave the login
 // to" filter.
 // ============================================================
-const ACCESS_USER = "GonzaloPlataPenta2026";
-const ACCESS_PASS = "platapontaburro";
+// access codes: only the SHA-256 of each code lives in the source, so the codes themselves can't be read from the bundle
+const ACCESS_CODE_HASHES = [
+  "4e84072c9a5dd6e68701837444d180c439816dd4a0e1c545f79f3d564ff1ad2f",
+  "439cb9b573d641f07981f13a6804d2dc03a285d03b72af278732ff7e24735a4a",
+  "1f40d1bd08b6f4423608b7392b1e99a7148cde30beeb1d24f842235e8a56d7f2",
+  "bb97e9fb41f3180d5b1428bd1f92ef9ce4ee7d3da2629e588db3f14da8a1744f",
+  "43075b4a71d5efe2b471bf61d78b6a1ed3b7e4f175d498ef6fa53904c3dcf677",
+  "90485ccc43b5edfc4b0f9510a2fa546fafdad062aa6bd64fe74177a5c6366497",
+  "de19d772d38de8f69496ed24f53a83bfccfcf2d06e7145d910639fc351a58267",
+  "073a7b1b294c8eefb7897ed4807169903d245168d363634766b3a1441019664b",
+  "fb92cde7720c3f30cc948e5c79488b09cad401dccf5a197d3035e38106dd2257",
+  "e91f714e6915c1b7b0b4994e57859f21b5f8abb92cd0bf8fcb5abde2e79b9020",
+  "0b22e93e63830f59eb9871d6a9d3de80d4c43228d4cde2b8875cfdf2e734937c",
+  "80f4544963dd620791a5bd086d15c51d740a5e38fdcf0d9d1beae51112ff0e1e",
+  "fe5bf879bb4e47f7172efe8ee0ccd75a60151ce3af364b46951ffa17ae8afa3d",
+  "beb48e13c778161ca552332a4fc983b8046b2b2738a64f64ba125b053eccfeb7",
+  "6264f20a6cf17eeeadbd64b00ddf8d457deb6c765b1731054eb107f4b7325b83",
+  "fe258233f4fdc765d756621d7566cedf424d599dbaabd8b7c6a8d4f49ef67aaf",
+  "62072ebac12690cc91ff4089d0c5cf21f21c34c2c95204e95a968f552db9a816",
+  "538cef4a538963ae3eec18098da0aa8c1706806f7447dae0208971f0377ce691",
+  "0324a55a90c2dff1fc6125f4664358c7796f8d3a3ec1a6ab0723904b9fd03c7f",
+  "4d29e49e70f5774b0835273d80fd01b17e5e6ea6d95dd41c86b6add18c8deeae"
+];
+async function sha256Hex(txt){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(txt));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
 function renderAccessGate(errorMsg){
   const app = document.getElementById("app");
   if(!app) return;
   app.innerHTML = `<div class="hero hero-home" style="min-height:100vh;">
-    <div class="hero-badge">ACESSO RESTRITO</div>
+    <div class="hero-badge">ACESSO RESTRITO · BETA</div>
     <h1 class="hero-title" style="font-size:clamp(30px,7vw,58px);">THE MANAGER</h1>
-    <p class="hero-sub">Esse jogo é privado. Entre com usuário e senha para jogar.</p>
+    <p class="hero-sub">Esse jogo está em fase de testes. Digite seu código de acesso para jogar.</p>
     <div class="panel mt24" style="max-width:340px;width:100%;text-align:left;">
-      <label class="tiny faint uc" style="display:block;margin-bottom:4px;">Usuário</label>
-      <input id="gateUser" class="input-inline" style="width:100%;margin-bottom:12px;" autocomplete="off" autocapitalize="off" spellcheck="false"/>
-      <label class="tiny faint uc" style="display:block;margin-bottom:4px;">Senha</label>
-      <input id="gatePass" type="password" class="input-inline" style="width:100%;" autocomplete="off"/>
+      <label class="tiny faint uc" style="display:block;margin-bottom:4px;">Código de acesso</label>
+      <input id="gateCode" class="input-inline" style="width:100%;text-transform:uppercase;letter-spacing:.08em;" placeholder="BETA-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false"/>
       ${errorMsg ? `<p class="red small mt8">${esc(errorMsg)}</p>` : ""}
       <button class="btn btn-gold btn-block mt16" onclick="window.__tryAccessLogin__()">Entrar</button>
     </div>
   </div>`;
-  const passEl = document.getElementById("gatePass");
-  if(passEl) passEl.addEventListener("keydown", e=>{ if(e.key==="Enter") window.__tryAccessLogin__(); });
+  const codeEl = document.getElementById("gateCode");
+  if(codeEl){ codeEl.addEventListener("keydown", e=>{ if(e.key==="Enter") window.__tryAccessLogin__(); }); codeEl.focus(); }
 }
-window.__tryAccessLogin__ = function(){
-  const u = (document.getElementById("gateUser")||{}).value || "";
-  const p = (document.getElementById("gatePass")||{}).value || "";
-  if(u===ACCESS_USER && p===ACCESS_PASS){
-    boot();
-  } else {
-    renderAccessGate("Usuário ou senha incorretos.");
-  }
+window.__tryAccessLogin__ = async function(){
+  const raw = ((document.getElementById("gateCode")||{}).value || "").trim().toUpperCase();
+  let ok = false;
+  try { ok = ACCESS_CODE_HASHES.includes(await sha256Hex(raw)); } catch(e){ ok = false; }
+  if(ok){ boot(); } else { renderAccessGate("Código inválido."); }
 };
 
 // ============================================================
