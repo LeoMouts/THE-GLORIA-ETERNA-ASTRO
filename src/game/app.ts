@@ -2441,6 +2441,7 @@ function maybeGenerateScoutMail(){
 
 const OFFER_SUBJECTS_ARAB = ["Proposta inacreditável chegou","Oferta chocante de fora da Libertadores","Um clube árabe fez uma fortuna por ele"];
 const OFFER_SUBJECTS_EURO = ["Proposta pelo seu atleta","Sondagem de um clube de fora","Interesse por um dos seus titulares"];
+const OFFER_SUBJECTS_DOM = ["Um rival quer o seu jogador","Proposta de um clube brasileiro","Concorrente direto faz sondagem por um dos seus"];
 function offerPosture(pl){ return OFFER_POSTURES.find(p=>p.id===pl.posture) || OFFER_POSTURES[1]; }
 // ---------- negotiation context ----------
 // Every club has its own tolerance (computeFlex in negotiation.ts) built from its finances, how much it
@@ -2491,7 +2492,7 @@ function offerNegCeiling(pl){
 function fmtNeg(v){ return fmtMoney(v); }
 function queueOfferMail(playerId, playerName, club, category, value, offer, rng, posture){
   const isArab = category==="arabe";
-  const subjects = isArab ? OFFER_SUBJECTS_ARAB : OFFER_SUBJECTS_EURO;
+  const subjects = isArab ? OFFER_SUBJECTS_ARAB : category==="domestico" ? OFFER_SUBJECTS_DOM : OFFER_SUBJECTS_EURO;
   const posturePick = posture||OFFER_POSTURES[1].id;
   const postureObj = OFFER_POSTURES.find(p=>p.id===posturePick) || OFFER_POSTURES[1];
   addMail({
@@ -5720,6 +5721,63 @@ function pickPosture(rng){
   const roll = rng();
   return roll<0.32 ? OFFER_POSTURES[0] : roll<0.72 ? OFFER_POSTURES[1] : OFFER_POSTURES[2];
 }
+// who actually bids for one of the user's players. Real offers come from several markets, in roughly these shares:
+//   rivals at home (Brazilian clubs — they buy to strengthen themselves and the player may well turn up against the user),
+//   Argentine and other South American sides, Portugal (the classic destination), the Gulf, and the rest of Europe.
+// Inside each market the club is picked with the same model the AI clubs shop with (what each tier really signs, by age and
+// price; a club that already has a better player in his position does not bid), so a 31-year-old 76 centre-back is chased by
+// Brazilian/Argentine/Portuguese/mid-table sides and the Gulf — never by Real Madrid — while a 21-year-old 85/90 prospect draws the elite.
+// Gulf clubs only come for established players (OVR 72+, 23+), as in real life.
+function normClubName(n){ return String(n||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/^(ca|csd|cd|club|cf|fc|sc)\s+/,"").replace(/[^a-z0-9]/g,""); }
+function pickIncomingBuyer(p, rng){
+  const world = ST.world || {};
+  const teams = world.teams || {};
+  const origGrp = clubGroupOf(ST.teamId, world);
+  const mine = myTeam();
+  const myCountry = mine && mine.country;
+  const v = tmValueEstimate(p), ab = tpAgeBucket(p.age);
+  const worldByNorm = {};
+  Object.keys(teams).forEach(n=>{ if(!teams[n].isNation) worldByNorm[normClubName(n)] = n; });
+  const canAfford = grp => { const sa = TP.saProfile && TP.saProfile[grp]; return !sa || v <= sa.maxValue*1.5; };   // a South American club never pays a European-sized fee
+  // clubs that live inside the game (the Brazilian leagues, the Libertadores / Sul-Americana sides): scored like a club shopping for a signing
+  const worldScore = n=>{
+    const t = teams[n], tier = tierOf(world, n);
+    if(!canAfford(clubGroupOf(n, world))) return 0;
+    const best = t.players.filter(q=>q.pos===p.pos || (q.altPos && q.altPos.includes(p.pos))).reduce((m,q)=>Math.max(m,q.ovr),0);
+    let w = best < p.ovr+2 ? 3 : best < p.ovr+6 ? 1 : 0.25;                      // a club that already has better in his position doesn't need him
+    w *= p.ovr <= aiSignerBudgetCeiling(tier)+4 ? 2 : 0.3;
+    w *= Math.max(0.25, 1 - Math.abs(teamAvgOvr(t) - (p.ovr-4))/14);             // clubs of his own level
+    return w;
+  };
+  // clubs only known from the transfer data: scored with the AI's own buyer model, restricted to the price band the club really pays
+  const tpScore = n=>{
+    const grp = clubGroupOf(n, world), gp = TP.groups[grp];
+    if(!gp || !canAfford(grp)) return 0;
+    if(gp.feeBins[tpFeeBin(v*(gp.feeRatio[ab]||1.1))] < 0.03) return 0;        // hundreds of small clubs must not swamp a star
+    return buyerFit(grp, p, origGrp);
+  };
+  const tpNames = Object.keys(TP.clubGroup).filter(n=>n!=="Free Agents" && n!==ST.teamId && !REAL_ARAB_CLUBS.includes(n) && TP.clubLeague[n]!=="Brazilian 2nd Division" && !isBrazilianClubName(n));
+  // "CA Boca Juniors" -> the game's own "Boca Juniors" — but only when it is a club of the same country (Portugal's "CD Nacional" is not Uruguay's "Nacional")
+  const fromLeague = (lg, country) => tpNames.filter(n=>TP.clubLeague[n]===lg).map(n=>{ const w = worldByNorm[normClubName(n)]; return (w && teams[w].country===country) ? w : n; });
+  const uniq = arr => Array.from(new Set(arr));
+  const inWorld = n=>!!teams[n] && !teams[n].isNation && n!==ST.teamId;
+  const markets = [];
+  const home = Object.keys(teams).filter(n=>inWorld(n) && teams[n].country===myCountry);
+  if(home.length) markets.push({kind:"dom", w:0.30, names:home});
+  if(myCountry!=="Argentina") markets.push({kind:"arg", w:0.12, names:uniq(fromLeague("Argentine League","Argentina").concat(Object.keys(teams).filter(n=>inWorld(n) && teams[n].country==="Argentina")))});
+  if(myCountry!=="Portugal") markets.push({kind:"por", w:0.16, names:uniq(fromLeague("Liga Portugal Betclic","Portugal"))});
+  const domSet = new Set(home);
+  const euro = tpNames.filter(n=>{ const lg = TP.clubLeague[n]; return lg!=="Argentine League" && lg!=="Liga Portugal Betclic" && !(worldByNorm[normClubName(n)] && teams[worldByNorm[normClubName(n)]].country!=="Portugal"); });
+  markets.push({kind:"eur", w:0.24, names:euro});
+  const scoreOf = n => (teams[n] && !teams[n].isNation) ? worldScore(n) : tpScore(n);
+  // drop markets with nobody who would realistically bid
+  const live = markets.map(m=>({...m, scored: m.names.filter(n=>!(m.kind!=="dom" && domSet.has(n))).map(n=>({n, s:scoreOf(n)})).filter(x=>x.s>0)})).filter(m=>m.scored.length);
+  if(p.ovr>=72 && p.age>=23) live.push({kind:"arab", w:0.18*(p.age>=28 ? 1.4 : p.age>=25 ? 1 : 0.35), scored:REAL_ARAB_CLUBS.map(n=>({n, s:1}))});   // the Gulf buys established players, young talents go to Europe
+  if(!live.length) return { club: REAL_EURO_CLUBS[Math.floor(rng()*REAL_EURO_CLUBS.length)], kind:"eur" };
+  const mk = pickWeighted(rng, live, m=>m.w);
+  const club = pickWeighted(rng, mk.scored, x=>x.s).n;
+  return { club, kind: mk.kind, arab: mk.kind==="arab" };
+}
 // rolls for a new incoming transfer offer and, if one lands, drops it straight into the
 // inbox as a negotiable "offer" mail (see queueOfferMail/negotiateOffer) instead of
 // popping a blocking modal — the manager reads and negotiates it on their own time from
@@ -5737,17 +5795,12 @@ function maybeIncomingOffer(baseChance){
   const rng = E.makeRNG(nextSeed());
   if(rng() >= chance) return;
   const target = weightedPickByOvr(squad, rng);
-  const roll = rng();
-  let category, club, mult;
-  if(roll < 0.35){
-    category = "arabe";
-    club = REAL_ARAB_CLUBS[Math.floor(rng()*REAL_ARAB_CLUBS.length)];
-    mult = 2.2 + rng()*1.0; // 2.2x - 3.2x
-  } else {
-    category = "euro_sa";
-    club = REAL_EURO_CLUBS[Math.floor(rng()*REAL_EURO_CLUBS.length)];
-    mult = 1.3 + rng()*0.5; // 1.3x - 1.8x
-  }
+  const buyer = pickIncomingBuyer(target, rng);
+  const category = buyer.arab ? "arabe" : buyer.kind==="dom" ? "domestico" : "euro_sa";
+  const club = buyer.club;
+  const mult = buyer.arab ? 2.2 + rng()*1.0                              // 2.2x - 3.2x
+             : (buyer.kind==="dom" || buyer.kind==="arg") ? 1.08 + rng()*0.30   // home / South American clubs pay closer to market value
+             : 1.3 + rng()*0.5;                                          // 1.3x - 1.8x
   const offer = Math.round(target.value*mult/5000)*5000;
   queueOfferMail(target.id, target.name, club, category, target.value, offer, rng, pickPosture(rng).id);
 }
@@ -8807,7 +8860,7 @@ function renderIncomingOfferModal(m){
           <div><div class="faint tiny uc">Time interessado</div><div class="bold">${esc(m.club)}</div></div>
         </div>
         <div class="contract-kv"><span>Tipo de transferência</span><span>Vender</span></div>
-        <div class="contract-kv"><span>Categoria</span><span>${isArab?'Proposta inacreditável':'Proposta do exterior'}</span></div>
+        <div class="contract-kv"><span>Categoria</span><span>${isArab?'Proposta inacreditável':m.category==="domestico"?'Proposta de clube brasileiro':'Proposta de outro clube'}</span></div>
         ${p ? contractPlayerCard(p, ST.teamId) : ""}
       </div>
       <div class="contract-divider"><span class="contract-pen">✒️</span></div>
@@ -8815,7 +8868,7 @@ function renderIncomingOfferModal(m){
         <div class="contract-panel-header">Proposta</div>
         <p class="contract-advisor"><b>Comentários do Gerente de Futebol:</b><br>${isArab
           ? "Um clube árabe está oferecendo uma fortuna muito acima do valor de mercado do jogador."
-          : "Um clube de fora da Libertadores fez uma proposta acima do valor de mercado do jogador."}</p>
+          : "Um clube interessado fez uma proposta acima do valor de mercado do jogador."}</p>
         <div class="contract-kv"><span>Valor de mercado</span><span>${fmtMoney(m.value)}</span></div>
         <div class="contract-kv"><span>Proposta recebida</span><span class="gold bold">${fmtMoney(m.offer)}</span></div>
         <div class="contract-kv"><span>Acima do valor</span><span class="green bold">+${pct}%</span></div>
