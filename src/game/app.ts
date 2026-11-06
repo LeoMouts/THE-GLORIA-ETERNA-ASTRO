@@ -6085,6 +6085,7 @@ function renderHome(){
           ["MAIS OU MENOS","Qual é maior? Acerte em sequência e compartilhe o placar.","maisoumenos.thefenomeno.com","mais-ou-menos"],
           ["CONECTE OS FENÔMENOS","Ligue dois craques pelos clubes que os dois vestiram. Um confronto novo todo dia.","conecte.thefenomeno.com","conecte"],
           ["RECONSTRUINDO","Monte o XI ideal do seu time: decida quem fica, quem sai e quem chega.","reconstruindo.thefenomeno.com","reconstruindo"],
+          ["100PRACADA","Leilão de futebol ao vivo com a galera: R$ 100 na mão, um time de cinco e um campeonato para decidir quem montou melhor.","100pracada.thefenomeno.com","100pracada"],
         ].map(g=>`<a class="mgr-more-card" href="https://${g[2]}" target="_blank" rel="noopener noreferrer" onclick="Game.openExternal(event,'https://${g[2]}')">
           <img src="/images/jogos/${g[3]}.webp" alt="${g[0]}" width="520" height="273" loading="lazy" decoding="async"/>
           <b>${g[0]}</b><p>${g[1]}</p><small>${g[2].replace(/^www\./,"")}</small><span class="go">ABRIR →</span>
