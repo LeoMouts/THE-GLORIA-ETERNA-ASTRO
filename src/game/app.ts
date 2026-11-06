@@ -1812,6 +1812,10 @@ async function initApp(){
       const dup = new Set(DUP_REMOVED);
       ST.world.globalMarket = ST.world.globalMarket.filter(p=>!dup.has(p.id));
     }
+    // carreiras salvas: "Club Estudiantes de La Plata" passou a ser só "Estudiantes" (mesmo clube, mesmo escudo)
+    if(ST.world){
+      ["globalMarket","prelibMarket"].forEach(k=>{ if(Array.isArray(ST.world[k])) ST.world[k].forEach(p=>{ if(p.club==="Club Estudiantes de La Plata") p.club = "Estudiantes"; }); });
+    }
     // never resume into a transient pre-career setup screen (team pick / manager name / mode
     // pick) — only resume straight into the hub (or an in-progress Pré-Libertadores run) if
     // something was actually committed.
@@ -7557,7 +7561,7 @@ function renderXferBuySubTab(f){
       list = list.concat(foreign);
       // club picker: every club that has a squad here (Boca, River, Peñarol...) — pick one to see its whole team
       intlTeams = Array.from(new Set(foreign.map(p=>p._team))).sort();
-      if(f.team && f.team!=="ALL" && intlTeams.includes(f.team)) list = list.filter(p=>p._team===f.team);
+      if(f.team && f.team!=="ALL" && intlTeams.includes(f.team)) list = list.filter(p=>p._team===f.team || p.club===f.team); // market players listed under the same club name (e.g. Estudiantes) show up with the squad too
     }
     if(f.pos!=="ALL") list = list.filter(p=>p.pos===f.pos);
     if(f.priceMax!=null) list = list.filter(p=>p.value<=f.priceMax);
