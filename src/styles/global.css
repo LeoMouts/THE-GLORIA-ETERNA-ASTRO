@@ -1553,7 +1553,8 @@ table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2
 
 /* ---------------- Sala de Troféus (armário) ---------------- */
 .trophy-room{max-width:980px;margin:0 auto;}
-.trophy-progress{font-family:var(--font-mono);font-size:13px;}
+.trophy-counts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
+.trophy-count-chip{padding:5px 11px;font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);background:var(--panel);border:1px solid var(--line-strong);border-radius:20px;}
 .cabinet{
   --wood-1:#3d2412;--wood-2:#59371c;--wood-3:#2a190c;
   position:relative;padding:0 14px;border-radius:10px 10px 4px 4px;
@@ -1576,32 +1577,65 @@ table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2
     linear-gradient(180deg,#14201a,#0c120e);
   box-shadow:inset 0 0 40px rgba(0,0,0,.7);overflow:hidden;
 }
-.cabinet-shelf{position:relative;padding:4px 6px 0;}
-.cabinet-shelf + .cabinet-shelf{margin-top:12px;}
-.cabinet-shelf-name{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,226,160,.55);margin:0 0 4px 4px;}
-.cabinet-items{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:10px;align-items:end;justify-items:center;}
-.cabinet-board{height:12px;margin:0 -10px;background:linear-gradient(180deg,#7a5129,var(--wood-1) 55%,var(--wood-3));box-shadow:0 6px 10px rgba(0,0,0,.6);border-radius:2px;}
 .cabinet-glare{position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,rgba(255,255,255,.07) 0%,rgba(255,255,255,0) 28%,rgba(255,255,255,0) 60%,rgba(255,255,255,.04) 72%,rgba(255,255,255,0) 82%);}
 .cabinet-base{margin:0 -14px;height:22px;border-radius:0 0 4px 4px;background:linear-gradient(180deg,var(--wood-2),var(--wood-3));box-shadow:0 4px 0 #1a0f06;}
-.tslot{width:100%;max-width:230px;display:flex;flex-direction:column;align-items:center;gap:8px;padding-bottom:10px;}
-.tslot-stage{position:relative;height:118px;display:flex;align-items:flex-end;justify-content:center;}
-.tslot-img{height:112px;width:auto;max-width:100%;object-fit:contain;display:block;}
-.tslot.won .tslot-img{filter:drop-shadow(0 6px 10px rgba(0,0,0,.65)) drop-shadow(0 0 14px rgba(255,214,120,.45));}
-.tslot.won .tslot-stage:before{content:"";position:absolute;left:50%;bottom:-6px;width:120px;height:26px;transform:translateX(-50%);background:radial-gradient(ellipse,rgba(255,226,160,.35),transparent 70%);}
-.tslot.locked .tslot-img{filter:brightness(0) opacity(.42);}
-.tslot-q{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);font-family:var(--font-display);font-weight:800;font-size:30px;color:rgba(255,226,160,.5);}
-.tslot-count{position:absolute;top:0;right:-8px;z-index:2;min-width:30px;padding:2px 7px;text-align:center;font-family:var(--font-mono);font-weight:800;font-size:12px;color:#2a1a05;background:linear-gradient(180deg,#f0d28a,#c9972e);border-radius:10px;box-shadow:0 2px 5px rgba(0,0,0,.5);}
-.tslot-plaque{width:100%;text-align:center;padding:5px 6px;border-radius:3px;background:linear-gradient(180deg,#e3c47a,#a97c27);color:#2a1a05;box-shadow:0 2px 5px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:1px;}
-.tslot-plaque b{font-family:var(--font-display);font-size:12px;letter-spacing:.05em;text-transform:uppercase;line-height:1.15;}
-.tslot-plaque span{font-family:var(--font-mono);font-size:10px;line-height:1.2;}
-.tslot.locked .tslot-plaque{background:linear-gradient(180deg,#4a4030,#33291b);color:rgba(255,226,160,.6);box-shadow:none;}
+.cabinet-board{height:12px;margin:0 -10px;background:linear-gradient(180deg,#7a5129,var(--wood-1) 55%,var(--wood-3));box-shadow:0 6px 10px rgba(0,0,0,.6);border-radius:2px;}
+
+/* one cup per title: the shelf boards are painted every row (--row), so the grid wraps onto new shelves by itself */
+.cabinet-grid{
+  --row:206px;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));grid-auto-rows:var(--row);gap:0 10px;
+  background:repeating-linear-gradient(180deg,transparent 0,transparent calc(var(--row) - 12px),#7a5129 calc(var(--row) - 12px),#3d2412 calc(var(--row) - 5px),#2a190c var(--row));
+}
+.tpiece{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;padding:0 4px 18px;min-width:0;}
+.tpiece-stage{position:relative;height:112px;display:flex;align-items:flex-end;justify-content:center;}
+.tpiece-stage:before{content:"";position:absolute;left:50%;bottom:-6px;width:110px;height:24px;transform:translateX(-50%);background:radial-gradient(ellipse,rgba(255,226,160,.35),transparent 70%);}
+.tpiece-img{position:relative;height:108px;width:auto;max-width:100%;object-fit:contain;display:block;filter:drop-shadow(0 6px 10px rgba(0,0,0,.65)) drop-shadow(0 0 14px rgba(255,214,120,.45));}
+.tpiece-plaque{width:100%;max-width:170px;text-align:center;padding:4px 6px;border-radius:3px;background:linear-gradient(180deg,#e3c47a,#a97c27);color:#2a1a05;box-shadow:0 2px 5px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:1px;}
+.tpiece-plaque b{font-family:var(--font-display);font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;line-height:1.15;}
+.tpiece-plaque span{font-family:var(--font-mono);font-size:10px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+/* never won anything: an abandoned, dusty cabinet with cobwebs and no cups at all */
+.cabinet.dusty{filter:sepia(.5) saturate(.6) brightness(.78);}
+.cabinet.dusty .cabinet-crown span{background:linear-gradient(180deg,#9b917a,#6e6552);color:#2b2518;}
+.cabinet.dusty .cabinet-body{background:radial-gradient(ellipse at 50% 0%,rgba(200,190,160,.10),transparent 60%),linear-gradient(180deg,#171b17,#0d100d);}
+.cabinet.dusty .cabinet-shelf{padding:0 6px;}
+.cabinet.dusty .cabinet-shelf + .cabinet-shelf{margin-top:0;}
+.cabinet-shelf-space{height:118px;}
+.cabinet.dusty .cabinet-board{box-shadow:0 6px 10px rgba(0,0,0,.6), inset 0 3px 0 rgba(214,204,176,.38);}
+.cabinet.dusty .cabinet-body:before{
+  content:"";position:absolute;inset:0;pointer-events:none;z-index:1;
+  background:
+    radial-gradient(circle at 12% 22%,rgba(225,215,190,.22) 0 1px,transparent 2px),
+    radial-gradient(circle at 63% 41%,rgba(225,215,190,.2) 0 1px,transparent 2px),
+    radial-gradient(circle at 81% 73%,rgba(225,215,190,.2) 0 1.5px,transparent 2.5px),
+    radial-gradient(ellipse at 30% 25%,rgba(205,195,170,.14),transparent 62%),
+    radial-gradient(ellipse at 75% 80%,rgba(205,195,170,.12),transparent 58%);
+  background-size:41px 37px,57px 49px,73px 61px,100% 100%,100% 100%;
+}
+.web{position:absolute;z-index:2;pointer-events:none;color:rgba(235,230,215,.5);width:34%;max-width:220px;aspect-ratio:1;}
+.web svg{display:block;width:100%;height:100%;}
+.web-tl{top:0;left:0;}
+.web-tr{top:0;right:0;transform:scaleX(-1);}
+.web-sm{width:17%;max-width:120px;color:rgba(235,230,215,.38);}
+.web-bl{left:0;bottom:12px;transform:scaleY(-1);}
+.web-br{right:0;bottom:12px;transform:scale(-1,-1);}
+.dust-note{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:3;width:min(86%,430px);text-align:center;
+  padding:14px 18px;border-radius:6px;background:rgba(14,12,8,.72);border:1px solid rgba(214,204,176,.25);
+  display:flex;flex-direction:column;gap:6px;color:#d9cfb4;
+}
+.dust-note b{font-family:var(--font-display);font-size:17px;letter-spacing:.04em;}
+.dust-note span{font-size:13px;color:rgba(217,207,180,.8);}
 @media (max-width:640px){
   .cabinet{padding:0 8px;}
   .cabinet-crown,.cabinet-base{margin:0 -8px;}
-  .cabinet-items{gap:6px;}
-  .tslot-stage{height:84px;}
-  .tslot-img{height:80px;}
-  .tslot-plaque b{font-size:10px;}
-  .tslot-plaque span{font-size:9px;}
-  .tslot-count{right:-4px;}
+  .cabinet-grid{--row:176px;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:0 6px;}
+  .tpiece{padding:0 2px 16px;}
+  .tpiece-stage{height:86px;}
+  .tpiece-img{height:82px;}
+  .tpiece-plaque b{font-size:10px;}
+  .tpiece-plaque span{font-size:9px;}
+  .cabinet-shelf-space{height:100px;}
+  .dust-note b{font-size:15px;}
 }

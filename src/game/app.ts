@@ -772,6 +772,7 @@ function startBrasileiraoCareer(teamId, managerName){
   ST.reputation = 50;
   ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tierOf(ST.world, teamId)]; // starting kitty follows the club's own level
   ST.history = [];
+  ST.trophies = []; // Sala de Troféus: a brand-new career starts with an empty (dusty) room
   ST.newsLog = [{title:"Bem-vindo!", text:`${mgrName(ST.managerName)} assume o comando do ${teamId} para a campanha de ${ST.seasonYear} do Brasileirão Série A.`}];
   ST.stage = "hub";
   ST.hubTab = "competicao";
@@ -1796,7 +1797,8 @@ function newCareerState(){
     trainingAnimating:false, // true for the 3s "training in progress" beat right after clicking Simular Treino
     drawRevealed:0, // how many of the 32 group-draw slots the "group_draw" screen has revealed so far
     clubCareer:null, // {club, seasons:{[year]:{players:{[id]:{...}}}}} — "Meu Clube" stats, reset whenever the club changes (see ensureClubCareer)
-    clubStatsScope:"season", // "season" | "career" — which the "Meu Clube" tab is currently showing
+    trophies:[], // every title the manager wins, whatever the club: [{key, year, team}]
+    clubStatsScope:"season", // "season" | "career" | "trophies" — which view the "Minha Carreira" tab is currently showing
     clubStatsYear:null, // which season year is picked while scope==="season" (defaults to the current one)
   };
 }
@@ -1922,6 +1924,7 @@ function startCareer(teamId, managerName){
   const tier = tierOf(ST.world, teamId);
   ST.budget = [0, 1800000, 3800000, 7500000, 15000000, 26000000][tier];
   ST.history = [];
+  ST.trophies = [];
   ST.newsLog = [{title:"Bem-vindo!", text:`${mgrName(ST.managerName)} assume o comando do ${teamId} para a campanha de ${ST.seasonYear} da CONMEBOL Libertadores.`}];
   ST.stage = "hub";
   ST.hubTab = "competicao";
@@ -6359,8 +6362,7 @@ function renderHub(){
     ${ST.natDuty?"":tabBtn("scout","Olheiro")}
     ${tabBtn("email",iconEnvelope(13)+" E-mail"+(unreadMailCount()?` <span class="badge-mail">${unreadMailCount()}</span>`:""))}
     ${ST.mode==="brasileirao"?tabBtn("desempenho","Desempenho"):""}
-    ${ST.natDuty?"":tabBtn("trofeus","🏆 Troféus")}
-    ${ST.natDuty?"":tabBtn("clube","Meu Clube")}
+    ${ST.natDuty?"":tabBtn("clube","Minha Carreira")}
   </div>
   <div class="tab-content">
     ${ST.hubTab==="competicao"?renderCompeticaoTab():""}
@@ -6369,7 +6371,6 @@ function renderHub(){
     ${ST.hubTab==="scout"?renderScoutTab():""}
     ${ST.hubTab==="email"?renderEmailTab():""}
     ${ST.hubTab==="desempenho"?renderDesempenhoTab():""}
-    ${ST.hubTab==="trofeus"?renderTrofeusTab():""}
     ${ST.hubTab==="clube"?renderMeuClubeTab():""}
   </div>`;
 }
@@ -7776,65 +7777,61 @@ function backfillTrophies(){
   const last = ST.lastSeasonSummary;
   if(last && Array.isArray(last.compCards)) last.compCards.forEach(c=>{ if(c.won && !ST.trophies.some(t=>t.key===c.trophyKey && t.year===last.year)) ST.trophies.push({key:c.trophyKey, year:last.year, team:ST.teamId}); });
 }
-// the cabinet: three shelves, every real trophy of the game — lit when won, a dark outline when it's still there to be taken
-const TROPHY_SHELVES = [
-  { name:"Mundial", items:[ {key:"worldcup", label:"Copa do Mundo"}, {key:"intercontinental", label:"Mundial de Clubes"} ] },
-  { name:"Continental", items:[ {key:"libertadores", label:"Libertadores"}, {key:"sulamericana", label:"Sul-Americana"} ] },
-  { name:"Nacional", items:[ {key:"brasileirao", label:"Brasileirão Série A"}, {key:"copa", label:"Copa do Brasil"}, {key:"brasileiraoB", label:"Brasileirão Série B"} ] },
-];
-function renderTrophySlot(item, wins){
-  const t = COMPETITION_TROPHIES[item.key];
-  const won = wins.length>0;
-  const years = wins.map(w=>w.year).sort((a,b)=>a-b);
-  return `<div class="tslot ${won?"won":"locked"}">
-    <div class="tslot-stage">
-      ${won ? `<span class="tslot-count">×${wins.length}</span>` : ""}
-      <img class="tslot-img" src="${t.url}" alt="${esc(t.alt)}" loading="lazy"/>
-      ${won ? "" : `<span class="tslot-q">?</span>`}
-    </div>
-    <div class="tslot-plaque">
-      <b>${esc(item.label)}</b>
-      <span>${won ? esc(years.join(" · ")) : "Possível campeão"}</span>
+// Sala de Troféus: every title the manager wins is its own trophy in the cabinet (4 Libertadores = 4 cups), whatever the club
+// he was in at the time. Until the very first title the room is abandoned: dust, cobwebs and a line of text; it cleans up on the first win.
+const TROPHY_ORDER = ["worldcup","intercontinental","libertadores","sulamericana","brasileirao","copa","brasileiraoB"];
+const TROPHY_LABELS = {worldcup:"Copa do Mundo", intercontinental:"Mundial de Clubes", libertadores:"Libertadores", sulamericana:"Sul-Americana", brasileirao:"Brasileirão Série A", copa:"Copa do Brasil", brasileiraoB:"Brasileirão Série B"};
+const WEB_SVG = `<svg class="web-svg" viewBox="0 0 100 100" aria-hidden="true"><path d="M0 0L96.0 0.0M0 0L89.0 36.0M0 0L67.9 67.9M0 0L36.0 89.0M0 0L0.0 96.0M22.0 0.0Q18.2 3.5 20.4 8.2M20.4 8.2Q15.5 10.2 15.6 15.6M15.6 15.6Q10.2 15.5 8.2 20.4M8.2 20.4Q3.5 18.2 0.0 22.0M42.0 0.0Q34.8 6.8 38.9 15.7M38.9 15.7Q29.5 19.5 29.7 29.7M29.7 29.7Q19.5 29.5 15.7 38.9M15.7 38.9Q6.8 34.8 0.0 42.0M64.0 0.0Q53.0 10.3 59.3 24.0M59.3 24.0Q45.0 29.8 45.3 45.3M45.3 45.3Q29.8 45.0 24.0 59.3M24.0 59.3Q10.3 53.0 0.0 64.0M88.0 0.0Q72.9 14.2 81.6 33.0M81.6 33.0Q61.8 40.9 62.2 62.2M62.2 62.2Q40.9 61.8 33.0 81.6M33.0 81.6Q14.2 72.9 0.0 88.0" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linecap="round"/></svg>`;
+function renderTrophyPiece(t){
+  const art = COMPETITION_TROPHIES[t.key] || COMPETITION_TROPHIES.brasileirao;
+  const label = TROPHY_LABELS[t.key] || t.key;
+  return `<div class="tpiece" title="${esc(label)} ${t.year} — ${esc(t.team)}">
+    <div class="tpiece-stage"><img class="tpiece-img" src="${art.url}" alt="${esc(art.alt)}" loading="lazy"/></div>
+    <div class="tpiece-plaque"><b>${esc(label)}</b><span>${t.year} · ${esc(t.team)}</span></div>
+  </div>`;
+}
+function renderDustyTrophyRoom(){
+  const web = `<span class="web web-tl">${WEB_SVG}</span><span class="web web-tr">${WEB_SVG}</span>`;
+  return `<div class="trophy-room">
+    <div class="cabinet dusty">
+      <div class="cabinet-crown"><span>Sala de Troféus</span></div>
+      <div class="cabinet-body">
+        ${web}
+        <span class="web web-sm web-bl">${WEB_SVG}</span><span class="web web-sm web-br">${WEB_SVG}</span>
+        ${[0,1,2].map(()=>`<div class="cabinet-shelf empty-shelf"><div class="cabinet-shelf-space"></div><div class="cabinet-board"></div></div>`).join("")}
+        <div class="dust-note">
+          <b>Aqui só tem poeira e teia de aranha…</b>
+          <span>Vença o seu primeiro título como técnico e esta sala ganha vida.</span>
+        </div>
+        <div class="cabinet-glare"></div>
+      </div>
+      <div class="cabinet-base"></div>
     </div>
   </div>`;
 }
 function renderTrofeusTab(){
   backfillTrophies();
-  const all = ST.trophies;
-  const onlyLib = ST.mode!=="brasileirao"; // the Libertadores-only career has a single trophy to chase
-  const shelves = TROPHY_SHELVES.map(sh=>({name:sh.name, items: sh.items.filter(it=>!onlyLib || it.key==="libertadores")})).filter(sh=>sh.items.length);
-  const total = all.length;
-  const keys = new Set(all.map(t=>t.key));
-  const totalSlots = shelves.reduce((a,sh)=>a+sh.items.length,0);
-  const last = all.slice().sort((a,b)=>b.year-a.year)[0];
-  const lastName = last ? ((TROPHY_SHELVES.flatMap(sh=>sh.items).find(i=>i.key===last.key)||{}).label||"") : "";
-  const timeline = all.slice().sort((a,b)=>b.year-a.year).map(t=>{
-    const it = TROPHY_SHELVES.flatMap(sh=>sh.items).find(i=>i.key===t.key);
-    return `<div class="kv"><span>${t.year} — ${esc(it?it.label:t.key)}</span><span class="gold bold">${esc(t.team)}</span></div>`;
-  }).join("");
+  const all = ST.trophies.slice().sort((a,b)=> TROPHY_ORDER.indexOf(a.key)-TROPHY_ORDER.indexOf(b.key) || a.year-b.year);
+  if(!all.length) return renderDustyTrophyRoom();
+  const counts = TROPHY_ORDER.map(k=>({k, n:all.filter(t=>t.key===k).length})).filter(c=>c.n);
+  const lastYear = Math.max(...all.map(t=>t.year));
+  const clubs = [...new Set(all.map(t=>t.team))];
   return `<div class="trophy-room">
     <div class="row wrap between mb16" style="gap:14px;">
       <div>
-        <div class="panel-title" style="margin:0;">Sala de Troféus — ${esc(ST.teamId)}</div>
-        <div class="faint tiny">${total ? `${total} título${total>1?"s":""} conquistado${total>1?"s":""}${last?` · último: ${esc(lastName)} ${last.year}`:""}` : "Nenhum título ainda — as taças escuras são as que você pode conquistar."}</div>
+        <div class="panel-title" style="margin:0;">Sala de Troféus — ${esc(mgrName(ST.managerName))}</div>
+        <div class="faint tiny">${all.length} título${all.length>1?"s":""} como técnico · por ${clubs.length} clube${clubs.length>1?"s":""} · último em ${lastYear}</div>
       </div>
-      <div class="trophy-progress"><b class="gold">${keys.size}</b><span class="faint"> / ${totalSlots} taças diferentes</span></div>
     </div>
+    <div class="trophy-counts">${counts.map(c=>`<span class="trophy-count-chip"><b class="gold">${c.n}×</b> ${esc(TROPHY_LABELS[c.k])}</span>`).join("")}</div>
     <div class="cabinet">
-      <div class="cabinet-crown"><span>${esc(ST.teamId)}</span></div>
+      <div class="cabinet-crown"><span>${esc(mgrName(ST.managerName))}</span></div>
       <div class="cabinet-body">
-        ${shelves.map(sh=>`<div class="cabinet-shelf">
-          <div class="cabinet-shelf-name">${sh.name}</div>
-          <div class="cabinet-items" style="--n:${sh.items.length}">
-            ${sh.items.map(it=>renderTrophySlot(it, all.filter(t=>t.key===it.key))).join("")}
-          </div>
-          <div class="cabinet-board"></div>
-        </div>`).join("")}
+        <div class="cabinet-grid">${all.map(renderTrophyPiece).join("")}</div>
         <div class="cabinet-glare"></div>
       </div>
       <div class="cabinet-base"></div>
     </div>
-    ${total ? `<div class="panel mt16"><div class="panel-title">Títulos da carreira</div>${timeline}</div>` : ""}
   </div>`;
 }
 
@@ -7859,7 +7856,7 @@ function renderStatLeaders(rows, key, label){
 function renderMeuClubeTab(){
   const cc = ensureClubCareer();
   const seasonYears = Object.keys(cc.seasons).map(Number).sort((a,b)=>b-a);
-  const scope = ST.clubStatsScope==="career" ? "career" : "season";
+  const scope = ST.clubStatsScope==="career" ? "career" : ST.clubStatsScope==="trophies" ? "trophies" : "season";
   const selectedYear = seasonYears.includes(ST.clubStatsYear) ? ST.clubStatsYear : ST.seasonYear;
   const statsMap = scope==="career" ? clubCareerTotals() : ((cc.seasons[String(selectedYear)]||{players:{}}).players);
   const rows = Object.values(statsMap);
@@ -7867,6 +7864,7 @@ function renderMeuClubeTab(){
   const scopeToggle = `<div class="btn-row mb16">
     <button class="btn ${scope==="season"?"btn-gold":""}" onclick="Game.setClubStatsScope('season')">Temporada</button>
     <button class="btn ${scope==="career"?"btn-gold":""}" onclick="Game.setClubStatsScope('career')">Carreira no ${esc(ST.teamId)}</button>
+    <button class="btn ${scope==="trophies"?"btn-gold":""}" onclick="Game.setClubStatsScope('trophies')">🏆 Sala de Troféus</button>
   </div>`;
   const yearPicker = (scope==="season" && seasonYears.length>1)
     ? `<select class="input-inline mb16" onchange="Game.setClubStatsYear(this.value)">
@@ -7874,6 +7872,7 @@ function renderMeuClubeTab(){
       </select>`
     : "";
 
+  if(scope==="trophies") return `${scopeToggle}${renderTrofeusTab()}`;
   if(!seasonYears.length){
     return `${scopeToggle}<div class="empty-state">Ainda não há partidas registradas nesta temporada — as estatísticas aparecem aqui assim que você jogar.</div>`;
   }
@@ -9983,7 +9982,7 @@ function beginWorldCup(){
     ST.natDuty = {club:ST.teamId, lineup:ST.lineup, formation:ST.formation, captainId:ST.captainId, key, nation:job.nation, year};
     ST.teamId = key; ST.formation = "4-3-3"; ST.lineup = []; ST.captainId = null;
     autoFillLineup();
-    if(ST.hubTab==="transfers" || ST.hubTab==="scout" || ST.hubTab==="clube" || ST.hubTab==="trofeus" || ST.hubTab==="desempenho") ST.hubTab = "competicao";
+    if(ST.hubTab==="transfers" || ST.hubTab==="scout" || ST.hubTab==="clube" || ST.hubTab==="desempenho") ST.hubTab = "competicao";
   }
   ST.stage = "wc_draw"; ST.hubTab = "competicao"; ST.uiModal = null;   // first the draw ceremony, then the tournament
   ST.worldCup.drawRevealed = 0;
