@@ -7311,7 +7311,7 @@ function renderElencoTab(){
       const p = lp[i];
       const c = coords[i];
       const unavailable = p && (p.injured||p.suspended);
-      return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;" onclick="Game.openSlotPicker(${i})">
+      return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;--y:${c.y};" onclick="Game.openSlotPicker(${i})">
         <div class="jersey-card ${unavailable?'unavailable':''}${p?' has-face':''}">
           <div class="jersey-shirt">${slot==="GK"?shirtGK:shirtLine}${p?playerFaceImg(p,40,"pface-over"):""}</div>
           <div class="jersey-stats">
@@ -7848,7 +7848,7 @@ function renderMixedXIPitch(xi){
       const c = coords[i];
       const shirt = p ? jerseyImage(p.team, slot==="GK", 30) : "";
       const rating = p ? (p.avgRating!=null ? p.avgRating : p.rating) : null;
-      return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;cursor:default;">
+      return `<div class="pslot ${p?'':'empty'}" style="left:${c.x}%;top:${c.y}%;--y:${c.y};cursor:default;">
         <div class="jersey-card${p?' has-face':''}">
           <div class="jersey-shirt">${shirt}${p?playerFaceImg(p,40,"pface-over"):""}</div>
           <div class="jersey-stats">

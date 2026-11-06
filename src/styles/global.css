@@ -522,6 +522,12 @@ table.data-fit .pface-cell > span{display:flex;flex-direction:column;gap:1px;lin
 table.data-fit .pface-cell .tiny{font-size:10.5px;}
 table.data-fit td .badge-pos{margin:1px 3px 1px 0;}
 table.data-fit .btn-sm{padding:7px 10px;font-size:12px;white-space:nowrap;}
+@media (max-width:900px){
+  .xfer-main .scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x pan-y;}
+  .xfer-main table.data-fit{min-width:620px;}
+  /* "Propor" stays pinned to the right edge so it is always tappable, even before dragging sideways */
+  .xfer-main table.data-fit td:last-child,.xfer-main table.data-fit th:last-child{position:sticky;right:0;z-index:2;background:var(--panel2);box-shadow:-8px 0 8px -6px rgba(0,0,0,.45);padding-left:8px;padding-right:6px;}
+}
 table.data-fa{width:auto;min-width:min(100%,640px);}
 table.data-fa td:last-child{padding-left:12px;}
 table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2px;}
@@ -764,17 +770,17 @@ table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2
   .bracket-center-col{min-width:108px;}
   .bm-row{padding:4px 5px;font-size:9px;}
 }
-/* Below this the two mirrored halves no longer fit side by side at a legible
-   card size — stack them (oitavas→quartas→semi, then a final, then the mirrored
-   other half) instead of shrinking text past readable. Each stacked row only
-   has to fit 3 round-columns wide, so it stays comfortably inside the panel
-   at any card size above, with no horizontal scrolling required. */
-@media (max-width:1000px){
-  .bracket-wrap{flex-direction:column;gap:18px;overflow-x:visible;}
-  .bracket-side{justify-content:center;}
-  .bracket-center-col{padding:6px 0;min-width:0;}
-  .bm{width:124px;}
+/* Small screens: keep the bracket exactly as it is on desktop (both halves + final in one row)
+   and let the user drag it sideways with a finger, instead of stacking the halves vertically. */
+@media (max-width:900px){
+  .bracket-wrap{justify-content:flex-start;gap:14px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x pan-y;padding:10px 10px 18px;scroll-snap-type:none;}
+  .bracket-wrap > :first-child{margin-left:auto;}
+  .bracket-wrap > :last-child{margin-right:auto;}
+  .bracket-wrap::-webkit-scrollbar{height:6px;}
+  .bracket-wrap::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:3px;}
+  .bm{width:116px;}
   .bracket-side{gap:8px;}
+  .bracket-center-col{min-width:116px;padding:0 4px;}
   .bm-row{padding:5px 6px;font-size:10px;}
 }
 @media (max-width:900px){
@@ -795,9 +801,6 @@ table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2
   .jersey-pos{font-size:6.5px;}
   .jersey-cap{width:11px;height:11px;font-size:6.5px;}
   .goat-mascot{opacity:.16;height:70vh !important;right:-60px !important;}
-  .bm{width:31vw;min-width:88px;}
-  .bracket-side{gap:5px;}
-  .bracket-wrap{gap:12px;}
   .bm-row{padding:4px 5px;font-size:9px;}
   .bm-crest{width:11px;}
 }
@@ -1157,6 +1160,10 @@ table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2
 @media (max-width:640px){
   .jersey-shirt .pface-over{width:30px !important;height:30px !important;top:-3px;}
   .jersey-card.has-face{height:66px;}
+  /* The pitch is taller on phones and each slot is placed inside a padded area, so the front line
+     (top of the field) is no longer clipped by the pitch edge. --y is the formation's y in %. */
+  .pitch{aspect-ratio:4/5;}
+  .pitch .pslot{top:calc(46px + var(--y,50) * (100% - 46px - 44px) / 100) !important;}
 }
 .pface-anon{display:inline-flex;align-items:flex-end;justify-content:center;overflow:hidden;background:#c9c6bd;border-color:var(--line-strong);}
 .pface-anon svg{display:block;flex:0 0 auto;}
