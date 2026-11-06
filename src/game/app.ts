@@ -504,6 +504,7 @@ const COMPETITION_TROPHIES = {
   sulamericana: {url:TROPHY_CDN+"SUD.png", alt:"Taça CONMEBOL Sul-Americana"},
   intercontinental: {url:TROPHY_CDN+"ICC.png", alt:"Taça Intercontinental FIFA"},
   worldcup: {url:TROPHY_CDN+"WC.png", alt:"Taça da Copa do Mundo"},
+  recopa: {url:TROPHY_CDN+"RSA.png", alt:"Taça Recopa Sul-Americana"},
 };
 function competitionTrophyImg(compType, height, opacity){
   if(compType==="brasileirao" && ST && ST.mode==="brasileirao" && ST.brasileirao && ST.brasileirao.division==="B") compType = "brasileiraoB";
@@ -7460,7 +7461,7 @@ function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
     <td class="tac mono">${fmtMoney(p.value)}</td>
     <td>${statusBadges(p)||'<span class="faint tiny">Disponível</span>'}</td>
     <td>
-      ${showSellBtn?`<button class="btn btn-sm ${p.blockOffers?'btn-gold':''}" onclick="Game.toggleBlockOffers(${p.id})" title="${p.blockOffers?'Propostas bloqueadas — clique para liberar':'Clique para não receber propostas por este jogador'}">${p.blockOffers?'🔒 Bloqueado':'🔓 Propostas'}</button> `:""}
+      ${showSellBtn?`<button class="btn btn-sm ${p.blockOffers?'btn-gold':''}" onclick="Game.toggleBlockOffers(${p.id})" title="${p.blockOffers?'Propostas bloqueadas — clique para liberar':'Clique para não receber propostas por este jogador'}">${p.blockOffers?'Propostas bloqueadas':'Bloquear propostas'}</button> `:""}
       ${showSellBtn?(sellLocked(p)?`<button class="btn btn-sm" disabled title="${esc(sellLockMsg(p))}">🔒 Próx. temporada</button>`:`<button class="btn btn-sm btn-danger" onclick="Game.sellPlayer(${p.id})">Vender</button>`):""}
       ${showBuyBtn?`<button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(teamNameForBuy||p._team)}')">Propor</button>`:""}
     </td>
@@ -7790,7 +7791,9 @@ function renderTrophyPiece(t){
     <div class="tpiece-plaque"><b>${esc(label)}</b><span>${t.year} · ${esc(t.team)}</span></div>
   </div>`;
 }
-function renderDustyTrophyRoom(){
+function renderDustyTrophyRoom(headline, sub){
+  headline = headline || "Aqui só tem poeira e teia de aranha…";
+  sub = sub || "Vença o seu primeiro título como técnico e esta sala ganha vida.";
   const web = `<span class="web web-tl">${WEB_SVG}</span><span class="web web-tr">${WEB_SVG}</span>`;
   return `<div class="trophy-room">
     <div class="cabinet dusty">
@@ -7800,9 +7803,105 @@ function renderDustyTrophyRoom(){
         <span class="web web-sm web-bl">${WEB_SVG}</span><span class="web web-sm web-br">${WEB_SVG}</span>
         ${[0,1,2].map(()=>`<div class="cabinet-shelf empty-shelf"><div class="cabinet-shelf-space"></div><div class="cabinet-board"></div></div>`).join("")}
         <div class="dust-note">
-          <b>Aqui só tem poeira e teia de aranha…</b>
-          <span>Vença o seu primeiro título como técnico e esta sala ganha vida.</span>
+          <b>${esc(headline)}</b>
+          <span>${esc(sub)}</span>
         </div>
+        <div class="cabinet-glare"></div>
+      </div>
+      <div class="cabinet-base"></div>
+    </div>
+  </div>`;
+}
+// [estaduais, UF, Sul-Americana, Recopa, Libertadores, Mundial, Brasileirão, Copa do Brasil] — títulos históricos de cada clube, antes da sua carreira
+const CLUB_TROPHY_BASE = {
+  "Flamengo":[40,"RJ",0,1,4,1,8,5],
+  "Palmeiras":[27,"SP",0,1,3,0,12,4],
+  "Cruzeiro":[39,"MG",0,0,2,0,4,6],
+  "Fluminense":[33,"RJ",0,1,1,0,4,1],
+  "Bahia":[52,"BA",0,0,0,0,2,0],
+  "Botafogo":[21,"RJ",0,0,1,0,3,0],
+  "São Paulo":[22,"SP",1,0,3,3,6,1],
+  "Red Bull Bragantino":[1,"SP",0,0,0,0,0,0],
+  "Corinthians":[31,"SP",0,1,1,2,7,4],
+  "Grêmio":[44,"RS",0,1,3,1,2,5],
+  "Vasco da Gama":[24,"RJ",0,0,1,0,4,1],
+  "Atlético Mineiro":[50,"MG",0,1,1,0,3,2],
+  "Santos":[22,"SP",0,0,3,2,8,1],
+  "Internacional":[46,"RS",1,1,2,1,3,1],
+  "Athletico Paranaense":[28,"PR",2,0,0,0,1,1],
+  "Coritiba":[39,"PR",0,0,0,0,1,0],
+  "Chapecoense":[7,"SC",1,0,0,0,0,0],
+  "Remo":[48,"PA",0,0,0,0,0,0],
+  "Vitória":[30,"BA",0,0,0,0,0,0],
+  "Mirassol":[0,"SP",0,0,0,0,0,0],
+  "América Mineiro":[16,"MG",0,0,0,0,0,0],
+  "Athletic Club":[0,"MG",0,0,0,0,0,0],
+  "Atlético Goianiense":[18,"GO",0,0,0,0,0,0],
+  "Avaí":[19,"SC",0,0,0,0,0,0],
+  "Botafogo-SP":[0,"SP",0,0,0,0,0,0],
+  "Ceará":[47,"CE",0,0,0,0,0,0],
+  "CRB":[45,"AL",0,0,0,0,0,0],
+  "Criciúma":[12,"SC",0,0,0,0,0,1],
+  "Cuiabá":[13,"MT",0,0,0,0,0,0],
+  "Fortaleza":[47,"CE",0,0,0,0,0,0],
+  "Goiás":[29,"GO",0,0,0,0,0,0],
+  "Juventude":[1,"RS",0,0,0,0,0,1],
+  "Londrina":[5,"PR",0,0,0,0,0,0],
+  "Novorizontino":[0,"SP",0,0,0,0,0,0],
+  "Náutico":[24,"PE",0,0,0,0,0,0],
+  "Operário-PR":[3,"PR",0,0,0,0,0,0],
+  "Ponte Preta":[0,"SP",0,0,0,0,0,0],
+  "Sport Recife":[46,"PE",0,0,0,0,1,1],
+  "São Bernardo":[0,"SP",0,0,0,0,0,0],
+  "Vila Nova":[16,"GO",0,0,0,0,0,0]
+};
+const STATE_TROPHY = {
+  RJ:{label:"Campeonato Carioca", art:"ST_carioca"}, SP:{label:"Campeonato Paulista", art:"ST_paulista"}, MG:{label:"Campeonato Mineiro", art:"ST_mineiro"},
+  RS:{label:"Campeonato Gaúcho", art:"ST_gaucho"}, PR:{label:"Campeonato Paranaense", art:"ST_paranaense"}, SC:{label:"Campeonato Catarinense", art:"ST_catarinense"},
+  GO:{label:"Campeonato Goiano", art:"ST_goiano"}, AL:{label:"Campeonato Alagoano", art:"ST_alagoano"}, BA:{label:"Campeonato Baiano", art:"_default"},
+  PA:{label:"Campeonato Paraense", art:"_default"}, CE:{label:"Campeonato Cearense", art:"_default"}, MT:{label:"Campeonato Mato-Grossense", art:"_default"},
+  PE:{label:"Campeonato Pernambucano", art:"_default"},
+};
+// the club's cabinet: its historical titles (CLUB_TROPHY_BASE) + every title won with this manager (ST.trophies of this club)
+function clubTrophyItems(club){
+  const b = CLUB_TROPHY_BASE[club] || [0,"",0,0,0,0,0,0];
+  const mine = key => (ST.trophies||[]).filter(t=>t.team===club && t.key===key).length;
+  const st = STATE_TROPHY[b[1]] || {label:"Campeonato Estadual", art:"_default"};
+  const list = [
+    {label:"Mundial de Clubes",     url:COMPETITION_TROPHIES.intercontinental.url, n:b[5]+mine("intercontinental"), mine:mine("intercontinental")},
+    {label:"Libertadores",          url:COMPETITION_TROPHIES.libertadores.url,     n:b[4]+mine("libertadores"),     mine:mine("libertadores")},
+    {label:"Recopa Sul-Americana",  url:COMPETITION_TROPHIES.recopa.url,           n:b[3],                          mine:0},
+    {label:"Sul-Americana",         url:COMPETITION_TROPHIES.sulamericana.url,     n:b[2]+mine("sulamericana"),     mine:mine("sulamericana")},
+    {label:"Brasileirão Série A",   url:COMPETITION_TROPHIES.brasileirao.url,      n:b[6]+mine("brasileirao"),      mine:mine("brasileirao")},
+    {label:"Copa do Brasil",        url:COMPETITION_TROPHIES.copa.url,             n:b[7]+mine("copa"),             mine:mine("copa")},
+    {label:"Brasileirão Série B",   url:COMPETITION_TROPHIES.brasileiraoB.url,     n:mine("brasileiraoB"),          mine:mine("brasileiraoB")},
+    {label:st.label,                url:TROPHY_CDN+st.art+".png",                  n:b[0],                          mine:0},
+  ];
+  return list.filter(i=>i.n>0);
+}
+function renderClubTrophyRoom(){
+  const club = ST.teamId;
+  const items = clubTrophyItems(club);
+  if(!items.length) return renderDustyTrophyRoom("Aqui só tem poeira e teia de aranha…", `O ${club} ainda não tem títulos nesta sala. Conquiste o primeiro e tire o pó dela.`);
+  const total = items.reduce((a,i)=>a+i.n,0);
+  const mineTotal = items.reduce((a,i)=>a+i.mine,0);
+  return `<div class="trophy-room">
+    <div class="row wrap between mb16" style="gap:14px;">
+      <div class="row" style="gap:12px;">
+        <span style="width:40px;display:inline-flex;">${clubCrestImg(club,40,null)}</span>
+        <div>
+          <div class="panel-title" style="margin:0;">Troféus do ${esc(club)}</div>
+          <div class="faint tiny">${total} título${total>1?"s":""} na história do clube${mineTotal?` · ${mineTotal} conquistado${mineTotal>1?"s":""} com você`:""}</div>
+        </div>
+      </div>
+    </div>
+    <div class="cabinet">
+      <div class="cabinet-crown"><span>${esc(club)}</span></div>
+      <div class="cabinet-body">
+        <div class="cabinet-grid">${items.map(i=>`<div class="tpiece" title="${esc(i.label)} — ${i.n}">
+          <div class="tpiece-stage"><span class="tpiece-count">${i.n}×</span><img class="tpiece-img" src="${i.url}" alt="${esc(i.label)}" loading="lazy"/></div>
+          <div class="tpiece-plaque"><b>${esc(i.label)}</b><span>${i.n} título${i.n>1?"s":""}${i.mine?` · ${i.mine} com você`:""}</span></div>
+        </div>`).join("")}</div>
         <div class="cabinet-glare"></div>
       </div>
       <div class="cabinet-base"></div>
@@ -7811,6 +7910,14 @@ function renderDustyTrophyRoom(){
 }
 function renderTrofeusTab(){
   backfillTrophies();
+  const view = ST.trophyRoomView==="club" ? "club" : "mine";
+  const sub = `<div class="btn-row mb16">
+    <button class="btn btn-sm ${view==="mine"?"btn-gold":""}" onclick="Game.setTrophyView('mine')">Meus Troféus</button>
+    <button class="btn btn-sm ${view==="club"?"btn-gold":""}" onclick="Game.setTrophyView('club')">Troféus do Clube</button>
+  </div>`;
+  return sub + (view==="club" ? renderClubTrophyRoom() : renderMyTrophyRoom());
+}
+function renderMyTrophyRoom(){
   const all = ST.trophies.slice().sort((a,b)=> TROPHY_ORDER.indexOf(a.key)-TROPHY_ORDER.indexOf(b.key) || a.year-b.year);
   if(!all.length) return renderDustyTrophyRoom();
   const counts = TROPHY_ORDER.map(k=>({k, n:all.filter(t=>t.key===k).length})).filter(c=>c.n);
@@ -7819,7 +7926,7 @@ function renderTrofeusTab(){
   return `<div class="trophy-room">
     <div class="row wrap between mb16" style="gap:14px;">
       <div>
-        <div class="panel-title" style="margin:0;">Sala de Troféus — ${esc(mgrName(ST.managerName))}</div>
+        <div class="panel-title" style="margin:0;">Meus Troféus — ${esc(mgrName(ST.managerName))}</div>
         <div class="faint tiny">${all.length} título${all.length>1?"s":""} como técnico · por ${clubs.length} clube${clubs.length>1?"s":""} · último em ${lastYear}</div>
       </div>
     </div>
@@ -7864,7 +7971,7 @@ function renderMeuClubeTab(){
   const scopeToggle = `<div class="btn-row mb16">
     <button class="btn ${scope==="season"?"btn-gold":""}" onclick="Game.setClubStatsScope('season')">Temporada</button>
     <button class="btn ${scope==="career"?"btn-gold":""}" onclick="Game.setClubStatsScope('career')">Carreira no ${esc(ST.teamId)}</button>
-    <button class="btn ${scope==="trophies"?"btn-gold":""}" onclick="Game.setClubStatsScope('trophies')">🏆 Sala de Troféus</button>
+    <button class="btn ${scope==="trophies"?"btn-gold":""}" onclick="Game.setClubStatsScope('trophies')">Sala de Troféus</button>
   </div>`;
   const yearPicker = (scope==="season" && seasonYears.length>1)
     ? `<select class="input-inline mb16" onchange="Game.setClubStatsYear(this.value)">
@@ -7930,8 +8037,8 @@ function renderEmailTab(){
     return `${bar}<div class="empty-state"><p>${tab.empty}</p>${hint}</div>`;
   }
   const toolbar = `<div class="btn-row mail-toolbar">
-    <button class="btn btn-sm" onclick="Game.markAllMailRead('${cur}')">✓ Marcar tudo como lido</button>
-    <button class="btn btn-sm btn-danger" onclick="Game.clearInboxConfirm('${cur}')">🗑 Limpar ${tab.label}</button>
+    <button class="btn btn-sm" onclick="Game.markAllMailRead('${cur}')">Marcar tudo como lido</button>
+    <button class="btn btn-sm btn-danger" onclick="Game.clearInboxConfirm('${cur}')">Limpar ${tab.label}</button>
   </div>`;
   return `${bar}${toolbar}<div class="mail-list">${box.map(renderMailRow).join("")}</div>`;
 }
@@ -8381,7 +8488,7 @@ function renderPenaltyOrderScreen(){
     <p class="dim small" style="max-width:520px;">Escolha quem bate e em que ordem. Os <b class="gold">5 primeiros</b> fazem as cobranças da série; o resto só bate se for para as cobranças alternadas.</p>
     <div class="pen-order-list">${rows}</div>
     <div class="btn-row mt16" style="justify-content:center;">
-      <button class="btn" onclick="Game.autoPenaltyOrder()">⚡ Melhores batedores primeiro</button>
+      <button class="btn" onclick="Game.autoPenaltyOrder()">Melhores batedores primeiro</button>
       <button class="btn btn-gold" onclick="Game.confirmPenaltyOrder()">CONFIRMAR E COMEÇAR</button>
     </div>
   </div>`;
@@ -8454,7 +8561,7 @@ function renderSquadCentralModal(){
     <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
     <td class="tac"><span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span></td>
     <td class="tac mono">${fmtMoney(p.value)}</td>
-    <td class="tac"><button class="btn btn-sm ${p.blockOffers?'btn-gold':''}" onclick="Game.toggleBlockOffers(${p.id})" title="Bloqueie para nenhum clube fazer proposta por este jogador">${p.blockOffers?'🔒 Bloqueado':'🔓 Livre'}</button></td>
+    <td class="tac"><button class="btn btn-sm ${p.blockOffers?'btn-gold':''}" onclick="Game.toggleBlockOffers(${p.id})" title="Bloqueie para nenhum clube fazer proposta por este jogador">${p.blockOffers?'Bloqueado':'Livre'}</button></td>
   </tr>`).join("");
   const blockedCount = players.filter(p=>p.blockOffers).length;
   return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
@@ -9280,6 +9387,7 @@ const Game = {
     }, 160);
   },
   setClubStatsScope(scope){ ST.clubStatsScope = scope; render(); },
+  setTrophyView(v){ ST.trophyRoomView = v==="club" ? "club" : "mine"; scheduleSave(); render(); },
   setClubStatsYear(year){ ST.clubStatsYear = Number(year); render(); },
   // "Editar escalação" on the match-confirm screen: jump back to the hub's Elenco tab.
   // (previously this button's onclick called bare ST/render() directly in the HTML attribute —
