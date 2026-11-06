@@ -416,16 +416,19 @@ input,select{font-family:inherit;}
 /* ---------------- Squad / pitch ---------------- */
 .pitch{
   position:relative;width:100%;aspect-ratio:16/10;background:
-    repeating-linear-gradient(90deg, #1D4530 0 40px, #1B4029 40px 80px);
+    repeating-linear-gradient(180deg, #1D4530 0 40px, #1B4029 40px 80px);
   border:2px solid var(--line-strong);border-radius:4px;overflow:hidden;
 }
 .pitch:before{content:"";position:absolute;inset:8px;border:1.5px solid rgba(241,237,225,.28);border-radius:2px;}
-.pitch:after{content:"";position:absolute;left:50%;top:8px;bottom:8px;width:1.5px;background:rgba(241,237,225,.28);transform:translateX(-50%);}
+/* the team attacks UP the field (GK at the bottom), so the halfway line runs sideways across the middle */
+.pitch:after{content:"";position:absolute;top:50%;left:8px;right:8px;height:1.5px;background:rgba(241,237,225,.28);transform:translateY(-50%);}
 .pitch-center{position:absolute;left:50%;top:50%;width:80px;height:80px;border:1.5px solid rgba(241,237,225,.28);border-radius:50%;transform:translate(-50%,-50%);}
 .pslot{
   position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;
   width:86px;cursor:pointer;user-select:none;
 }
+/* every slot is placed inside a padded area of the pitch (--y is the formation's y in %), so the front line and the GK are never clipped by the pitch edge */
+.pitch .pslot{top:calc(56px + var(--y,50) * (100% - 56px - 54px) / 100) !important;}
 .jersey-card{
   position:relative;width:56px;height:76px;
   background:linear-gradient(180deg,var(--panel2),var(--panel));
@@ -1519,4 +1522,86 @@ table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2
 @media (max-width:900px), (pointer:coarse){
   html, body, *{scrollbar-width:none;-ms-overflow-style:none;}
   html::-webkit-scrollbar, body::-webkit-scrollbar, *::-webkit-scrollbar{display:none;width:0;height:0;background:transparent;}
+}
+
+/* ---------------- E-mail folders ---------------- */
+.mail-tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+.mail-tab{
+  display:inline-flex;align-items:center;gap:7px;padding:9px 14px;font-family:var(--font-mono);font-size:11.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);background:var(--panel);
+  border:1px solid var(--line-strong);border-radius:4px;cursor:pointer;
+}
+.mail-tab:hover{color:var(--text);}
+.mail-tab.active{color:var(--marigold);border-color:var(--marigold-dim);background:rgba(227,185,77,.08);}
+@media (max-width:640px){
+  .mail-tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .mail-tab{flex:0 0 auto;white-space:nowrap;}
+}
+
+/* ---------------- Ordem dos batedores (pênaltis) ---------------- */
+.pen-order-list{display:flex;flex-direction:column;gap:6px;width:min(560px,100%);margin-top:14px;text-align:left;}
+.pen-order-row{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--panel);border:1px solid var(--line);border-radius:5px;}
+.pen-order-row.main{border-color:var(--marigold-dim);background:rgba(227,185,77,.07);}
+.pen-order-n{font-family:var(--font-display);font-weight:800;font-size:18px;color:var(--text-faint);width:30px;flex:0 0 auto;}
+.pen-order-row.main .pen-order-n{color:var(--marigold);}
+.pen-order-who{display:flex;align-items:center;gap:8px;flex:1;min-width:0;}
+.pen-order-who .bold{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pen-order-stats{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+.pen-order-arrows{display:flex;gap:4px;flex:0 0 auto;}
+.pen-order-arrows .btn{padding:6px 10px;min-width:34px;}
+@media (max-width:480px){ .pen-order-stats .faint{display:none;} .pen-order-who .badge{display:none;} }
+
+/* ---------------- Sala de Troféus (armário) ---------------- */
+.trophy-room{max-width:980px;margin:0 auto;}
+.trophy-progress{font-family:var(--font-mono);font-size:13px;}
+.cabinet{
+  --wood-1:#3d2412;--wood-2:#59371c;--wood-3:#2a190c;
+  position:relative;padding:0 14px;border-radius:10px 10px 4px 4px;
+  background:linear-gradient(90deg,var(--wood-3),var(--wood-2) 8%,var(--wood-1) 50%,var(--wood-2) 92%,var(--wood-3));
+  box-shadow:0 18px 40px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,214,150,.08);
+}
+.cabinet-crown{
+  margin:0 -14px;padding:12px 18px 10px;text-align:center;border-radius:10px 10px 0 0;
+  background:linear-gradient(180deg,#6b4423,var(--wood-2) 60%,var(--wood-1));
+  border-bottom:3px solid var(--wood-3);box-shadow:0 3px 8px rgba(0,0,0,.45);
+}
+.cabinet-crown span{
+  display:inline-block;padding:3px 22px;font-family:var(--font-display);font-weight:800;letter-spacing:.16em;text-transform:uppercase;font-size:14px;
+  color:#2a1a05;background:linear-gradient(180deg,#f0d28a,#c9972e);border-radius:3px;box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 1px 3px rgba(0,0,0,.5);
+}
+.cabinet-body{
+  position:relative;padding:14px 10px 10px;border-left:6px solid var(--wood-3);border-right:6px solid var(--wood-3);
+  background:
+    radial-gradient(ellipse at 50% 0%,rgba(255,226,160,.20),transparent 60%),
+    linear-gradient(180deg,#14201a,#0c120e);
+  box-shadow:inset 0 0 40px rgba(0,0,0,.7);overflow:hidden;
+}
+.cabinet-shelf{position:relative;padding:4px 6px 0;}
+.cabinet-shelf + .cabinet-shelf{margin-top:12px;}
+.cabinet-shelf-name{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,226,160,.55);margin:0 0 4px 4px;}
+.cabinet-items{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:10px;align-items:end;justify-items:center;}
+.cabinet-board{height:12px;margin:0 -10px;background:linear-gradient(180deg,#7a5129,var(--wood-1) 55%,var(--wood-3));box-shadow:0 6px 10px rgba(0,0,0,.6);border-radius:2px;}
+.cabinet-glare{position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,rgba(255,255,255,.07) 0%,rgba(255,255,255,0) 28%,rgba(255,255,255,0) 60%,rgba(255,255,255,.04) 72%,rgba(255,255,255,0) 82%);}
+.cabinet-base{margin:0 -14px;height:22px;border-radius:0 0 4px 4px;background:linear-gradient(180deg,var(--wood-2),var(--wood-3));box-shadow:0 4px 0 #1a0f06;}
+.tslot{width:100%;max-width:230px;display:flex;flex-direction:column;align-items:center;gap:8px;padding-bottom:10px;}
+.tslot-stage{position:relative;height:118px;display:flex;align-items:flex-end;justify-content:center;}
+.tslot-img{height:112px;width:auto;max-width:100%;object-fit:contain;display:block;}
+.tslot.won .tslot-img{filter:drop-shadow(0 6px 10px rgba(0,0,0,.65)) drop-shadow(0 0 14px rgba(255,214,120,.45));}
+.tslot.won .tslot-stage:before{content:"";position:absolute;left:50%;bottom:-6px;width:120px;height:26px;transform:translateX(-50%);background:radial-gradient(ellipse,rgba(255,226,160,.35),transparent 70%);}
+.tslot.locked .tslot-img{filter:brightness(0) opacity(.42);}
+.tslot-q{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);font-family:var(--font-display);font-weight:800;font-size:30px;color:rgba(255,226,160,.5);}
+.tslot-count{position:absolute;top:0;right:-8px;z-index:2;min-width:30px;padding:2px 7px;text-align:center;font-family:var(--font-mono);font-weight:800;font-size:12px;color:#2a1a05;background:linear-gradient(180deg,#f0d28a,#c9972e);border-radius:10px;box-shadow:0 2px 5px rgba(0,0,0,.5);}
+.tslot-plaque{width:100%;text-align:center;padding:5px 6px;border-radius:3px;background:linear-gradient(180deg,#e3c47a,#a97c27);color:#2a1a05;box-shadow:0 2px 5px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:1px;}
+.tslot-plaque b{font-family:var(--font-display);font-size:12px;letter-spacing:.05em;text-transform:uppercase;line-height:1.15;}
+.tslot-plaque span{font-family:var(--font-mono);font-size:10px;line-height:1.2;}
+.tslot.locked .tslot-plaque{background:linear-gradient(180deg,#4a4030,#33291b);color:rgba(255,226,160,.6);box-shadow:none;}
+@media (max-width:640px){
+  .cabinet{padding:0 8px;}
+  .cabinet-crown,.cabinet-base{margin:0 -8px;}
+  .cabinet-items{gap:6px;}
+  .tslot-stage{height:84px;}
+  .tslot-img{height:80px;}
+  .tslot-plaque b{font-size:10px;}
+  .tslot-plaque span{font-size:9px;}
+  .tslot-count{right:-4px;}
 }

@@ -1281,6 +1281,7 @@ function finalizeBrasaSeason(){
   const wcr = (ST.wcSeasonResult && ST.wcSeasonResult.year===ST.seasonYear) ? ST.wcSeasonResult : null;
   if(wcr) compCards.push({key:"wc", label:`Copa do Mundo · ${wcr.nation}`, trophyKey:"worldcup", result:wcr.label, repChange:wcr.rep, prize:wcr.prize, won:wcr.label==="Campeão"});
   const totalRepChange = brasaRep + copaRep + sulaRep + libRep + icRep + (wcr ? wcr.rep : 0);
+  compCards.forEach(c=>{ if(c.won) recordTitle(c.trophyKey, c.key==="wc" ? (wcr?wcr.nation:ST.teamId) : ST.teamId, ST.seasonYear); });
   ST.lastSeasonSummary = {
     year: ST.seasonYear,
     placement: pos===1 ? "Campeão" : `${pos}º lugar`,
@@ -2310,8 +2311,21 @@ function mintMailId(){ ST.mailSeq = (ST.mailSeq||0)+1; return "mail"+ST.mailSeq;
 function inboxList(){ return Array.isArray(ST.inbox) ? ST.inbox : (ST.inbox=[]); }
 function findMail(id){ return inboxList().find(m=>m.id===id); }
 function unreadMailCount(){ return inboxList().filter(m=>!m.read).length; }
-function markAllMailRead(){ inboxList().forEach(m=>{ m.read = true; }); scheduleSave(); }
-function clearInbox(){ ST.inbox = []; ST.openMailId = null; scheduleSave(); }
+function markAllMailRead(tabId){ const t = MAIL_TABS.find(x=>x.id===tabId); inboxList().forEach(m=>{ if(!t || t.match(m)) m.read = true; }); scheduleSave(); }
+function clearInbox(tabId){
+  if(!tabId){ ST.inbox = []; }
+  else { const t = MAIL_TABS.find(x=>x.id===tabId); ST.inbox = inboxList().filter(m=>!(t && t.match(m))); }
+  ST.openMailId = null; scheduleSave();
+}
+// the three E-mail folders: everyday mail (medical reports, scouting analyses, Time da Semana, agent news...),
+// transfer bids for the user's players, and national-team invitations.
+const MAIL_TABS = [
+  {id:"inbox",    label:"Caixa de Entrada",       empty:"Nenhum e-mail na caixa de entrada.",                       match:m=>m.type!=="offer" && m.type!=="nacional"},
+  {id:"players",  label:"Propostas por Jogador",  empty:"Nenhuma proposta por jogadores do seu elenco por enquanto.", match:m=>m.type==="offer"},
+  {id:"national", label:"Propostas por Seleções", empty:"Nenhum convite de seleção por enquanto.",                  match:m=>m.type==="nacional"},
+];
+function mailTabOf(m){ return (MAIL_TABS.find(t=>t.match(m))||MAIL_TABS[0]).id; }
+function currentMailTab(){ return MAIL_TABS.some(t=>t.id===ST.mailTab) ? ST.mailTab : "inbox"; }
 // every new mail lands with today's weekday stamped on it and unread — callers only
 // need to supply {type, subject, from, preview, body?, payload?}.
 function addMail(mail){
@@ -2576,7 +2590,7 @@ function maybeGenerateOfferComeback(){
   for(const mail of candidates){
     if(rng() >= 0.25) continue;
     const pl = mail.payload;
-    if(!myTeam().players.some(p=>p.id===pl.playerId && !sellLocked(p))) continue; // sold/gone since
+    if(!myTeam().players.some(p=>p.id===pl.playerId && !sellLocked(p) && !p.blockOffers)) continue; // sold/gone since (or blocked to offers)
     const newOffer = Math.round(pl.offer*(1.12+rng()*0.18)/5000)*5000;
     pl.status = "superseded";
     addMail({
@@ -3000,16 +3014,46 @@ function shootoutDecided(s){
 }
 // kicks off an interactive shootout screen — pass what to do once it resolves via resolveCtx
 // ({type:"knockoutTie", tieId} or {type:"final"}).
-function startShootout(teamAName, teamBName, resolveCtx){
+// the user's own kickers, in the order they will take the penalties: the last order they confirmed
+// (ST.penaltyOrderPref) first, anyone new / not yet ranked after it by shooting skill. Only players on the pitch, no GK.
+function defaultPenaltyOrderIds(){
+  const lu = lineupPlayers().filter(p=>p && !p.injured && !p.suspended && p.pos!=="GK");
+  const ok = new Set(lu.map(p=>p.id));
+  const pref = (Array.isArray(ST.penaltyOrderPref) ? ST.penaltyOrderPref : []).filter(id=>ok.has(id));
+  const rest = lu.filter(p=>!pref.includes(p.id)).sort((a,b)=>(b.sho||b.ovr)-(a.sho||a.ovr)).map(p=>p.id);
+  return pref.concat(rest);
+}
+// userOrder (ids) is set once the manager has confirmed the "Ordem dos batedores" screen
+function startShootout(teamAName, teamBName, resolveCtx, userOrder){
   const rng = E.makeRNG(nextSeed());
   const teamAObj = ST.world.teams[teamAName];
   const teamBObj = ST.world.teams[teamBName];
+  // the user's club is playing this shootout: stop first and let the manager pick who kicks, and in what order
+  if(!userOrder && (teamAName===ST.teamId || teamBName===ST.teamId)){
+    const ids = defaultPenaltyOrderIds();
+    if(ids.length){
+      ST.penaltyOrderDraft = { teamAName, teamBName, resolveCtx, ids };
+      ST.stage = "penaltyOrder";
+      ST.uiModal = null;
+      setTimeout(()=>render(), 0);
+      return;
+    }
+  }
   function lineupFor(teamObj, teamName){
     if(teamName===ST.teamId) return lineupPlayers().filter(p=>p && !p.injured && !p.suspended);
     return E.bestAvailableXI(teamObj, "4-3-3").lineup.filter(Boolean);
   }
   const orderA = pickShootoutOrder(lineupFor(teamAObj, teamAName), teamAObj);
   const orderB = pickShootoutOrder(lineupFor(teamBObj, teamBName), teamBObj);
+  if(userOrder && userOrder.length){
+    const mine = teamAName===ST.teamId ? orderA : teamBName===ST.teamId ? orderB : null;
+    const obj = teamAName===ST.teamId ? teamAObj : teamBObj;
+    if(mine){
+      const chosen = userOrder.map(id=>obj.players.find(p=>p.id===id)).filter(Boolean);
+      const rest = mine.kickers.filter(p=>!userOrder.includes(p.id)); // keeps the cycle going if it ever runs past everyone
+      if(chosen.length) mine.kickers = chosen.concat(rest);
+    }
+  }
 
   const kicks = [];
   const ROUNDS = 15; // far more than any realistic shootout needs
@@ -4433,6 +4477,7 @@ function endOfSeason(){
   ST.budget = Math.round((ST.budget+baseByTier+bonus)/10000)*10000;
 
   ST.history.push({year:ST.seasonYear, team:ST.teamId, result:placement, reputation:ST.reputation});
+  if(placement==="Campeão") recordTitle("libertadores", ST.teamId, ST.seasonYear);
   ST.newsLog.unshift({title:`Temporada ${ST.seasonYear} encerrada`, text:`${ST.teamId} terminou a Libertadores em: ${placement}. Reputação: ${repChange>=0?"+":""}${repChange}.`});
 
   // Rei da América: the tournament's outright top scorer — only worth celebrating on the
@@ -5677,7 +5722,7 @@ function pickPosture(rng){
 // the E-mail tab.
 function maybeIncomingOffer(baseChance){
   if(wcActive()) return; // durante a Copa do Mundo o mercado fica parado
-  const squad = myTeam().players.filter(p=>p.ovr>=70 && !sellLocked(p));
+  const squad = myTeam().players.filter(p=>p.ovr>=70 && !sellLocked(p) && !p.blockOffers); // players marked 'Bloquear propostas' never draw a bid
   if(squad.length===0) return;
   // a squad playing well draws more attention from other clubs — recent match form (already
   // tracked per player, decaying back toward 0 over time) pushes the offer chance up, never down,
@@ -5838,6 +5883,7 @@ function render(){
     else if(ST.stage==="wc_end") html = renderWcEnd();
     else if(ST.stage==="job_offers") html = renderJobOffers();
     else if(ST.stage==="career_over") html = renderCareerOver();
+    else if(ST.stage==="penaltyOrder") html = renderPenaltyOrderScreen();
     else if(ST.stage==="penaltyShootout") html = renderPenaltyShootoutScreen();
     else if(ST.stage==="prelib_select") html = renderPreLibSelect();
     else if(ST.stage==="prelib_manager_name") html = renderPreLibManagerName();
@@ -6313,6 +6359,7 @@ function renderHub(){
     ${ST.natDuty?"":tabBtn("scout","Olheiro")}
     ${tabBtn("email",iconEnvelope(13)+" E-mail"+(unreadMailCount()?` <span class="badge-mail">${unreadMailCount()}</span>`:""))}
     ${ST.mode==="brasileirao"?tabBtn("desempenho","Desempenho"):""}
+    ${ST.natDuty?"":tabBtn("trofeus","🏆 Troféus")}
     ${ST.natDuty?"":tabBtn("clube","Meu Clube")}
   </div>
   <div class="tab-content">
@@ -6322,6 +6369,7 @@ function renderHub(){
     ${ST.hubTab==="scout"?renderScoutTab():""}
     ${ST.hubTab==="email"?renderEmailTab():""}
     ${ST.hubTab==="desempenho"?renderDesempenhoTab():""}
+    ${ST.hubTab==="trofeus"?renderTrofeusTab():""}
     ${ST.hubTab==="clube"?renderMeuClubeTab():""}
   </div>`;
 }
@@ -7411,6 +7459,7 @@ function renderPlayerTable(players, showSellBtn, showBuyBtn, teamNameForBuy){
     <td class="tac mono">${fmtMoney(p.value)}</td>
     <td>${statusBadges(p)||'<span class="faint tiny">Disponível</span>'}</td>
     <td>
+      ${showSellBtn?`<button class="btn btn-sm ${p.blockOffers?'btn-gold':''}" onclick="Game.toggleBlockOffers(${p.id})" title="${p.blockOffers?'Propostas bloqueadas — clique para liberar':'Clique para não receber propostas por este jogador'}">${p.blockOffers?'🔒 Bloqueado':'🔓 Propostas'}</button> `:""}
       ${showSellBtn?(sellLocked(p)?`<button class="btn btn-sm" disabled title="${esc(sellLockMsg(p))}">🔒 Próx. temporada</button>`:`<button class="btn btn-sm btn-danger" onclick="Game.sellPlayer(${p.id})">Vender</button>`):""}
       ${showBuyBtn?`<button class="btn btn-sm btn-gold" onclick="Game.openBuyModal(${p.id},'${escJs(teamNameForBuy||p._team)}')">Propor</button>`:""}
     </td>
@@ -7712,6 +7761,83 @@ function renderScoutTab(){
   </div>` : ""}`;
 }
 
+// ---------------- SALA DE TROFÉUS ----------------
+// every title the manager wins is kept in ST.trophies ({key, year, team}) — one row per competition per season.
+function recordTitle(key, team, year){
+  if(!Array.isArray(ST.trophies)) ST.trophies = [];
+  if(ST.trophies.some(t=>t.key===key && t.year===year)) return;
+  ST.trophies.push({key, year, team});
+  scheduleSave();
+}
+// careers saved before the trophy room existed: rebuild what we still know (Libertadores-mode history, last season's cards)
+function backfillTrophies(){
+  if(!Array.isArray(ST.trophies)) ST.trophies = [];
+  (ST.history||[]).forEach(h=>{ if(h.result==="Campeão" && !ST.trophies.some(t=>t.key==="libertadores" && t.year===h.year)) ST.trophies.push({key:"libertadores", year:h.year, team:h.team}); });
+  const last = ST.lastSeasonSummary;
+  if(last && Array.isArray(last.compCards)) last.compCards.forEach(c=>{ if(c.won && !ST.trophies.some(t=>t.key===c.trophyKey && t.year===last.year)) ST.trophies.push({key:c.trophyKey, year:last.year, team:ST.teamId}); });
+}
+// the cabinet: three shelves, every real trophy of the game — lit when won, a dark outline when it's still there to be taken
+const TROPHY_SHELVES = [
+  { name:"Mundial", items:[ {key:"worldcup", label:"Copa do Mundo"}, {key:"intercontinental", label:"Mundial de Clubes"} ] },
+  { name:"Continental", items:[ {key:"libertadores", label:"Libertadores"}, {key:"sulamericana", label:"Sul-Americana"} ] },
+  { name:"Nacional", items:[ {key:"brasileirao", label:"Brasileirão Série A"}, {key:"copa", label:"Copa do Brasil"}, {key:"brasileiraoB", label:"Brasileirão Série B"} ] },
+];
+function renderTrophySlot(item, wins){
+  const t = COMPETITION_TROPHIES[item.key];
+  const won = wins.length>0;
+  const years = wins.map(w=>w.year).sort((a,b)=>a-b);
+  return `<div class="tslot ${won?"won":"locked"}">
+    <div class="tslot-stage">
+      ${won ? `<span class="tslot-count">×${wins.length}</span>` : ""}
+      <img class="tslot-img" src="${t.url}" alt="${esc(t.alt)}" loading="lazy"/>
+      ${won ? "" : `<span class="tslot-q">?</span>`}
+    </div>
+    <div class="tslot-plaque">
+      <b>${esc(item.label)}</b>
+      <span>${won ? esc(years.join(" · ")) : "Possível campeão"}</span>
+    </div>
+  </div>`;
+}
+function renderTrofeusTab(){
+  backfillTrophies();
+  const all = ST.trophies;
+  const onlyLib = ST.mode!=="brasileirao"; // the Libertadores-only career has a single trophy to chase
+  const shelves = TROPHY_SHELVES.map(sh=>({name:sh.name, items: sh.items.filter(it=>!onlyLib || it.key==="libertadores")})).filter(sh=>sh.items.length);
+  const total = all.length;
+  const keys = new Set(all.map(t=>t.key));
+  const totalSlots = shelves.reduce((a,sh)=>a+sh.items.length,0);
+  const last = all.slice().sort((a,b)=>b.year-a.year)[0];
+  const lastName = last ? ((TROPHY_SHELVES.flatMap(sh=>sh.items).find(i=>i.key===last.key)||{}).label||"") : "";
+  const timeline = all.slice().sort((a,b)=>b.year-a.year).map(t=>{
+    const it = TROPHY_SHELVES.flatMap(sh=>sh.items).find(i=>i.key===t.key);
+    return `<div class="kv"><span>${t.year} — ${esc(it?it.label:t.key)}</span><span class="gold bold">${esc(t.team)}</span></div>`;
+  }).join("");
+  return `<div class="trophy-room">
+    <div class="row wrap between mb16" style="gap:14px;">
+      <div>
+        <div class="panel-title" style="margin:0;">Sala de Troféus — ${esc(ST.teamId)}</div>
+        <div class="faint tiny">${total ? `${total} título${total>1?"s":""} conquistado${total>1?"s":""}${last?` · último: ${esc(lastName)} ${last.year}`:""}` : "Nenhum título ainda — as taças escuras são as que você pode conquistar."}</div>
+      </div>
+      <div class="trophy-progress"><b class="gold">${keys.size}</b><span class="faint"> / ${totalSlots} taças diferentes</span></div>
+    </div>
+    <div class="cabinet">
+      <div class="cabinet-crown"><span>${esc(ST.teamId)}</span></div>
+      <div class="cabinet-body">
+        ${shelves.map(sh=>`<div class="cabinet-shelf">
+          <div class="cabinet-shelf-name">${sh.name}</div>
+          <div class="cabinet-items" style="--n:${sh.items.length}">
+            ${sh.items.map(it=>renderTrophySlot(it, all.filter(t=>t.key===it.key))).join("")}
+          </div>
+          <div class="cabinet-board"></div>
+        </div>`).join("")}
+        <div class="cabinet-glare"></div>
+      </div>
+      <div class="cabinet-base"></div>
+    </div>
+    ${total ? `<div class="panel mt16"><div class="panel-title">Títulos da carreira</div>${timeline}</div>` : ""}
+  </div>`;
+}
+
 // ---------------- MEU CLUBE TAB ----------------
 // average rating, formatted, or an em-dash when the player never actually took the pitch
 // in the selected scope.
@@ -7790,15 +7916,25 @@ const MAIL_ICON = { offer: iconCoin(20), injury: iconMedical(20), scout: iconMag
 function renderEmailTab(){
   const open = ST.openMailId ? findMail(ST.openMailId) : null;
   if(open) return renderMailDetail(open);
-  const box = inboxList();
+  const cur = currentMailTab();
+  const tab = MAIL_TABS.find(t=>t.id===cur);
+  const all = inboxList();
+  const bar = `<div class="mail-tabs">${MAIL_TABS.map(t=>{
+    const unread = all.filter(m=>t.match(m) && !m.read).length;
+    return `<button class="mail-tab${t.id===cur?" active":""}" onclick="Game.setMailTab('${t.id}')">${t.label}${unread?` <span class="badge-mail">${unread}</span>`:""}</button>`;
+  }).join("")}</div>`;
+  const box = all.filter(tab.match);
   if(!box.length){
-    return `<div class="empty-state"><p>Sua caixa de entrada está vazia.</p><p class="dim small">Clique em AVANÇAR DIA na aba Competição para receber propostas, boletins médicos e relatórios de olheiro.</p></div>`;
+    const hint = cur==="inbox" ? `<p class="dim small">Clique em AVANÇAR DIA na aba Competição para receber boletins médicos, relatórios de olheiro e novidades.</p>`
+      : cur==="players" ? `<p class="dim small">Clubes de fora fazem propostas pelos seus jogadores ao longo da temporada. Para um jogador não receber propostas, bloqueie-o na Central de Elenco.</p>`
+      : `<p class="dim small">Convites de seleções chegam em anos de Copa do Mundo.</p>`;
+    return `${bar}<div class="empty-state"><p>${tab.empty}</p>${hint}</div>`;
   }
   const toolbar = `<div class="btn-row mail-toolbar">
-    <button class="btn btn-sm" onclick="Game.markAllMailRead()">✓ Marcar tudo como lido</button>
-    <button class="btn btn-sm btn-danger" onclick="Game.clearInboxConfirm()">🗑 Limpar caixa de entrada</button>
+    <button class="btn btn-sm" onclick="Game.markAllMailRead('${cur}')">✓ Marcar tudo como lido</button>
+    <button class="btn btn-sm btn-danger" onclick="Game.clearInboxConfirm('${cur}')">🗑 Limpar ${tab.label}</button>
   </div>`;
-  return `${toolbar}<div class="mail-list">${box.map(renderMailRow).join("")}</div>`;
+  return `${bar}${toolbar}<div class="mail-list">${box.map(renderMailRow).join("")}</div>`;
 }
 function renderMailRow(m){
   const rowIcon = (m.type==="offer" && m.payload && m.payload.club)
@@ -8216,6 +8352,41 @@ function renderMatch(){
   </div>`;
 }
 
+// "Ordem dos batedores" — shown before every shootout the user's club plays: reorder the takers with the arrows
+// (the first five are the main round; anyone after that only kicks in sudden death), then confirm.
+function renderPenaltyOrderScreen(){
+  const d = ST.penaltyOrderDraft;
+  if(!d) return renderHub();
+  const team = myTeam();
+  const opp = d.teamAName===ST.teamId ? d.teamBName : d.teamAName;
+  const rows = d.ids.map((id,i)=>{
+    const p = team.players.find(x=>x.id===id); if(!p) return "";
+    return `<div class="pen-order-row${i<5?" main":""}">
+      <span class="pen-order-n">${i+1}º</span>
+      <span class="pen-order-who">${playerFaceImg(p,30)}<span class="bold">${esc(p.name)}</span><span class="badge badge-pos">${esc(p.pos)}</span></span>
+      <span class="pen-order-stats"><span class="faint tiny">FIN</span> <b class="mono">${p.sho||p.ovr}</b> <span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></span>
+      <span class="pen-order-arrows">
+        <button class="btn btn-sm" ${i===0?"disabled":""} onclick="Game.movePenaltyKicker(${i},-1)" aria-label="Subir">▲</button>
+        <button class="btn btn-sm" ${i===d.ids.length-1?"disabled":""} onclick="Game.movePenaltyKicker(${i},1)" aria-label="Descer">▼</button>
+      </span>
+    </div>`;
+  }).join("");
+  return `<div class="hero pen-order-screen" style="min-height:88vh;">
+    <div class="hero-badge">DISPUTA DE PÊNALTIS</div>
+    <h1 class="hero-title" style="font-size:clamp(26px,5vw,44px);">ORDEM DOS BATEDORES</h1>
+    <div class="pen-shoot-scoreboard" style="margin-bottom:6px;">
+      <div class="pen-shoot-team"><span class="match-crest">${crestSVG(ST.teamId,40)}</span><div class="bold">${esc(ST.teamId)}</div></div>
+      <div class="score-num" style="font-size:22px;">×</div>
+      <div class="pen-shoot-team"><span class="match-crest">${crestSVG(opp,40)}</span><div class="bold">${esc(opp)}</div></div>
+    </div>
+    <p class="dim small" style="max-width:520px;">Escolha quem bate e em que ordem. Os <b class="gold">5 primeiros</b> fazem as cobranças da série; o resto só bate se for para as cobranças alternadas.</p>
+    <div class="pen-order-list">${rows}</div>
+    <div class="btn-row mt16" style="justify-content:center;">
+      <button class="btn" onclick="Game.autoPenaltyOrder()">⚡ Melhores batedores primeiro</button>
+      <button class="btn btn-gold" onclick="Game.confirmPenaltyOrder()">CONFIRMAR E COMEÇAR</button>
+    </div>
+  </div>`;
+}
 // two-column, name-by-name shootout reveal: kickers alternate A/B, each row's name appears
 // first and — after the reveal pause — a green GOL or red ERROU lands next to it.
 function renderPenaltyShootoutScreen(){
@@ -8284,16 +8455,19 @@ function renderSquadCentralModal(){
     <td class="tac"><span class="ovr-chip ${ovrClass(p.ovr)}">${p.ovr}</span></td>
     <td class="tac"><span class="ovr-chip ${ovrClass(p.pot)}">${p.pot}</span></td>
     <td class="tac mono">${fmtMoney(p.value)}</td>
+    <td class="tac"><button class="btn btn-sm ${p.blockOffers?'btn-gold':''}" onclick="Game.toggleBlockOffers(${p.id})" title="Bloqueie para nenhum clube fazer proposta por este jogador">${p.blockOffers?'🔒 Bloqueado':'🔓 Livre'}</button></td>
   </tr>`).join("");
+  const blockedCount = players.filter(p=>p.blockOffers).length;
   return `<div class="modal-backdrop" onclick="if(event.target===this)Game.closeModal()">
     <div class="modal modal-wide">
       <div class="row between wrap" style="gap:12px;margin-bottom:6px;">
         <div class="panel-title" style="margin:0;">Central de Elenco</div>
         <button class="btn btn-gold btn-sm" onclick="Game.goSellFromSquadCentral()">Ir para Transferências</button>
       </div>
-      <div class="dim tiny mb12">${players.length} jogadores · Valor total do elenco: <span class="gold bold">${fmtMoney(totalValue)}</span></div>
+      <div class="dim tiny mb12">${players.length} jogadores · Valor total do elenco: <span class="gold bold">${fmtMoney(totalValue)}</span> · Propostas bloqueadas: <span class="gold bold">${blockedCount}</span></div>
+      <div class="faint tiny mb12">🔒 Jogador bloqueado não recebe propostas de outros clubes (a aba E-mail → Propostas por Jogador não terá ofertas por ele). Você ainda pode vendê-lo quando quiser.</div>
       <div class="scroll-x"><table class="data"><thead><tr>
-        <th class="tac">Nº</th><th>Jogador</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">POT</th><th class="tac">Valor</th>
+        <th class="tac">Nº</th><th>Jogador</th><th>Pos</th><th class="tac">Idade</th><th class="tac">OVR</th><th class="tac">POT</th><th class="tac">Valor</th><th class="tac">Propostas</th>
       </tr></thead><tbody>${rows}</tbody></table></div>
       <button class="btn btn-block mt16" onclick="Game.closeModal()">Fechar</button>
     </div>
@@ -9199,10 +9373,11 @@ const Game = {
   },
   finishTrainingDay(){ finishTrainingDay(); render(); },
   skipTraining(){ skipSquadTraining(); render(); },
-  openMail(id){ const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
+  openMail(id){ const m=findMail(id); if(m){ m.read=true; ST.mailTab=mailTabOf(m); } ST.openMailId=id; scheduleSave(); render(); },
+  setMailTab(id){ if(MAIL_TABS.some(t=>t.id===id)){ ST.mailTab=id; ST.openMailId=null; scheduleSave(); render(); } },
   // same as openMail, but also jumps the hub over to the E-mail tab first — used by the
   // "Últimos E-mails" shortcut on the Competição tab.
-  openLatestMail(id){ ST.hubTab="email"; const m=findMail(id); if(m) m.read=true; ST.openMailId=id; scheduleSave(); render(); },
+  openLatestMail(id){ ST.hubTab="email"; const m=findMail(id); if(m){ m.read=true; ST.mailTab=mailTabOf(m); } ST.openMailId=id; scheduleSave(); render(); },
   closeMail(){ ST.openMailId=null; render(); },
   negotiateOffer(id, askedAmount){ negotiateOffer(id, askedAmount); render(); },
   updateAskWords(inputEl, mailId){ formatMoneyInputEl(inputEl, "askWords_"+mailId); },
@@ -9219,6 +9394,11 @@ const Game = {
   assignSlot(idx, playerId){ assignSlot(idx, playerId); ST.uiModal=null; scheduleSave(); render(); },
   closeModal(){ ST.uiModal=null; render(); },
   openSquadCentral(){ ST.uiModal={type:"squadCentral"}; render(); },
+  toggleBlockOffers(playerId){
+    const p = myTeam().players.find(x=>x.id===playerId); if(!p) return;
+    p.blockOffers = !p.blockOffers;
+    scheduleSave(); render();
+  },
   setPlayerNumber(playerId, val){
     const p = playerById(ST.teamId, Number(playerId));
     if(!p) return;
@@ -9253,12 +9433,13 @@ const Game = {
     if(m.action==="quickSell") quickSell(m.payload);
     else if(m.action==="resetCareer") { resetCareer(); return; }
     else if(m.action==="confirmNewGame") { ST.tmpSelectedTeam=null; ST.tmpManagerNameInput=""; ST.stage="brasa_team_select"; }
-    else if(m.action==="clearInbox") clearInbox();
+    else if(m.action==="clearInbox") clearInbox(m.tab);
     render();
   },
-  markAllMailRead(){ markAllMailRead(); render(); },
-  clearInboxConfirm(){
-    ST.uiModal = {type:"confirm", message:"Tem certeza que quer limpar a caixa de entrada? Todos os e-mails serão apagados — isso não pode ser desfeito.", action:"clearInbox"};
+  markAllMailRead(tabId){ markAllMailRead(tabId); render(); },
+  clearInboxConfirm(tabId){
+    const t = MAIL_TABS.find(x=>x.id===tabId);
+    ST.uiModal = {type:"confirm", message:`Tem certeza que quer limpar "${t?t.label:"a caixa de entrada"}"? Todos os e-mails dessa pasta serão apagados — isso não pode ser desfeito.`, action:"clearInbox", tab:tabId};
     render();
   },
   openFaModal(playerId){ ST.uiModal = {type:"faSign", playerId}; render(); },
@@ -9438,6 +9619,25 @@ const Game = {
   // resolves every remaining kick instantly, using the exact same scoring/stopping rule as the
   // live reveal, then hands off to finishShootout() to apply the result — for players who just
   // want the outcome instead of watching each kick land.
+  movePenaltyKicker(i, dir){
+    const d = ST.penaltyOrderDraft; if(!d) return;
+    const j = i + dir; if(j<0 || j>=d.ids.length) return;
+    const t = d.ids[i]; d.ids[i] = d.ids[j]; d.ids[j] = t;
+    scheduleSave(); render();
+  },
+  autoPenaltyOrder(){
+    const d = ST.penaltyOrderDraft; if(!d) return;
+    const team = myTeam();
+    const sho = id => { const p = team.players.find(x=>x.id===id); return p ? (p.sho||p.ovr) : 0; };
+    d.ids.sort((a,b)=>sho(b)-sho(a));
+    scheduleSave(); render();
+  },
+  confirmPenaltyOrder(){
+    const d = ST.penaltyOrderDraft; if(!d) return;
+    ST.penaltyOrderPref = d.ids.slice(); // remembered as the starting order of the next shootout
+    ST.penaltyOrderDraft = null;
+    startShootout(d.teamAName, d.teamBName, d.resolveCtx, d.ids);
+  },
   skipShootout(){
     const s = ST.penaltyShootout;
     if(!s || s.phase!=="kicking") return;
@@ -9783,7 +9983,7 @@ function beginWorldCup(){
     ST.natDuty = {club:ST.teamId, lineup:ST.lineup, formation:ST.formation, captainId:ST.captainId, key, nation:job.nation, year};
     ST.teamId = key; ST.formation = "4-3-3"; ST.lineup = []; ST.captainId = null;
     autoFillLineup();
-    if(ST.hubTab==="transfers" || ST.hubTab==="scout" || ST.hubTab==="clube" || ST.hubTab==="desempenho") ST.hubTab = "competicao";
+    if(ST.hubTab==="transfers" || ST.hubTab==="scout" || ST.hubTab==="clube" || ST.hubTab==="trofeus" || ST.hubTab==="desempenho") ST.hubTab = "competicao";
   }
   ST.stage = "wc_draw"; ST.hubTab = "competicao"; ST.uiModal = null;   // first the draw ceremony, then the tournament
   ST.worldCup.drawRevealed = 0;
