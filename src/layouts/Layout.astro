@@ -14,6 +14,9 @@ const { title = "THE MANAGER" } = Astro.props;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{title}</title>
+    <!-- Vercel Web Analytics: conta visitantes (só existe em produção, no dev dá 404 e é ignorado) -->
+    <script is:inline>window.va = window.va || function(){ (window.vaq = window.vaq || []).push(arguments); };</script>
+    <script is:inline defer src="/_vercel/insights/script.js"></script>
     <meta name="description" content="THE MANAGER — simulador de carreira como técnico no Brasileirão." />
     <meta name="theme-color" content="#0a0e0b" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />

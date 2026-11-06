@@ -11285,8 +11285,17 @@ window.__tryAccessLogin__ = async function(){
   let hash = "";
   try { hash = await sha256Hex(raw); ok = ACCESS_CODE_HASHES.includes(hash) || hash===VIP_RENATO_HASH; } catch(e){ ok = false; }
   window.__VIP_RENATO__ = ok && hash===VIP_RENATO_HASH;
-  if(ok){ await boot(); if(window.__VIP_RENATO__) showVipWelcome(); } else { renderAccessGate("Código inválido."); }
+  if(ok){ trackLogin(); await boot(); if(window.__VIP_RENATO__) showVipWelcome(); } else { renderAccessGate("Código inválido."); }
 };
+// counts one "player who got in" in Vercel Web Analytics (Pages -> /entrou): a virtual page view fired only after a VALID code.
+// No personal data and the code itself is never sent. The address bar goes back to the real URL right after.
+function trackLogin(){
+  try{
+    const back = location.pathname + location.search + location.hash;
+    history.pushState(null, "", "/entrou");
+    setTimeout(()=>{ try{ history.replaceState(null, "", back); }catch(e){} }, 600);
+  }catch(e){}
+}
 
 // ============================================================
 // BOOT
