@@ -776,8 +776,6 @@ table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2
   .bracket-wrap{justify-content:flex-start;gap:14px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x pan-y;padding:10px 10px 18px;scroll-snap-type:none;}
   .bracket-wrap > :first-child{margin-left:auto;}
   .bracket-wrap > :last-child{margin-right:auto;}
-  .bracket-wrap::-webkit-scrollbar{height:6px;}
-  .bracket-wrap::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:3px;}
   .bm{width:116px;}
   .bracket-side{gap:8px;}
   .bracket-center-col{min-width:116px;padding:0 4px;}
@@ -1516,3 +1514,9 @@ table.data-fit td:last-child{text-align:right;white-space:nowrap;padding-right:2
 @keyframes mxIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 
 .mx-pl.empty small{display:block;}
+
+/* Phones/tablets: scrolling (vertical and sideways) still works with the finger, but no scrollbar is drawn */
+@media (max-width:900px), (pointer:coarse){
+  html, body, *{scrollbar-width:none;-ms-overflow-style:none;}
+  html::-webkit-scrollbar, body::-webkit-scrollbar, *::-webkit-scrollbar{display:none;width:0;height:0;background:transparent;}
+}
