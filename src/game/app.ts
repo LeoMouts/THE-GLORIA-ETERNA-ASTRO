@@ -1726,6 +1726,122 @@ async function loadState(){
   return null;
 }
 
+// ============================================================
+// ANTI-FREEZE: timers que nunca quebram + cura de estados "presos"
+// Várias telas (assinatura de contrato, cobrança de pênalti, disputa de pênaltis, simulação da
+// partida) avançam por cadeias de setTimeout e o estado intermediário é salvo. Se o timer se perde
+// (recarregar a aba, o celular suspender o navegador, um erro dentro do timer), o save volta num
+// ponto em que nada mais empurra o jogo adiante. Aqui: (1) todo timer é protegido, (2) ao carregar,
+// qualquer estado transitório é concluído/limpo, (3) um watchdog percebe telas paradas e destrava.
+// ============================================================
+function safeTimeout(fn, ms){
+  return setTimeout(()=>{
+    try{ fn(); }
+    catch(err){
+      console.error("timer failed, healing", err);
+      try{ healTransientState(); render(); }catch(e2){ console.error("heal failed", e2); }
+    }
+  }, ms);
+}
+function soLater(s, fn, ms){
+  const ep = s.epoch || 0;
+  return safeTimeout(()=>{ if(ST && ST.penaltyShootout===s && (s.epoch||0)===ep) fn(); }, ms);
+}
+// leva a disputa de pênaltis ao próximo passo mesmo que o timer tenha sumido
+function advanceShootoutIfStalled(){
+  const s = ST && ST.penaltyShootout;
+  if(!s) return false;
+  s.epoch = (s.epoch||0) + 1; // invalida qualquer timer antigo que ainda esteja pendente
+  if(s.phase==="done"){ Game.finishShootout(); return true; }
+  if(s.phase==="kicking"){
+    if(s.revealIdx >= s.kicks.length){ s.phase = "done"; Game.finishShootout(); return true; }
+    if(s.nameShown[s.revealIdx] && s.resultShown[s.revealIdx]) s.revealIdx++;
+    Game.tickShootout();
+    return true;
+  }
+  return false;
+}
+// conclui ou limpa qualquer estado transitório que dependa de um timer que não existe mais
+function healTransientState(){
+  if(!ST) return false;
+  let fixed = false;
+  const m = ST.uiModal;
+  if(m){
+    if(m.signing){
+      // assinatura em andamento: a venda aceita precisa ser concluída; nas compras o negócio já foi fechado
+      if(m.type==="incomingOffer"){ try{ acceptIncomingOffer(); }catch(e){ console.warn(e); } }
+      ST.uiModal = null; fixed = true;
+    } else if(m.type==="faSign" && m.done){ ST.uiModal = null; fixed = true; }
+    else if(m.type==="penaltyKick"){
+      const pm = ST.pendingMatch;
+      if(pm && pm.result){
+        const idx = Number.isInteger(m.eventIndex) ? m.eventIndex : ST.matchAnimIdx;
+        const ev = pm.result.events[idx];
+        if(ev && ev.type==="penalty_pending"){ try{ resolvePendingPenaltyEvent(pm, idx, m.takerId||null); }catch(e){ console.warn(e); } }
+        ST.matchAnimIdx = idx + 1;
+      }
+      ST.uiModal = null; fixed = true;
+    }
+  }
+  if(ST.trainingAnimating){ ST.trainingAnimating = false; fixed = true; }
+  if(ST.romanoFlipping){ ST.romanoFlipping = false; fixed = true; }
+  if(ST.stage==="match" && (!ST.pendingMatch || !ST.pendingMatch.ref || !ST.pendingMatch.context)){
+    ST.pendingMatch = null; ST.stage = "hub"; fixed = true;
+  }
+  if(ST.stage==="penaltyShootout" && !ST.penaltyShootout){ ST.stage = "hub"; fixed = true; }
+  if(ST.stage==="penaltyOrder" && !ST.penaltyOrderDraft){ ST.stage = "hub"; fixed = true; }
+  if(fixed) scheduleSave();
+  return fixed;
+}
+// assinatura do que está "em andamento" na tela; se ela não muda por tempo demais, algo travou
+function stallSignature(){
+  if(!ST) return "";
+  const m = ST.uiModal;
+  if(m && (m.signing || m.type==="penaltyKick" || (m.type==="faSign" && m.done))) return "modal:"+m.type+":"+(m.phase||"")+":"+(m.signing?1:0);
+  const s = ST.penaltyShootout;
+  if(ST.stage==="penaltyShootout" && s) return "so:"+s.phase+":"+s.revealIdx+":"+(s.nameShown[s.revealIdx]?1:0)+(s.resultShown[s.revealIdx]?1:0);
+  const pm = ST.pendingMatch;
+  if(ST.stage==="match" && pm && pm.result && !matchAnimDone() && !(m && m.type==="penaltyPicker")) return "match:"+ST.matchAnimIdx+":"+(ST.matchClockMinute||0);
+  if(ST.trainingAnimating) return "train";
+  if(ST.romanoFlipping) return "flip";
+  return "";
+}
+let wdSig = "", wdSince = 0;
+function unfreeze(){
+  try{
+    const sig = stallSignature();
+    if(sig.indexOf("so:")===0) advanceShootoutIfStalled();
+    else healTransientState();
+    // partida parada sem modal: render() reabre a cadeia de eventos
+    render();
+  }catch(err){ console.error("unfreeze failed", err); }
+}
+function watchdogTick(force){
+  if(!ST) return;
+  const sig = stallSignature();
+  const now = Date.now();
+  if(!sig){ wdSig = ""; return; }
+  if(sig!==wdSig){ wdSig = sig; wdSince = now; if(!force) return; }
+  const limit = sig.indexOf("match:")===0 ? 4500 : 7000;
+  if(force || now - wdSince > limit){
+    console.warn("[watchdog] tela parada, destravando:", sig);
+    wdSince = now; unfreeze();
+  }
+}
+function installWatchdog(){
+  if(window.__wdInstalled) return; window.__wdInstalled = true;
+  setInterval(()=>{ try{ watchdogTick(false); }catch(e){ console.error(e); } }, 1000);
+  // voltou de segundo plano (celular bloqueado, troca de app): os timers podem ter sido congelados
+  document.addEventListener("visibilitychange", ()=>{
+    if(document.visibilityState==="hidden"){ try{ if(saveTimer){ clearTimeout(saveTimer); saveTimer=null; saveState(); } }catch(e){} }
+    else { try{ if(stallSignature()) watchdogTick(true); }catch(e){ console.error(e); } }
+  });
+  window.addEventListener("pageshow", ev=>{ if(ev.persisted){ try{ if(stallSignature()) watchdogTick(true); }catch(e){} } });
+  window.addEventListener("pagehide", ()=>{ try{ if(saveTimer){ clearTimeout(saveTimer); saveTimer=null; saveState(); } }catch(e){} });
+  window.addEventListener("error", e=>{ console.error("[window.error]", e && e.message); });
+  window.addEventListener("unhandledrejection", e=>{ console.error("[unhandledrejection]", e && e.reason); });
+}
+
 function mutate(fn){
   fn(ST);
   scheduleSave();
@@ -1846,6 +1962,7 @@ async function initApp(){
     if(ST.romanoFlip==null) ST.romanoFlip = false;
     if(ST.romanoFlipping==null) ST.romanoFlipping = false;
     recomputeIdCounter();
+    try{ healTransientState(); }catch(err){ console.warn("heal on load failed", err); }
   } else if(loaded){
     // an older/incompatible save from a previous version of the game — cannot be
     // safely resumed, so start fresh rather than crashing on missing fields.
@@ -1855,10 +1972,11 @@ async function initApp(){
     ST = newCareerState();
   }
   render();
+  installWatchdog();
   // a penalty shootout drives itself via its own setTimeout chain, which a page reload
   // wipes — restart it so a save captured mid-shootout doesn't resume frozen.
-  if(ST.stage==="penaltyShootout" && ST.penaltyShootout && ST.penaltyShootout.phase==="kicking"){
-    setTimeout(()=>{ Game.tickShootout(); }, 700);
+  if(ST.stage==="penaltyShootout" && ST.penaltyShootout){
+    safeTimeout(()=>{ advanceShootoutIfStalled(); }, 700);
   }
   // same idea for the group-draw animation's setInterval — a reload mid-draw otherwise
   // resumes frozen with no way forward except SKIP.
@@ -3040,7 +3158,7 @@ function startShootout(teamAName, teamBName, resolveCtx, userOrder){
       ST.penaltyOrderDraft = { teamAName, teamBName, resolveCtx, ids };
       ST.stage = "penaltyOrder";
       ST.uiModal = null;
-      setTimeout(()=>render(), 0);
+      safeTimeout(()=>render(), 0);
       return;
     }
   }
@@ -3075,10 +3193,11 @@ function startShootout(teamAName, teamBName, resolveCtx, userOrder){
     scoreA: 0, scoreB: 0,
     phase: "kicking",
     resolveCtx,
+    epoch: 0,
   };
   ST.stage = "penaltyShootout";
   ST.uiModal = null;
-  setTimeout(()=>{ Game.tickShootout(); }, 700);
+  soLater(ST.penaltyShootout, ()=>{ Game.tickShootout(); }, 700);
 }
 // applies the shootout's winner into the actual tie/final it was resolving, then continues
 // exactly the flow that would have run if the score had never been level.
@@ -5970,33 +6089,59 @@ function render(){
           // the user's own penalty — pause the ticker and let them pick the taker
           if(!ST.uiModal || ST.uiModal.type!=="penaltyPicker"){
             ST.uiModal = {type:"penaltyPicker", eventIndex: ST.matchAnimIdx};
-            tickTimer = setTimeout(()=>{ render(); }, 0); // re-render once more so the modal paints
+            tickTimer = safeTimeout(()=>{ render(); }, 0); // re-render once more so the modal paints
           }
         } else {
           // the opponent's penalty — resolve it live but without pausing for input
           resolvePendingPenaltyEvent(pm, ST.matchAnimIdx, null);
-          tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, 900);
+          tickTimer = safeTimeout(()=>{ ST.matchAnimIdx++; render(); }, 900);
         }
       } else if(nextEvent && clockReady){
         const delay = ST.matchSpeed==="slow" ? 120 : matchTickDelay(pm, ST.matchAnimIdx);
-        tickTimer = setTimeout(()=>{ ST.matchAnimIdx++; render(); }, delay);
+        tickTimer = safeTimeout(()=>{ ST.matchAnimIdx++; render(); }, delay);
       } else {
         // nothing left to reveal at the current minute — just tick the clock forward (only
         // reachable in "slow" mode; every other speed always has clockReady===true above).
-        tickTimer = setTimeout(()=>{ ST.matchClockMinute = Math.min(90, (ST.matchClockMinute||0)+1); render(); }, 450);
+        tickTimer = safeTimeout(()=>{ ST.matchClockMinute = Math.min(90, (ST.matchClockMinute||0)+1); render(); }, 450);
       }
     }
   }catch(err){
-    console.error("Render error, offering recovery:", err);
+    console.error("Render error, trying to recover:", err);
+    // 1ª tentativa: limpar estados transitórios e desenhar de novo (resolve a maioria dos casos sem perder nada)
+    if(!renderRecovering){
+      renderRecovering = true;
+      try{
+        healTransientState();
+        if(ST && ST.uiModal && ST.uiModal.type!=="confirm"){ ST.uiModal = null; }
+        render();
+        return;
+      }catch(e2){ console.error("retry render failed", e2); }
+      finally{ renderRecovering = false; }
+    }
     app.innerHTML = `
       <div class="hero">
         <div class="hero-badge">OPS</div>
-        <h1 class="hero-title" style="font-size:clamp(24px,5vw,40px);">Algo deu errado</h1>
-        <p class="hero-sub">Encontramos um problema ao carregar essa tela — provavelmente uma carreira salva de uma versão anterior do jogo. Reinicie para voltar ao normal (sua carreira atual será apagada).</p>
-        <button class="btn btn-gold btn-lg" onclick="window.__forceReset__()">Reiniciar jogo</button>
+        <h1 class="hero-title" style="font-size:clamp(24px,5vw,40px);">Essa tela travou</h1>
+        <p class="hero-sub">Sua carreira está salva. Tente voltar ao painel do clube; se continuar travando, recarregue a página. Só reinicie se nada mais funcionar (isso apaga a carreira).</p>
+        <button class="btn btn-gold btn-lg" onclick="window.__recoverToHub__()">Voltar ao painel do clube</button>
+        <div class="mt16"><button class="btn" onclick="window.__retryRender__()">Tentar de novo</button>
+        <button class="btn" onclick="window.__forceReset__()">Reiniciar jogo (apaga a carreira)</button></div>
       </div>`;
   }
 }
+let renderRecovering = false;
+window.__retryRender__ = () => { try{ healTransientState(); }catch(e){} render(); };
+window.__recoverToHub__ = () => {
+  try{
+    if(ST && ST.teamId && ST.world){
+      ST.uiModal = null; ST.pendingMatch = null; ST.penaltyShootout = null; ST.penaltyOrderDraft = null;
+      ST.trainingAnimating = false; ST.romanoFlipping = false;
+      ST.stage = "hub"; if(!ST.hubTab) ST.hubTab = "elenco";
+      saveState();
+    }
+  }catch(e){ console.error(e); }
+  render();
+};
 
 function matchAnimDone(){
   const pm = ST.pendingMatch;
@@ -9434,7 +9579,7 @@ const Game = {
     // since a full-string re-render can't rely on a CSS transition to animate the swap.
     ST.romanoFlipping = true;
     render();
-    setTimeout(()=>{
+    safeTimeout(()=>{
       ST.romanoFlip = !ST.romanoFlip;
       ST.romanoFlipping = false;
       render();
@@ -9526,7 +9671,7 @@ const Game = {
   simulateTraining(){
     ST.trainingAnimating = true;
     render();
-    setTimeout(()=>{
+    safeTimeout(()=>{
       ST.trainingAnimating = false;
       runSquadTraining();
       render();
@@ -9606,7 +9751,7 @@ const Game = {
   openFaModal(playerId){ ST.uiModal = {type:"faSign", playerId}; render(); },
   signFreeAgent(playerId){
     const res = signFreeAgent(playerId);
-    if(res.ok){ ST.uiModal = {type:"faSign", playerId, done:true, msg:res.msg}; render(); setTimeout(()=>{ if(ST.uiModal && ST.uiModal.type==="faSign" && ST.uiModal.done){ ST.uiModal=null; render(); } }, 1800); }
+    if(res.ok){ ST.uiModal = {type:"faSign", playerId, done:true, msg:res.msg}; const fm = ST.uiModal; render(); safeTimeout(()=>{ if(ST.uiModal===fm && fm.done){ ST.uiModal=null; render(); } }, 1800); }
     else { ST.uiModal = {type:"faSign", playerId, err:res.msg}; render(); }
   },
   injuredAuto(){ ST.matchLineupOverride = buildAutoSubstitutes(); ST.uiModal = null; resumeAfterLineupChoice(); render(); },
@@ -9624,7 +9769,7 @@ const Game = {
     if(!m || m.type!=="incomingOffer" || m.signing) return;
     m.signing = true; m.signMsg = "Venda Concluída!";
     render();
-    setTimeout(()=>{ acceptIncomingOffer(); render(); }, 2200);
+    safeTimeout(()=>{ if(ST.uiModal===m){ acceptIncomingOffer(); render(); } }, 2200);
   },
   declineIncomingOffer(){ declineIncomingOffer(); render(); },
   updateOfferWords(inputEl){ formatMoneyInputEl(inputEl, "offerWords"); },
@@ -9637,7 +9782,7 @@ const Game = {
     if(res.deal){
       m.signing = true; m.signMsg = "Contrato Assinado!";
       render();
-      setTimeout(()=>{ ST.uiModal=null; render(); }, 2200);
+      safeTimeout(()=>{ if(ST.uiModal===m){ ST.uiModal=null; render(); } }, 2200);
     } else if(!res.verdict){
       const msgEl = document.getElementById("offerMsg");           // a plain validation message (budget, empty value, cooldown)
       if(msgEl) msgEl.innerHTML = `<span class="red">${esc(res.msg)}</span>`;
@@ -9650,7 +9795,7 @@ const Game = {
     if(res.deal){
       m.signing = true; m.signMsg = "Contrato Assinado!";
       render();
-      setTimeout(()=>{ ST.uiModal=null; render(); }, 2200);
+      safeTimeout(()=>{ if(ST.uiModal===m){ ST.uiModal=null; render(); } }, 2200);
     } else {
       const msgEl = document.getElementById("offerMsg");
       if(msgEl) msgEl.innerHTML = `<span class="red">${esc(res.msg||"Não foi possível fechar agora.")}</span>`;
@@ -9729,17 +9874,19 @@ const Game = {
     const ev = pm.result.events[eventIndex];
     const atkTeamName = ev.side==="home" ? pm.ref.home : pm.ref.away;
     const shooter = playerById(atkTeamName, Number(playerId));
-    ST.uiModal = {type:"penaltyKick", phase:"waiting", playerName: shooter ? shooter.name : "Cobrador"};
+    const mk = {type:"penaltyKick", phase:"waiting", playerName: shooter ? shooter.name : "Cobrador", eventIndex, takerId:Number(playerId)};
+    ST.uiModal = mk;
     render();
-    setTimeout(()=>{
-      if(!ST.uiModal || ST.uiModal.type!=="penaltyKick" || ST.uiModal.phase!=="waiting") return; // guards a stray double-fire
+    safeTimeout(()=>{
+      if(ST.uiModal!==mk) return; // guards a stray double-fire
       const outcome = resolvePendingPenaltyEvent(pm, eventIndex, Number(playerId));
       if(!outcome){ ST.uiModal = null; ST.matchAnimIdx = eventIndex + 1; render(); return; }
-      ST.uiModal = {type:"penaltyKick", phase:"result", scored:outcome.scored, flavor:outcome.flavor, playerName:outcome.playerName};
+      const rk = {type:"penaltyKick", phase:"result", scored:outcome.scored, flavor:outcome.flavor, playerName:outcome.playerName, eventIndex, takerId:Number(playerId)};
+      ST.uiModal = rk;
       scheduleSave();
       render();
-      setTimeout(()=>{
-        if(ST.uiModal && ST.uiModal.type==="penaltyKick" && ST.uiModal.phase==="result"){
+      safeTimeout(()=>{
+        if(ST.uiModal===rk){
           ST.uiModal = null;
           ST.matchAnimIdx = eventIndex + 1;
           render();
@@ -9755,10 +9902,11 @@ const Game = {
     const s = ST.penaltyShootout;
     if(!s || s.phase!=="kicking") return;
     const i = s.revealIdx;
+    if(i >= s.kicks.length){ s.phase = "done"; render(); soLater(s, ()=>Game.finishShootout(), 600); return; }
     if(!s.nameShown[i]){
       s.nameShown[i] = true;
       render();
-      setTimeout(()=>Game.tickShootout(), 2000);
+      soLater(s, ()=>Game.tickShootout(), 2000);
       return;
     }
     if(!s.resultShown[i]){
@@ -9770,10 +9918,10 @@ const Game = {
       if(shootoutDecided(s)){
         s.phase = "done";
         render();
-        setTimeout(()=>Game.finishShootout(), 2400);
+        soLater(s, ()=>Game.finishShootout(), 2400);
       } else {
         render();
-        setTimeout(()=>{ s.revealIdx++; Game.tickShootout(); }, 1300);
+        soLater(s, ()=>{ s.revealIdx++; Game.tickShootout(); }, 1300);
       }
     }
   },
